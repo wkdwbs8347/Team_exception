@@ -1,22 +1,28 @@
-// router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '@/components/main/HomeView.vue'
-import Test from '@/views/Test.vue'  // import 추가
+import HomeView from '../views/HomeView.vue'
+import LoginView from '../views/LoginView.vue'
 
-const routes = [
-  {
-    path: '/',
-    name: 'home',
-    component: HomeView,
-  },
-  {
-    path: '/test',       // /test 주소로 접근 가능
-    name: 'test',
-    component: Test
-  },
-]
-
-export default createRouter({
-  history: createWebHistory(),
-  routes,
+const router = createRouter({
+  history: createWebHistory(import.meta.env.BASE_URL),
+  routes: [
+    {
+      path: '/',
+      name: 'home',
+      component: HomeView
+    },
+    {
+      path: '/login',
+      name: 'login',
+      component: LoginView
+    }
+  ],
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    } else {
+      return { top: 0 }
+    }
+  }
 })
+
+export default router
