@@ -4,65 +4,152 @@ import { useRouter } from 'vue-router'
 
 const router = useRouter()
 
-const email = ref('')
-const password = ref('')
-const rememberMe = ref(false)
+const formData = ref({
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  agreeTerms: false,
+})
+
+// input 입력 검증 에러 상태
+const fieldErrors = ref({
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+})
+
+// 각 input 필드 단위 검증 함수
+const validateField = (field) => {
+  const value = formData.value[field]
+
+  if (!value) {
+    fieldErrors.value[field] = '이 입력란을 작성하세요.'
+    return false
+  }
+
+  fieldErrors.value[field] = ''
+  return true
+}
+
 const isLoading = ref(false)
 const errorMessage = ref('')
 const showPassword = ref(false)
+const showConfirmPassword = ref(false)
+const passwordStrength = ref(0)
 
-const handleLogin = async () => {
-  errorMessage.value = ''
+const validatePassword = () => {
+  const password = formData.value.password
+  let strength = 0
 
-  if (!email.value || !password.value) {
-    errorMessage.value = 'Please fill in all fields'
-    return
-  }
+  if (password.length >= 8) strength++
+  if (password.match(/[a-z]/) && password.match(/[A-Z]/)) strength++
+  if (password.match(/[0-9]/)) strength++
+  if (password.match(/[^a-zA-Z0-9]/)) strength++
 
-  isLoading.value = true
+  passwordStrength.value = strength
+}
 
-  // Simulate API call
-  setTimeout(() => {
-    isLoading.value = false
-    // Success - redirect to home
-    router.push('/')
-  }, 1500)
+const getPasswordStrengthLabel = () => {
+  const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong']
+  return labels[passwordStrength.value] || 'Weak'
+}
+
+const getPasswordStrengthColor = () => {
+  const colors = ['#ff6b6b', '#ffa500', '#ffd700', '#90ee90', '#00d4ff']
+  return colors[passwordStrength.value] || '#ff6b6b'
 }
 
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value
 }
 
-const handleForgotPassword = () => {
-  alert('Password reset functionality would be implemented here')
+const toggleConfirmPasswordVisibility = () => {
+  showConfirmPassword.value = !showConfirmPassword.value
 }
 
-const handleSignUp = () => {
-  router.push('/register')
+const handleRegister = async () => {
+  // 1️⃣ 전체 필드 검증
+  let isValid = true
+  Object.keys(fieldErrors.value).forEach((field) => {
+    if (!validateField(field)) isValid = false
+  })
+
+  if (!isValid) return
+
+  // 2️⃣ 로딩 시작
+  isLoading.value = true
+
+  // 3️⃣ API 호출 시뮬레이션
+  setTimeout(() => {
+    isLoading.value = false
+    router.push('/')
+  }, 1500)
+}
+
+const handleLoginRedirect = () => {
+  router.push('/login')
 }
 </script>
 
 <template>
-  <div class="login-container">
-    <div class="login-background">
+  <div class="register-container">
+    <div class="register-background">
       <div class="gradient-orb orb-1"></div>
       <div class="gradient-orb orb-2"></div>
       <div class="gradient-orb orb-3"></div>
     </div>
 
-    <div class="login-wrapper">
-      <div class="login-card">
-        <!-- Header -->
-        <div class="login-header">
-          <div class="logo-section">
-            <span class="logo-icon">✨</span>
-            <h1 class="logo-text">StyleHub</h1>
-          </div>
-          <p class="subtitle">Welcome back to your creative space</p>
-        </div>
-
+    <div class="register-wrapper">
+      <div class="register-card">
         <!-- Form -->
-        <form class="login-form" @submit.prevent="handleLogin">
+        <form class="register-form" @submit.prevent="handleRegister" novalidate>
+          <!-- Name Row -->
+          <div class="form-row">
+            <div class="form-group">
+              <label for="firstName" class="form-label">First Name</label>
+              <div class="input-wrapper">
+                <span class="input-icon">👤</span>
+                <input
+                  id="firstName"
+                  v-model="formData.firstName"
+                  type="text"
+                  placeholder="CHA"
+                  class="form-input"
+                  @blur="validateField('firstName')"
+                  @input="fieldErrors.firstName = ''"
+                />
+                <!-- 👇 커스텀 말풍선 -->
+                <div v-if="fieldErrors.firstName" class="error-tooltip">
+                  ⚠️ {{ fieldErrors.firstName }}
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="lastName" class="form-label">Last Name</label>
+              <div class="input-wrapper">
+                <span class="input-icon">👤</span>
+                <input
+                  id="lastName"
+                  v-model="formData.lastName"
+                  type="text"
+                  placeholder="EUNWOO"
+                  class="form-input"
+                  @blur="validateField('lastName')"
+                  @input="fieldErrors.lastName = ''"
+                />
+                <!-- 👇 커스텀 말풍선 -->
+                <div v-if="fieldErrors.lastName" class="error-tooltip">
+                  ⚠️ {{ fieldErrors.lastName }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Email Input -->
           <div class="form-group">
             <label for="email" class="form-label">Email Address</label>
@@ -70,12 +157,17 @@ const handleSignUp = () => {
               <span class="input-icon">📧</span>
               <input
                 id="email"
-                v-model="email"
+                v-model="formData.email"
                 type="email"
                 placeholder="you@example.com"
                 class="form-input"
-                required
+                @blur="validateField('email')"
+                @input="fieldErrors.email = ''"
               />
+              <!-- 👇 커스텀 말풍선 -->
+              <div v-if="fieldErrors.email" class="error-tooltip">
+                ⚠️ {{ fieldErrors.email }}
+              </div>
             </div>
           </div>
 
@@ -86,11 +178,12 @@ const handleSignUp = () => {
               <span class="input-icon">🔒</span>
               <input
                 id="password"
-                v-model="password"
+                v-model="formData.password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="Enter your password"
+                placeholder="Create a strong password"
                 class="form-input"
-                required
+                @blur="validateField('password')"
+                @input="validatePassword"
               />
               <button
                 type="button"
@@ -100,31 +193,83 @@ const handleSignUp = () => {
               >
                 {{ showPassword ? '👁️' : '👁️‍🗨️' }}
               </button>
+              <!-- 👇 커스텀 말풍선 -->
+              <div v-if="fieldErrors.password" class="error-tooltip">
+                ⚠️ {{ fieldErrors.password }}
+              </div>
+            </div>
+
+            <!-- Password Strength Indicator -->
+            <div class="password-strength">
+              <div class="strength-bar">
+                <div
+                  class="strength-fill"
+                  :style="{
+                    width: (passwordStrength / 4) * 100 + '%',
+                    backgroundColor: getPasswordStrengthColor(),
+                  }"
+                ></div>
+              </div>
+              <span
+                class="strength-label"
+                :style="{ color: getPasswordStrengthColor() }"
+              >
+                {{ getPasswordStrengthLabel() }}
+              </span>
             </div>
           </div>
 
-          <!-- Remember Me & Forgot Password -->
-          <div class="form-options">
-            <label class="remember-me">
-              <input v-model="rememberMe" type="checkbox" />
-              <span>Remember me</span>
-            </label>
-            <button type="button" class="forgot-password" @click="handleForgotPassword">
-              Forgot password?
-            </button>
+          <!-- Confirm Password Input -->
+          <div class="form-group">
+            <label for="confirmPassword" class="form-label"
+              >Confirm Password</label
+            >
+            <div class="input-wrapper">
+              <span class="input-icon">🔒</span>
+              <input
+                id="confirmPassword"
+                v-model="formData.confirmPassword"
+                :type="showConfirmPassword ? 'text' : 'password'"
+                placeholder="Confirm your password"
+                class="form-input"
+                @blur="validateField('confirmPassword')"
+                @input="fieldErrors.confirmPassword = ''"
+                required
+              />
+              <button
+                type="button"
+                class="password-toggle"
+                @click="toggleConfirmPasswordVisibility"
+                :title="showConfirmPassword ? 'Hide password' : 'Show password'"
+              >
+                {{ showConfirmPassword ? '👁️' : '👁️‍🗨️' }}
+              </button>
+              <!-- 👇 커스텀 말풍선 -->
+              <div v-if="fieldErrors.confirmPassword" class="error-tooltip">
+                ⚠️ {{ fieldErrors.confirmPassword }}
+              </div>
+            </div>
           </div>
+
+          <!-- Terms and Conditions -->
+          <label class="terms-checkbox">
+            <input v-model="formData.agreeTerms" type="checkbox" />
+            <span>
+              <a href="#" class="terms-link">이용약관</a>
+            </span>
+          </label>
 
           <!-- Error Message -->
           <div v-if="errorMessage" class="error-message">
             {{ errorMessage }}
           </div>
 
-          <!-- Login Button -->
-          <button type="submit" class="login-btn" :disabled="isLoading">
-            <span v-if="!isLoading">Sign In</span>
+          <!-- Register Button -->
+          <button type="submit" class="register-btn" :disabled="isLoading">
+            <span v-if="!isLoading">회원가입</span>
             <span v-else class="loading-spinner">
               <span class="spinner"></span>
-              Signing in...
+              계정 생성중...
             </span>
           </button>
         </form>
@@ -134,8 +279,8 @@ const handleSignUp = () => {
           <span>or</span>
         </div>
 
-        <!-- Social Login -->
-        <div class="social-login">
+        <!-- Social Register -->
+        <div class="social-register">
           <button type="button" class="social-btn google">
             <span>🔍</span>
             Google
@@ -146,34 +291,43 @@ const handleSignUp = () => {
           </button>
         </div>
 
-        <!-- Sign Up Link -->
-        <div class="signup-section">
-          <p>Don't have an account? <button type="button" class="signup-link" @click="handleSignUp">Sign up</button></p>
+        <!-- Login Link -->
+        <div class="login-section">
+          <p>
+            이미 계정이있습니까?
+            <button
+              type="button"
+              class="login-link"
+              @click="handleLoginRedirect"
+            >
+              Sign in
+            </button>
+          </p>
         </div>
       </div>
 
-      <!-- Decorative Card -->
+      <!-- Info Card -->
       <div class="info-card">
         <div class="info-header">
-          <span class="info-icon">🎨</span>
-          <h3>Why StyleHub?</h3>
+          <span class="info-icon">🚀</span>
+          <h3>오늘 시작하세요!</h3>
         </div>
         <ul class="info-list">
           <li>
             <span class="check-icon">✓</span>
-            <span>Powerful design tools</span>
+            <span>무료 계정 생성</span>
           </li>
           <li>
             <span class="check-icon">✓</span>
-            <span>Collaborative workspace</span>
+            <span>결제 수단 등록 필요 없음</span>
           </li>
           <li>
             <span class="check-icon">✓</span>
-            <span>Real-time updates</span>
+            <span>모든 도구를 즉시 사용하세요!</span>
           </li>
           <li>
             <span class="check-icon">✓</span>
-            <span>Enterprise security</span>
+            <span>끊김 없는 고객 서포트</span>
           </li>
         </ul>
       </div>
@@ -182,18 +336,19 @@ const handleSignUp = () => {
 </template>
 
 <style scoped>
-.login-container {
+.register-container {
   position: relative;
   min-height: 100vh;
+  margin-top: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
   background: linear-gradient(135deg, #0f0f1e 0%, #1a1a2e 100%);
   overflow: hidden;
 }
 
-.login-background {
+.register-background {
   position: absolute;
   top: 0;
   left: 0;
@@ -238,7 +393,8 @@ const handleSignUp = () => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {
@@ -246,7 +402,7 @@ const handleSignUp = () => {
   }
 }
 
-.login-wrapper {
+.register-wrapper {
   position: relative;
   z-index: 10;
   display: grid;
@@ -256,8 +412,12 @@ const handleSignUp = () => {
   width: 100%;
 }
 
-.login-card {
-  background: linear-gradient(135deg, rgba(15, 15, 30, 0.8) 0%, rgba(26, 26, 46, 0.8) 100%);
+.register-card {
+  background: linear-gradient(
+    135deg,
+    rgba(15, 15, 30, 0.8) 0%,
+    rgba(26, 26, 46, 0.8) 100%
+  );
   backdrop-filter: blur(20px);
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 20px;
@@ -277,7 +437,7 @@ const handleSignUp = () => {
   }
 }
 
-.login-header {
+.register-header {
   margin-bottom: 2rem;
   text-align: center;
 }
@@ -309,10 +469,16 @@ const handleSignUp = () => {
   margin-top: 0.5rem;
 }
 
-.login-form {
+.register-form {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: 1rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
 }
 
 .form-group {
@@ -380,39 +546,61 @@ const handleSignUp = () => {
   transform: scale(1.1);
 }
 
-.form-options {
+.password-strength {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-size: 0.85rem;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
 }
 
-.remember-me {
+.strength-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(0, 212, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.strength-fill {
+  height: 100%;
+  transition: all 0.3s ease;
+  border-radius: 2px;
+}
+
+.strength-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 60px;
+}
+
+.terms-checkbox {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  align-items: flex-start;
+  gap: 0.75rem;
   color: #a0a0a0;
+  font-size: 0.85rem;
   cursor: pointer;
   user-select: none;
 }
 
-.remember-me input {
+.terms-checkbox input {
   width: 16px;
   height: 16px;
+  margin-top: 0.25rem;
   cursor: pointer;
   accent-color: #00d4ff;
+  flex-shrink: 0;
 }
 
-.forgot-password {
-  background: none;
-  border: none;
+.terms-link {
   color: #00d4ff;
-  cursor: pointer;
-  transition: all 0.3s ease;
   text-decoration: none;
+  transition: all 0.3s ease;
 }
 
-.forgot-password:hover {
+.terms-link:hover {
   color: #00ffff;
   text-decoration: underline;
 }
@@ -427,7 +615,7 @@ const handleSignUp = () => {
   text-align: center;
 }
 
-.login-btn {
+.register-btn {
   padding: 1rem;
   background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
   color: #0f0f1e;
@@ -442,12 +630,12 @@ const handleSignUp = () => {
   margin-top: 0.5rem;
 }
 
-.login-btn:hover:not(:disabled) {
+.register-btn:hover:not(:disabled) {
   transform: translateY(-3px);
   box-shadow: 0 12px 35px rgba(0, 212, 255, 0.4);
 }
 
-.login-btn:disabled {
+.register-btn:disabled {
   opacity: 0.7;
   cursor: not-allowed;
 }
@@ -492,7 +680,7 @@ const handleSignUp = () => {
   background: rgba(0, 212, 255, 0.1);
 }
 
-.social-login {
+.social-register {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
@@ -524,14 +712,14 @@ const handleSignUp = () => {
   font-size: 1.2rem;
 }
 
-.signup-section {
+.login-section {
   text-align: center;
   margin-top: 1.5rem;
   color: #a0a0a0;
   font-size: 0.9rem;
 }
 
-.signup-link {
+.login-link {
   background: none;
   border: none;
   color: #00d4ff;
@@ -540,13 +728,17 @@ const handleSignUp = () => {
   transition: all 0.3s ease;
 }
 
-.signup-link:hover {
+.login-link:hover {
   color: #00ffff;
   text-decoration: underline;
 }
 
 .info-card {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(0, 153, 204, 0.02) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(0, 212, 255, 0.05) 0%,
+    rgba(0, 153, 204, 0.02) 100%
+  );
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 20px;
   padding: 2rem;
@@ -610,13 +802,17 @@ const handleSignUp = () => {
 }
 
 @media (max-width: 768px) {
-  .login-wrapper {
+  .register-wrapper {
     grid-template-columns: 1fr;
     gap: 2rem;
   }
 
-  .login-card {
+  .register-card {
     padding: 2rem;
+  }
+
+  .form-row {
+    grid-template-columns: 1fr;
   }
 
   .logo-text {
@@ -645,5 +841,50 @@ const handleSignUp = () => {
     width: 220px;
     height: 220px;
   }
+}
+
+.error-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 10px;
+  padding: 7px 12px;
+  background: #0b1220; /* 딥 네이비 다크 */
+  color: #e5e7eb; /* 소프트 화이트 */
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: 8px;
+  border: 1.5px solid rgba(0, 212, 255, 0.75);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 20;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 212, 255, 0.12);
+}
+
+/* 🔻 바깥 테두리 삼각형 */
+.error-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -14px;
+  left: 22px;
+  border: 7px solid transparent;
+  border-bottom-color: rgba(0, 212, 255, 0.85);
+  z-index: 1;
+}
+
+/* 🔻 안쪽 배경 삼각형 */
+.error-tooltip::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 22px;
+  border: 7px solid transparent;
+  border-bottom-color: #0b1220;
+  z-index: 2;
 }
 </style>

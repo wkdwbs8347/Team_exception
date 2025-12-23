@@ -3,8 +3,6 @@
 // 1️⃣ 컴포넌트 import 영역
 // ==============================
 
-
-
 // 메인 히어로 섹션
 import HeroSection from '../components/HeroSection.vue'
 
@@ -13,8 +11,6 @@ import FeaturesSection from '../components/FeaturesSection.vue'
 
 // 통계 / 수치 표시 섹션
 import StatsSection from '../components/StatsSection.vue'
-
-
 
 // Vue의 반응형 상태를 만들기 위한 ref import
 import { ref } from 'vue'
@@ -72,7 +68,7 @@ if (typeof window !== 'undefined') {
 
     <!-- 통계 / 수치 섹션 -->
     <StatsSection />
-    
+
   </div>
 </template>
 

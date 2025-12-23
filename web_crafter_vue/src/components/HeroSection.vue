@@ -6,6 +6,16 @@ const isVisible = ref(false)
 onMounted(() => {
   isVisible.value = true
 })
+
+const scrollToSection = (id) => {
+  const el = document.getElementById(id)
+  if (el) {
+    el.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
+  }
+}
 </script>
 
 <template>
@@ -16,19 +26,22 @@ onMounted(() => {
       <div class="gradient-orb orb-3"></div>
     </div>
 
-    <div class="hero-content" :class="{ 'visible': isVisible }">
+    <div class="hero-content" :class="{ visible: isVisible }">
       <h1 class="hero-title">
         <span class="title-line">Welcome to</span>
-        <span class="title-highlight">StyleHub</span>
+        <span class="title-highlight">Web Crafter</span>
       </h1>
 
-      <p class="hero-subtitle">
-        Experience the future of modern web design with cutting-edge technology and stunning visual aesthetics.
-      </p>
+      <p class="hero-subtitle">코드블럭으로 웹 페이지를 만들어 보세요!</p>
 
       <div class="hero-buttons">
-        <button class="btn btn-primary">Get Started</button>
-        <button class="btn btn-secondary">Learn More</button>
+        <button class="btn btn-primary" @click="scrollToSection('features')">
+          Get Started
+        </button>
+
+        <button class="btn btn-secondary" @click="scrollToSection('stats')">
+          Learn More
+        </button>
       </div>
 
       <div class="hero-features">
@@ -111,7 +124,8 @@ onMounted(() => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {
@@ -170,7 +184,8 @@ onMounted(() => {
 }
 
 @keyframes shimmer {
-  0%, 100% {
+  0%,
+  100% {
     filter: brightness(1);
   }
   50% {
@@ -282,7 +297,8 @@ onMounted(() => {
 }
 
 @keyframes bounce {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateX(-50%) translateY(0);
   }
   50% {
@@ -291,7 +307,8 @@ onMounted(() => {
 }
 
 @keyframes scrollBounce {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: translateY(0);
   }

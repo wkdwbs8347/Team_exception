@@ -1,1 +1,22 @@
-DROP DATABASE IF EXISTS
+DROP DATABASE IF EXISTS web_crafter;
+CREATE DATABASE web_crafter;
+USE web_crafter;
+
+CREATE TABLE userWeb(
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'                              
+    , title varchar(100) NOT NULL COMMENT '제목'
+    , pycode text NOT NULL COMMENT '파이썬 코드'
+    , regDate DATETIME NOT NULL COMMENT '작성일'
+    , updateDate DATETIME NOT NULL COMMENT '수정일'
+);
+
+CREATE TABLE user(
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
+    , loginId varchar(100) NOT NULL COMMENT '이메일'
+    , loginPw varchar(200) NOT NULL COMMENT '비밀번호'
+    , name varchar(50) NOT NULL COMMENT '유저 닉네임'
+    , authPath varchar(100) COMMENT '뭐로 로그인햇어?'
+    , regDate DATETIME NOT NULL COMMENT '작성일'
+    , updateDate DATETIME NOT NULL COMMENT '수정일'
+    , status TINYINT NOT NULL DEFAULT 1 COMMENT '1: 정상 0: 탈퇴유예'
+)

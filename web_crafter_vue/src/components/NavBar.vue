@@ -11,13 +11,6 @@ const toggleMenu = () => {
   isMenuOpen.value = !isMenuOpen.value
 }
 
-const scrollToSection = (id) => {
-  const element = document.getElementById(id)
-  if (element) {
-    element.scrollIntoView({ behavior: 'smooth' })
-    isMenuOpen.value = false
-  }
-}
 </script>
 
 <template>
@@ -25,7 +18,7 @@ const scrollToSection = (id) => {
     <div class="navbar-container">
       <div class="navbar-brand">
         <span class="logo-icon">✨</span>
-        <span class="logo-text">StyleHub</span>
+        <span class="logo-text"><RouterLink to="/" @click="isMenuOpen = false">Web Crafter</RouterLink></span>
       </div>
 
       <button class="menu-toggle" @click="toggleMenu" :class="{ 'active': isMenuOpen }">
@@ -35,9 +28,8 @@ const scrollToSection = (id) => {
       </button>
 
       <ul class="nav-menu" :class="{ 'active': isMenuOpen }">
-        <li><a href="#features" @click.prevent="scrollToSection('features')">Features</a></li>
-        <li><a href="#stats" @click.prevent="scrollToSection('stats')">Stats</a></li>
-        <li><a href="#cta" @click.prevent="scrollToSection('cta')">Get Started</a></li>
+        <li><RouterLink to="/login" @click="isMenuOpen = false">로그인</RouterLink></li>
+        <li><RouterLink to="/register" @click="isMenuOpen = false">회원가입</RouterLink></li>
       </ul>
     </div>
   </nav>
