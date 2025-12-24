@@ -1,6 +1,15 @@
 <script setup>
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  Sparkles,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Palette,
+  Check,
+} from 'lucide-vue-next'
 
 const router = useRouter()
 
@@ -55,19 +64,19 @@ const handleSignUp = () => {
         <!-- Header -->
         <div class="login-header">
           <div class="logo-section">
-            <span class="logo-icon">✨</span>
-            <h1 class="logo-text">StyleHub</h1>
+            <span class="logo-icon"><Sparkles :size="28" /></span>
+            <h1 class="logo-text">Web Crafter</h1>
           </div>
-          <p class="subtitle">Welcome back to your creative space</p>
+          <p class="subtitle">당신의 작업실에 오신 걸 환영합니다!</p>
         </div>
 
         <!-- Form -->
-        <form class="login-form" @submit.prevent="handleLogin">
+        <form class="login-form" @submit.prevent="handleLogin" autocomplete="off">
           <!-- Email Input -->
           <div class="form-group">
-            <label for="email" class="form-label">Email Address</label>
+            <label for="email" class="form-label">이메일 주소</label>
             <div class="input-wrapper">
-              <span class="input-icon">📧</span>
+              <span class="input-icon"><Mail :size="18" /></span>
               <input
                 id="email"
                 v-model="email"
@@ -81,9 +90,9 @@ const handleSignUp = () => {
 
           <!-- Password Input -->
           <div class="form-group">
-            <label for="password" class="form-label">Password</label>
+            <label for="password" class="form-label">비밀번호</label>
             <div class="input-wrapper">
-              <span class="input-icon">🔒</span>
+              <span class="input-icon"><Lock :size="18" /></span>
               <input
                 id="password"
                 v-model="password"
@@ -98,7 +107,8 @@ const handleSignUp = () => {
                 @click="togglePasswordVisibility"
                 :title="showPassword ? 'Hide password' : 'Show password'"
               >
-                {{ showPassword ? '👁️' : '👁️‍🗨️' }}
+                <Eye v-if="showPassword" :size="18" />
+                <EyeOff v-else :size="18" />
               </button>
             </div>
           </div>
@@ -107,10 +117,14 @@ const handleSignUp = () => {
           <div class="form-options">
             <label class="remember-me">
               <input v-model="rememberMe" type="checkbox" />
-              <span>Remember me</span>
+              <span>자동 로그인</span>
             </label>
-            <button type="button" class="forgot-password" @click="handleForgotPassword">
-              Forgot password?
+            <button
+              type="button"
+              class="forgot-password"
+              @click="handleForgotPassword"
+            >
+              비밀번호를 잊으셨나요?
             </button>
           </div>
 
@@ -121,10 +135,10 @@ const handleSignUp = () => {
 
           <!-- Login Button -->
           <button type="submit" class="login-btn" :disabled="isLoading">
-            <span v-if="!isLoading">Sign In</span>
+            <span v-if="!isLoading">로그인</span>
             <span v-else class="loading-spinner">
               <span class="spinner"></span>
-              Signing in...
+              로그인 중...
             </span>
           </button>
         </form>
@@ -148,32 +162,37 @@ const handleSignUp = () => {
 
         <!-- Sign Up Link -->
         <div class="signup-section">
-          <p>Don't have an account? <button type="button" class="signup-link" @click="handleSignUp">Sign up</button></p>
+          <p>
+            아직 계정이 없으신가요?
+            <button type="button" class="signup-link" @click="handleSignUp">
+              회원가입
+            </button>
+          </p>
         </div>
       </div>
 
       <!-- Decorative Card -->
       <div class="info-card">
         <div class="info-header">
-          <span class="info-icon">🎨</span>
-          <h3>Why StyleHub?</h3>
+          <span class="info-icon"><Palette :size="26" /></span>
+          <h3>웹페이지 제작 경험이 없으신가요?</h3>
         </div>
         <ul class="info-list">
           <li>
-            <span class="check-icon">✓</span>
-            <span>Powerful design tools</span>
+            <span class="check-icon"><Check :size="14" /></span>
+            <span>코드블럭을 활용한 학습과 창작 경험 제공</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
-            <span>Collaborative workspace</span>
+            <span class="check-icon"><Check :size="14" /></span>
+            <span>쉽게 만드는 나만의 웹사이트</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
-            <span>Real-time updates</span>
+            <span class="check-icon"><Check :size="14" /></span>
+            <span>모든 변화가 즉시 반영</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
-            <span>Enterprise security</span>
+            <span class="check-icon"><Check :size="14" /></span>
+            <span>안심하고 쓰는 보안</span>
           </li>
         </ul>
       </div>
@@ -238,7 +257,8 @@ const handleSignUp = () => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0px);
   }
   50% {
@@ -257,7 +277,11 @@ const handleSignUp = () => {
 }
 
 .login-card {
-  background: linear-gradient(135deg, rgba(15, 15, 30, 0.8) 0%, rgba(26, 26, 46, 0.8) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(15, 15, 30, 0.8) 0%,
+    rgba(26, 26, 46, 0.8) 100%
+  );
   backdrop-filter: blur(20px);
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 20px;
@@ -546,7 +570,11 @@ const handleSignUp = () => {
 }
 
 .info-card {
-  background: linear-gradient(135deg, rgba(0, 212, 255, 0.05) 0%, rgba(0, 153, 204, 0.02) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(0, 212, 255, 0.05) 0%,
+    rgba(0, 153, 204, 0.02) 100%
+  );
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 20px;
   padding: 2rem;

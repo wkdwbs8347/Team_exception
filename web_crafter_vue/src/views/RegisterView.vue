@@ -1,9 +1,29 @@
 <script setup>
-import { ref } from 'vue'
+/*
+  ✅ 전체 동작 흐름
+
+  - onBlur → 현재 blur된 input만 말풍선 표시(이전 blur 말풍선 제거)
+  - 회원가입 클릭 →
+      1) 위에서부터 순서 검증
+      2) 가장 첫 번째 문제만 전역 모달 표시
+      3) 확인 누르면 해당 input으로 포커스 이동
+  - 이메일 인증 →
+      1) 이메일 옆 인증 버튼 클릭(로딩/중복방지)
+      2) 전송 완료 모달
+      3) 인증번호 입력칸 표시 + 확인 버튼
+      4) 일치/불일치 모달
+      5) 인증 성공 시 인증완료 버튼으로 변경 + 입력칸 제거
+*/
+
+import { ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import GlobalModal from '@/modal/GlobalModal.vue'
 
 const router = useRouter()
 
+/* ======================
+   입력 데이터
+====================== */
 const formData = ref({
   firstName: '',
   lastName: '',
@@ -13,7 +33,9 @@ const formData = ref({
   agreeTerms: false,
 })
 
-// input 입력 검증 에러 상태
+/* ======================
+   필드별 에러 (말풍선)
+====================== */
 const fieldErrors = ref({
   firstName: '',
   lastName: '',
@@ -22,76 +44,309 @@ const fieldErrors = ref({
   confirmPassword: '',
 })
 
-// 각 input 필드 단위 검증 함수
-const validateField = (field) => {
-  const value = formData.value[field]
+/* ======================
+   input ref (포커스 이동용)
+====================== */
+const firstNameRef = ref(null)
+const lastNameRef = ref(null)
+const emailRef = ref(null)
+const passwordRef = ref(null)
+const confirmPasswordRef = ref(null)
+const verificationCodeRef = ref(null)
 
-  if (!value) {
-    fieldErrors.value[field] = '이 입력란을 작성하세요.'
-    return false
-  }
+/* ======================
+   말풍선: 마지막 blur 필드
+====================== */
+const lastBlurField = ref(null)
 
-  fieldErrors.value[field] = ''
-  return true
+/* ======================
+   전역 모달 상태
+====================== */
+const modal = ref({
+  open: false,
+  message: '',
+  focusField: null,
+  type: 'info', // 'warning' | 'info'
+  onConfirm: null,
+})
+
+const openModal = (message, field = null, type = 'info', onConfirm = null) => {
+  modal.value.open = true
+  modal.value.message = message
+  modal.value.focusField = field
+  modal.value.type = type
+  modal.value.onConfirm = onConfirm
 }
 
+const closeModal = async () => {
+  modal.value.open = false
+  await nextTick()
+
+  // ✅ 안내/성공 모달에서 후처리 동작(페이지 이동 등)
+  if (modal.value.onConfirm) {
+    const fn = modal.value.onConfirm
+    modal.value.onConfirm = null
+    fn()
+    return
+  }
+
+  // ✅ 경고 모달: 해당 input으로 포커스 이동
+  const focusMap = {
+    firstName: firstNameRef,
+    lastName: lastNameRef,
+    email: emailRef,
+    password: passwordRef,
+    confirmPassword: confirmPasswordRef,
+    verificationCode: verificationCodeRef,
+  }
+
+  if (modal.value.focusField) {
+    focusMap[modal.value.focusField]?.value?.focus()
+  }
+}
+
+/* ======================
+   상태 관리
+====================== */
 const isLoading = ref(false)
 const errorMessage = ref('')
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const passwordStrength = ref(0)
+const passwordGuide = ref('') // 안전/위험 안내 말풍선
 
+// 비밀번호 입력중일때
+const handlePasswordInput = () => {
+  validatePassword()
+  fieldErrors.value.password = ''
+
+  // ✅ 입력중일때만 안내 말풍선 세팅
+  const password = formData.value.password
+  if (!password) {
+    passwordGuide.value = ''
+  } else if (passwordStrength.value <= 1) {
+    passwordGuide.value = '안전하지 않은 비밀번호입니다'
+  } else {
+    passwordGuide.value = '안전한 비밀번호입니다'
+  }
+}
+
+// 비밀번호 강도 계산
 const validatePassword = () => {
   const password = formData.value.password
   let strength = 0
 
   if (password.length >= 8) strength++
-  if (password.match(/[a-z]/) && password.match(/[A-Z]/)) strength++
-  if (password.match(/[0-9]/)) strength++
-  if (password.match(/[^a-zA-Z0-9]/)) strength++
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++
+  if (/[0-9]/.test(password)) strength++
+  if (/[^a-zA-Z0-9]/.test(password)) strength++
 
   passwordStrength.value = strength
 }
 
-const getPasswordStrengthLabel = () => {
-  const labels = ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong']
-  return labels[passwordStrength.value] || 'Weak'
-}
+// 비밀번호 강도기준
+const getPasswordStrengthLabel = () =>
+  ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong'][passwordStrength.value] ||
+  'Weak'
 
-const getPasswordStrengthColor = () => {
-  const colors = ['#ff6b6b', '#ffa500', '#ffd700', '#90ee90', '#00d4ff']
-  return colors[passwordStrength.value] || '#ff6b6b'
-}
+const getPasswordStrengthColor = () =>
+  ['#ff6b6b', '#ffa500', '#ffd700', '#90ee90', '#00d4ff'][
+    passwordStrength.value
+  ] || '#ff6b6b'
 
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value
 }
-
 const toggleConfirmPasswordVisibility = () => {
   showConfirmPassword.value = !showConfirmPassword.value
 }
 
-const handleRegister = async () => {
-  // 1️⃣ 전체 필드 검증
-  let isValid = true
-  Object.keys(fieldErrors.value).forEach((field) => {
-    if (!validateField(field)) isValid = false
-  })
+/* ======================
+   이메일 인증 상태
+====================== */
+const isEmailSending = ref(false) // 전송중(버튼 disable)
+const showVerificationInput = ref(false) // 인증번호 입력칸 노출
+const verificationCodeInput = ref('') // 사용자가 입력한 인증번호
+const emailVerified = ref(false) // 인증 완료 여부
 
-  if (!isValid) return
+// (데모용) 서버가 보낸 인증번호라고 가정
+const sentVerificationCode = ref('')
 
-  // 2️⃣ 로딩 시작
-  isLoading.value = true
+const isValidEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
-  // 3️⃣ API 호출 시뮬레이션
+/* ======================
+   ✅ 이메일 input 변경 시 초기화
+   (템플릿에서 multiline @input 쓰지 말고 함수로!)
+====================== */
+const handleEmailInput = () => {
+  fieldErrors.value.email = ''
+
+  // 이메일이 바뀌면 인증 상태 초기화(안전)
+  emailVerified.value = false
+  showVerificationInput.value = false
+  verificationCodeInput.value = ''
+  sentVerificationCode.value = ''
+}
+
+/* ======================
+   ✅ 이메일 인증 요청
+====================== */
+const requestEmailVerification = async () => {
+  if (emailVerified.value) return
+  if (isEmailSending.value) return
+
+  // 이메일 기본 검증
+  if (!formData.value.email) {
+    fieldErrors.value.email = '이메일을 입력해주세요.'
+    return openModal(fieldErrors.value.email, 'email', 'warning')
+  }
+  if (!isValidEmailFormat(formData.value.email)) {
+    fieldErrors.value.email = '이메일 형식이 올바르지 않습니다.'
+    return openModal(fieldErrors.value.email, 'email', 'warning')
+  }
+
+  // 재요청이면 입력칸 값 초기화
+  verificationCodeInput.value = ''
+
+  isEmailSending.value = true
+
+  // ✅ 여기서 실제 API 호출하면 됨
+  // await api.post('/email/send', { email: formData.value.email })
   setTimeout(() => {
-    isLoading.value = false
-    router.push('/')
-  }, 1500)
+    isEmailSending.value = false
+    showVerificationInput.value = true
+
+    // 데모용 "서버가 보낸 코드"
+    sentVerificationCode.value = '123456'
+
+    openModal('인증번호가 전송되었습니다.', null, 'info', async () => {
+      await nextTick()
+      verificationCodeRef.value?.focus()
+    })
+  }, 900)
+}
+
+/* ======================
+   ✅ 인증번호 확인
+====================== */
+const confirmVerificationCode = () => {
+  if (!showVerificationInput.value) return
+
+  if (!verificationCodeInput.value) {
+    return openModal('인증번호를 입력해주세요.', 'verificationCode', 'warning')
+  }
+
+  const ok = verificationCodeInput.value.trim() === sentVerificationCode.value
+
+  if (!ok) {
+    return openModal(
+      '인증번호가 일치하지 않습니다.',
+      'verificationCode',
+      'warning'
+    )
+  }
+
+  // ✅ 인증 성공 상태
+  emailVerified.value = true
+  showVerificationInput.value = false
+  verificationCodeInput.value = ''
+  sentVerificationCode.value = ''
+
+  openModal('인증이 완료되었습니다.', null, 'info')
+}
+
+/* ======================
+   단일 필드 검증
+   - mode: 'blur' | 'submit'
+   - submit일 때만 이메일 인증여부까지 체크
+====================== */
+const validateField = (field, mode = 'blur') => {
+  // ✅ 이전 blur에서 뜬 말풍선 제거
+  if (mode === 'blur' && lastBlurField.value && lastBlurField.value !== field) {
+    fieldErrors.value[lastBlurField.value] = ''
+  }
+
+  const value = formData.value[field]
+  let message = ''
+
+  switch (field) {
+    case 'firstName':
+      if (!value) message = '성을 입력해주세요.'
+      break
+
+    case 'lastName':
+      if (!value) message = '이름을 입력해주세요.'
+      break
+
+    case 'email':
+      if (!value) message = '이메일을 입력해주세요.'
+      else if (!isValidEmailFormat(value))
+        message = '이메일 형식이 올바르지 않습니다.'
+      else if (mode === 'submit' && !emailVerified.value)
+        message = '이메일 인증을 완료해주세요.'
+      break
+
+    case 'password':
+      if (!value) message = '비밀번호를 입력해주세요.'
+
+      // ✅ blur 시에는 안내 말풍선 숨김 (입력중에만 보이게)
+      if (mode === 'blur') passwordGuide.value = ''
+      break
+
+    case 'confirmPassword':
+      if (!value) message = '비밀번호 확인을 입력해주세요.'
+      else if (value !== formData.value.password)
+        message = '비밀번호가 일치하지 않습니다.'
+      break
+  }
+
+  fieldErrors.value[field] = message
+
+  if (mode === 'blur') {
+    lastBlurField.value = field
+  }
+
+  return !message
+}
+
+/* ======================
+   회원가입 검증 및 진행 (React 흐름)
+====================== */
+const handleRegister = () => {
+  if (!validateField('firstName', 'submit'))
+    return openModal(fieldErrors.value.firstName, 'firstName', 'warning')
+
+  if (!validateField('lastName', 'submit'))
+    return openModal(fieldErrors.value.lastName, 'lastName', 'warning')
+
+  if (!validateField('email', 'submit'))
+    return openModal(fieldErrors.value.email, 'email', 'warning')
+
+  if (!validateField('password', 'submit'))
+    return openModal(fieldErrors.value.password, 'password', 'warning')
+
+  if (!validateField('confirmPassword', 'submit'))
+    return openModal(
+      fieldErrors.value.confirmPassword,
+      'confirmPassword',
+      'warning'
+    )
+
+  // ✅ 통과 (데모: 성공 모달 후 이동)
+  openModal('회원가입이 완료되었습니다.', null, 'info', () => router.push('/'))
 }
 
 const handleLoginRedirect = () => {
   router.push('/login')
+}
+
+/* ======================
+   이메일 버튼 라벨
+====================== */
+const getEmailButtonLabel = () => {
+  if (emailVerified.value) return '인증완료'
+  if (showVerificationInput.value) return '재요청'
+  return '인증'
 }
 </script>
 
@@ -106,23 +361,23 @@ const handleLoginRedirect = () => {
     <div class="register-wrapper">
       <div class="register-card">
         <!-- Form -->
-        <form class="register-form" @submit.prevent="handleRegister" novalidate>
+        <form class="register-form" @submit.prevent="handleRegister" novalidate autocomplete="off">
           <!-- Name Row -->
           <div class="form-row">
             <div class="form-group">
-              <label for="firstName" class="form-label">First Name</label>
+              <label for="firstName" class="form-label">성</label>
               <div class="input-wrapper">
                 <span class="input-icon">👤</span>
                 <input
                   id="firstName"
+                  ref="firstNameRef"
                   v-model="formData.firstName"
                   type="text"
                   placeholder="CHA"
                   class="form-input"
-                  @blur="validateField('firstName')"
+                  @blur="validateField('firstName', 'blur')"
                   @input="fieldErrors.firstName = ''"
                 />
-                <!-- 👇 커스텀 말풍선 -->
                 <div v-if="fieldErrors.firstName" class="error-tooltip">
                   ⚠️ {{ fieldErrors.firstName }}
                 </div>
@@ -130,19 +385,19 @@ const handleLoginRedirect = () => {
             </div>
 
             <div class="form-group">
-              <label for="lastName" class="form-label">Last Name</label>
+              <label for="lastName" class="form-label">이름</label>
               <div class="input-wrapper">
                 <span class="input-icon">👤</span>
                 <input
                   id="lastName"
+                  ref="lastNameRef"
                   v-model="formData.lastName"
                   type="text"
                   placeholder="EUNWOO"
                   class="form-input"
-                  @blur="validateField('lastName')"
+                  @blur="validateField('lastName', 'blur')"
                   @input="fieldErrors.lastName = ''"
                 />
-                <!-- 👇 커스텀 말풍선 -->
                 <div v-if="fieldErrors.lastName" class="error-tooltip">
                   ⚠️ {{ fieldErrors.lastName }}
                 </div>
@@ -150,40 +405,83 @@ const handleLoginRedirect = () => {
             </div>
           </div>
 
-          <!-- Email Input -->
+          <!-- Email Input + 인증 버튼 -->
           <div class="form-group">
-            <label for="email" class="form-label">Email Address</label>
+            <label for="email" class="form-label">이메일 주소</label>
             <div class="input-wrapper">
               <span class="input-icon">📧</span>
               <input
                 id="email"
+                ref="emailRef"
                 v-model="formData.email"
                 type="email"
                 placeholder="you@example.com"
-                class="form-input"
-                @blur="validateField('email')"
-                @input="fieldErrors.email = ''"
+                class="form-input has-right-btn"
+                @blur="validateField('email', 'blur')"
+                @input="handleEmailInput"
               />
-              <!-- 👇 커스텀 말풍선 -->
+
+              <!-- ✅ 이메일 인증/재요청/인증완료 버튼 -->
+              <button
+                type="button"
+                class="email-verify-btn"
+                :disabled="isEmailSending || emailVerified"
+                @click="requestEmailVerification"
+                :title="emailVerified ? '이미 인증 완료' : ''"
+              >
+                <span v-if="!isEmailSending">{{ getEmailButtonLabel() }}</span>
+                <span v-else class="email-btn-loading">
+                  <span class="mini-spinner"></span>
+                  전송중
+                </span>
+              </button>
+
               <div v-if="fieldErrors.email" class="error-tooltip">
                 ⚠️ {{ fieldErrors.email }}
+              </div>
+            </div>
+
+            <!-- ✅ 인증번호 입력칸(전송 후 & 인증 전) -->
+            <div
+              v-if="showVerificationInput && !emailVerified"
+              class="verify-row"
+            >
+              <div class="input-wrapper">
+                <span class="input-icon">🔑</span>
+                <input
+                  ref="verificationCodeRef"
+                  v-model="verificationCodeInput"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="인증번호 6자리"
+                  class="form-input has-right-btn"
+                  @keyup.enter="confirmVerificationCode"
+                />
+                <button
+                  type="button"
+                  class="email-verify-btn"
+                  @click="confirmVerificationCode"
+                >
+                  확인
+                </button>
               </div>
             </div>
           </div>
 
           <!-- Password Input -->
           <div class="form-group">
-            <label for="password" class="form-label">Password</label>
+            <label for="password" class="form-label">비밀번호</label>
             <div class="input-wrapper">
               <span class="input-icon">🔒</span>
               <input
                 id="password"
+                ref="passwordRef"
                 v-model="formData.password"
                 :type="showPassword ? 'text' : 'password'"
                 placeholder="Create a strong password"
                 class="form-input"
-                @blur="validateField('password')"
-                @input="validatePassword"
+                @blur="validateField('password', 'blur')"
+                @input="handlePasswordInput"
               />
               <button
                 type="button"
@@ -193,13 +491,15 @@ const handleLoginRedirect = () => {
               >
                 {{ showPassword ? '👁️' : '👁️‍🗨️' }}
               </button>
-              <!-- 👇 커스텀 말풍선 -->
               <div v-if="fieldErrors.password" class="error-tooltip">
                 ⚠️ {{ fieldErrors.password }}
               </div>
+              <!-- ✅ 안전/위험 안내 말풍선 (에러 없을 때만) -->
+              <div v-else-if="passwordGuide" class="error-tooltip">
+                {{ passwordGuide }}
+              </div>
             </div>
 
-            <!-- Password Strength Indicator -->
             <div class="password-strength">
               <div class="strength-bar">
                 <div
@@ -222,17 +522,18 @@ const handleLoginRedirect = () => {
           <!-- Confirm Password Input -->
           <div class="form-group">
             <label for="confirmPassword" class="form-label"
-              >Confirm Password</label
+              >비밀번호 확인</label
             >
             <div class="input-wrapper">
               <span class="input-icon">🔒</span>
               <input
                 id="confirmPassword"
+                ref="confirmPasswordRef"
                 v-model="formData.confirmPassword"
                 :type="showConfirmPassword ? 'text' : 'password'"
                 placeholder="Confirm your password"
                 class="form-input"
-                @blur="validateField('confirmPassword')"
+                @blur="validateField('confirmPassword', 'blur')"
                 @input="fieldErrors.confirmPassword = ''"
                 required
               />
@@ -244,7 +545,6 @@ const handleLoginRedirect = () => {
               >
                 {{ showConfirmPassword ? '👁️' : '👁️‍🗨️' }}
               </button>
-              <!-- 👇 커스텀 말풍선 -->
               <div v-if="fieldErrors.confirmPassword" class="error-tooltip">
                 ⚠️ {{ fieldErrors.confirmPassword }}
               </div>
@@ -274,23 +574,6 @@ const handleLoginRedirect = () => {
           </button>
         </form>
 
-        <!-- Divider -->
-        <div class="divider">
-          <span>or</span>
-        </div>
-
-        <!-- Social Register -->
-        <div class="social-register">
-          <button type="button" class="social-btn google">
-            <span>🔍</span>
-            Google
-          </button>
-          <button type="button" class="social-btn github">
-            <span>💻</span>
-            GitHub
-          </button>
-        </div>
-
         <!-- Login Link -->
         <div class="login-section">
           <p>
@@ -310,12 +593,12 @@ const handleLoginRedirect = () => {
       <div class="info-card">
         <div class="info-header">
           <span class="info-icon">🚀</span>
-          <h3>오늘 시작하세요!</h3>
+          <h3>계정을 생성하세요!</h3>
         </div>
         <ul class="info-list">
           <li>
             <span class="check-icon">✓</span>
-            <span>무료 계정 생성</span>
+            <span>서비스 시작을 위한 계정 생성</span>
           </li>
           <li>
             <span class="check-icon">✓</span>
@@ -333,6 +616,14 @@ const handleLoginRedirect = () => {
       </div>
     </div>
   </div>
+
+  <!-- ✅ 전역 모달 -->
+  <GlobalModal
+    :open="modal.open"
+    :message="modal.message"
+    :type="modal.type"
+    @confirm="closeModal"
+  />
 </template>
 
 <style scoped>
@@ -886,5 +1177,59 @@ const handleLoginRedirect = () => {
   border: 7px solid transparent;
   border-bottom-color: #0b1220;
   z-index: 2;
+}
+
+/* 이메일/인증번호 input 오른쪽 버튼 공간 확보 */
+.form-input.has-right-btn {
+  padding-right: 6.2rem; /* 버튼 폭만큼 여유 */
+}
+
+/* 이메일 인증 버튼(인증/재요청/확인/인증완료 공용) */
+.email-verify-btn {
+  position: absolute;
+  right: 0.6rem;
+  height: calc(100% - 10px);
+  top: 5px;
+  padding: 0 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 212, 255, 0.25);
+  background: rgba(0, 212, 255, 0.08);
+  color: #e0e0e0;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.email-verify-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(0, 212, 255, 0.14);
+  border-color: rgba(0, 212, 255, 0.45);
+}
+
+.email-verify-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 전송중 표시 */
+.email-btn-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* 작은 스피너 */
+.mini-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(0, 212, 255, 0.9);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* 인증번호 입력칸 위 여백 */
+.verify-row {
+  margin-top: 0.75rem;
 }
 </style>

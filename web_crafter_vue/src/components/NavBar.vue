@@ -28,6 +28,7 @@ const toggleMenu = () => {
       </button>
 
       <ul class="nav-menu" :class="{ 'active': isMenuOpen }">
+        <li><RouterLink to="/ide" @click="isMenuOpen = false">웹 만들기</RouterLink></li>
         <li><RouterLink to="/login" @click="isMenuOpen = false">로그인</RouterLink></li>
         <li><RouterLink to="/register" @click="isMenuOpen = false">회원가입</RouterLink></li>
       </ul>
