@@ -17,7 +17,9 @@
 
 import { ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import GlobalModal from '@/modal/GlobalModal.vue'
+import GlobalModal from '@/modal/GlobalModal.vue' // 알림 모달
+import api from '@/api/axios' // 스프링부트와 통신하기 위한것
+import { Sparkles } from 'lucide-vue-next' // 헤더 아이콘
 
 const router = useRouter()
 
@@ -27,10 +29,10 @@ const router = useRouter()
 const formData = ref({
   firstName: '',
   lastName: '',
+  nickname: '',
   email: '',
   password: '',
   confirmPassword: '',
-  agreeTerms: false,
 })
 
 /* ======================
@@ -39,6 +41,7 @@ const formData = ref({
 const fieldErrors = ref({
   firstName: '',
   lastName: '',
+  nickname: '',
   email: '',
   password: '',
   confirmPassword: '',
@@ -49,6 +52,7 @@ const fieldErrors = ref({
 ====================== */
 const firstNameRef = ref(null)
 const lastNameRef = ref(null)
+const nicknameRef = ref(null)
 const emailRef = ref(null)
 const passwordRef = ref(null)
 const confirmPasswordRef = ref(null)
@@ -94,6 +98,7 @@ const closeModal = async () => {
   const focusMap = {
     firstName: firstNameRef,
     lastName: lastNameRef,
+    nickname: nicknameRef,
     email: emailRef,
     password: passwordRef,
     confirmPassword: confirmPasswordRef,
@@ -114,6 +119,62 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const passwordStrength = ref(0)
 const passwordGuide = ref('') // 안전/위험 안내 말풍선
+const isNicknameChecking = ref(false)
+const nicknameChecked = ref(false) // 중복체크 했는지
+const nicknameAvailable = ref(false) // 사용 가능한지
+
+// 닉네임 입력이 바뀌면 중복체크 초기화
+const handleNicknameInput = () => {
+  fieldErrors.value.nickname = ''
+  nicknameChecked.value = false
+  nicknameAvailable.value = false
+}
+
+// 닉네임 중복체크 API호출
+const checkNickname = async () => {
+  if (isNicknameChecking.value) return
+
+  const nick = formData.value.nickname?.trim()
+
+  if (!nick) {
+    fieldErrors.value.nickname = '닉네임을 입력해주세요.'
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+  }
+
+  // 닉네임 입력값 간단 규칙
+  if (nick.length < 2 || nick.length > 20) {
+    fieldErrors.value.nickname = '닉네임은 2~20자여야 합니다.'
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+  }
+  if (nick.includes(' ')) {
+    fieldErrors.value.nickname = '닉네임에는 공백을 사용할 수 없습니다.'
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+  }
+
+  try {
+    isNicknameChecking.value = true
+
+    const res = await api.get('/members/check-nickname', {
+      params: { nickname: nick },
+    })
+
+    nicknameChecked.value = true
+    nicknameAvailable.value = !!res.data.available
+
+    if (nicknameAvailable.value) {
+      openModal('사용 가능한 닉네임입니다 ✅', null, 'info')
+    } else {
+      openModal('이미 사용중인 닉네임입니다 ❌', 'nickname', 'warning')
+    }
+  } catch (e) {
+    nicknameChecked.value = false
+    nicknameAvailable.value = false
+    const msg = e?.response?.data?.message || '닉네임 확인 실패'
+    openModal(msg, 'nickname', 'warning')
+  } finally {
+    isNicknameChecking.value = false
+  }
+}
 
 // 비밀번호 입력중일때
 const handlePasswordInput = () => {
@@ -278,6 +339,19 @@ const validateField = (field, mode = 'blur') => {
       if (!value) message = '이름을 입력해주세요.'
       break
 
+    case 'nickname':
+      if (!value) message = '닉네임을 입력해주세요.'
+      else if (value.trim().length < 2 || value.trim().length > 20)
+        message = '닉네임은 2~20자여야 합니다.'
+      else if (value.includes(' '))
+        message = '닉네임에는 공백을 사용할 수 없습니다.'
+      else if (mode === 'submit') {
+        if (!nicknameChecked.value) message = '닉네임 중복체크를 해주세요.'
+        else if (!nicknameAvailable.value)
+          message = '사용 가능한 닉네임으로 변경해주세요.'
+      }
+      break
+
     case 'email':
       if (!value) message = '이메일을 입력해주세요.'
       else if (!isValidEmailFormat(value))
@@ -310,14 +384,17 @@ const validateField = (field, mode = 'blur') => {
 }
 
 /* ======================
-   회원가입 검증 및 진행 (React 흐름)
+   회원가입버튼 클릭시 검증 및 진행 
 ====================== */
-const handleRegister = () => {
+const handleRegister = async () => {
   if (!validateField('firstName', 'submit'))
     return openModal(fieldErrors.value.firstName, 'firstName', 'warning')
 
   if (!validateField('lastName', 'submit'))
     return openModal(fieldErrors.value.lastName, 'lastName', 'warning')
+
+  if (!validateField('nickname', 'submit'))
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
 
   if (!validateField('email', 'submit'))
     return openModal(fieldErrors.value.email, 'email', 'warning')
@@ -332,8 +409,28 @@ const handleRegister = () => {
       'warning'
     )
 
-  // ✅ 통과 (데모: 성공 모달 후 이동)
-  openModal('회원가입이 완료되었습니다.', null, 'info', () => router.push('/'))
+  try {
+    isLoading.value = true
+
+    const payload = {
+      firstName: formData.value.firstName,
+      lastName: formData.value.lastName,
+      nickname: formData.value.nickname.trim(),
+      email: formData.value.email,
+      password: formData.value.password,
+    }
+
+    await api.post('/members/register', payload)
+
+    openModal('회원가입이 완료되었습니다.', null, 'info', () =>
+      router.push('/')
+    )
+  } catch (e) {
+    const msg = e?.response?.data?.message || '회원가입 실패'
+    openModal(msg, null, 'warning')
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const handleLoginRedirect = () => {
@@ -361,7 +458,20 @@ const getEmailButtonLabel = () => {
     <div class="register-wrapper">
       <div class="register-card">
         <!-- Form -->
-        <form class="register-form" @submit.prevent="handleRegister" novalidate autocomplete="off">
+        <form
+          class="register-form"
+          @submit.prevent="handleRegister"
+          novalidate
+          autocomplete="off"
+        >
+          <!-- ✅ Header (Login 페이지 스타일) -->
+          <div class="register-header">
+            <div class="logo-section">
+              <span class="logo-icon"><Sparkles :size="28" /></span>
+              <h1 class="logo-text">Web Crafter</h1>
+            </div>
+            <p class="subtitle">계정을 생성하고 작업실을 시작하세요!</p>
+          </div>
           <!-- Name Row -->
           <div class="form-row">
             <div class="form-group">
@@ -401,6 +511,43 @@ const getEmailButtonLabel = () => {
                 <div v-if="fieldErrors.lastName" class="error-tooltip">
                   ⚠️ {{ fieldErrors.lastName }}
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Nickname Input + 중복체크 버튼 -->
+          <div class="form-group">
+            <label for="nickname" class="form-label">닉네임</label>
+            <div class="input-wrapper">
+              <span class="input-icon">🏷️</span>
+
+              <input
+                id="nickname"
+                ref="nicknameRef"
+                v-model="formData.nickname"
+                type="text"
+                placeholder="닉네임을 입력하세요"
+                class="form-input has-right-btn"
+                @blur="validateField('nickname', 'blur')"
+                @input="handleNicknameInput"
+                @keyup.enter="checkNickname"
+              />
+
+              <button
+                type="button"
+                class="email-verify-btn"
+                :disabled="isNicknameChecking"
+                @click="checkNickname"
+              >
+                <span v-if="!isNicknameChecking">중복체크</span>
+                <span v-else class="email-btn-loading">
+                  <span class="mini-spinner"></span>
+                  확인중
+                </span>
+              </button>
+
+              <div v-if="fieldErrors.nickname" class="error-tooltip">
+                ⚠️ {{ fieldErrors.nickname }}
               </div>
             </div>
           </div>
@@ -551,14 +698,6 @@ const getEmailButtonLabel = () => {
             </div>
           </div>
 
-          <!-- Terms and Conditions -->
-          <label class="terms-checkbox">
-            <input v-model="formData.agreeTerms" type="checkbox" />
-            <span>
-              <a href="#" class="terms-link">이용약관</a>
-            </span>
-          </label>
-
           <!-- Error Message -->
           <div v-if="errorMessage" class="error-message">
             {{ errorMessage }}
@@ -698,7 +837,7 @@ const getEmailButtonLabel = () => {
   z-index: 10;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 3rem;
+  gap: 2rem;
   max-width: 1000px;
   width: 100%;
 }
@@ -712,7 +851,7 @@ const getEmailButtonLabel = () => {
   backdrop-filter: blur(20px);
   border: 1px solid rgba(0, 212, 255, 0.2);
   border-radius: 20px;
-  padding: 3rem;
+  padding: 2.2rem;
   box-shadow: 0 20px 60px rgba(0, 212, 255, 0.1);
   animation: slideInLeft 0.6s ease-out;
 }
@@ -729,7 +868,7 @@ const getEmailButtonLabel = () => {
 }
 
 .register-header {
-  margin-bottom: 2rem;
+  margin-bottom: 1.2rem;
   text-align: center;
 }
 
@@ -737,7 +876,7 @@ const getEmailButtonLabel = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   margin-bottom: 1rem;
 }
 
@@ -763,7 +902,7 @@ const getEmailButtonLabel = () => {
 .register-form {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .form-row {
@@ -864,36 +1003,6 @@ const getEmailButtonLabel = () => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   min-width: 60px;
-}
-
-.terms-checkbox {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.75rem;
-  color: #a0a0a0;
-  font-size: 0.85rem;
-  cursor: pointer;
-  user-select: none;
-}
-
-.terms-checkbox input {
-  width: 16px;
-  height: 16px;
-  margin-top: 0.25rem;
-  cursor: pointer;
-  accent-color: #00d4ff;
-  flex-shrink: 0;
-}
-
-.terms-link {
-  color: #00d4ff;
-  text-decoration: none;
-  transition: all 0.3s ease;
-}
-
-.terms-link:hover {
-  color: #00ffff;
-  text-decoration: underline;
 }
 
 .error-message {
