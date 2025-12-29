@@ -15,11 +15,25 @@
       5) 인증 성공 시 인증완료 버튼으로 변경 + 입력칸 제거
 */
 
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, computed, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import GlobalModal from '@/modal/GlobalModal.vue' // 알림 모달
-import api from '@/api/axios' // 스프링부트와 통신하기 위한것
-import { Sparkles } from 'lucide-vue-next' // 헤더 아이콘
+import api from '@/api/axios' // 스프링부트 통신
+import {
+  Sparkles,
+  TriangleAlert,
+  CheckCircle,
+  XCircle,
+  User,
+  Tag,
+  Mail,
+  KeyRound,
+  Lock,
+  Eye,
+  EyeOff,
+  Rocket,
+  Check,
+} from 'lucide-vue-next' // 아이콘
 
 const router = useRouter()
 
@@ -47,6 +61,14 @@ const fieldErrors = ref({
   confirmPassword: '',
 })
 
+// 말풍선 초기화
+const clearAllTooltips = () => {
+  Object.keys(fieldErrors.value).forEach((k) => {
+    fieldErrors.value[k] = ''
+  })
+  lastBlurField.value = null
+}
+
 /* ======================
    input ref (포커스 이동용)
 ====================== */
@@ -70,23 +92,40 @@ const modal = ref({
   open: false,
   message: '',
   focusField: null,
-  type: 'info', // 'warning' | 'info'
+  type: 'info', // info | warning | success | error
+  icon: null, // lucide icon name
   onConfirm: null,
 })
 
-const openModal = (message, field = null, type = 'info', onConfirm = null) => {
+const openModal = (
+  message,
+  field = null,
+  type = 'info',
+  onConfirm = null,
+  icon = null
+) => {
+  // 모달을 띄우기 전에 기존 말풍선 정리
+  clearAllTooltips()
+
+  // 포커스 줄 필드가 있으면 그 필드에만 말풍선 표시
+  if (field && message) {
+    fieldErrors.value[field] = message
+    lastBlurField.value = field
+  }
+
   modal.value.open = true
   modal.value.message = message
   modal.value.focusField = field
   modal.value.type = type
   modal.value.onConfirm = onConfirm
+  modal.value.icon = icon
 }
 
 const closeModal = async () => {
   modal.value.open = false
   await nextTick()
 
-  // ✅ 안내/성공 모달에서 후처리 동작(페이지 이동 등)
+  // 안내/성공 모달에서 후처리 동작(페이지 이동 등)
   if (modal.value.onConfirm) {
     const fn = modal.value.onConfirm
     modal.value.onConfirm = null
@@ -94,7 +133,7 @@ const closeModal = async () => {
     return
   }
 
-  // ✅ 경고 모달: 해당 input으로 포커스 이동
+  // 경고 모달: 해당 input으로 포커스 이동
   const focusMap = {
     firstName: firstNameRef,
     lastName: lastNameRef,
@@ -154,7 +193,7 @@ const checkNickname = async () => {
   try {
     isNicknameChecking.value = true
 
-    const res = await api.get('/members/check-nickname', {
+    const res = await api.get('/member/nicknameCheck', {
       params: { nickname: nick },
     })
 
@@ -162,9 +201,21 @@ const checkNickname = async () => {
     nicknameAvailable.value = !!res.data.available
 
     if (nicknameAvailable.value) {
-      openModal('사용 가능한 닉네임입니다 ✅', null, 'info')
+      openModal(
+        '사용 가능한 닉네임입니다',
+        'email', // 확인 누르면 이메일로 포커스
+        'success',
+        null,
+        CheckCircle // ✅ 아이콘
+      )
     } else {
-      openModal('이미 사용중인 닉네임입니다 ❌', 'nickname', 'warning')
+      openModal(
+        '이미 사용중인 닉네임입니다',
+        'nickname',
+        'error',
+        null,
+        XCircle // ❌ 아이콘
+      )
     }
   } catch (e) {
     nicknameChecked.value = false
@@ -181,7 +232,7 @@ const handlePasswordInput = () => {
   validatePassword()
   fieldErrors.value.password = ''
 
-  // ✅ 입력중일때만 안내 말풍선 세팅
+  // 입력중일때만 안내 말풍선 세팅
   const password = formData.value.password
   if (!password) {
     passwordGuide.value = ''
@@ -229,14 +280,53 @@ const isEmailSending = ref(false) // 전송중(버튼 disable)
 const showVerificationInput = ref(false) // 인증번호 입력칸 노출
 const verificationCodeInput = ref('') // 사용자가 입력한 인증번호
 const emailVerified = ref(false) // 인증 완료 여부
+const isValidEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) // 이메일 형식
+// 인증번호 입력 타이머 (5분)
+const expiresInSec = ref(0) // 남은 초
+let timerId = null
 
-// (데모용) 서버가 보낸 인증번호라고 가정
-const sentVerificationCode = ref('')
+const formatTime = (sec) => {
+  const m = String(Math.floor(sec / 60)).padStart(2, '0')
+  const s = String(sec % 60).padStart(2, '0')
+  return `${m}:${s}`
+}
 
-const isValidEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+const countdownText = computed(() => formatTime(expiresInSec.value))
+const isExpired = computed(() => expiresInSec.value <= 0)
+
+const startCountdown = (seconds = 300) => {
+  // 기존 타이머 정리
+  if (timerId) clearInterval(timerId)
+
+  expiresInSec.value = seconds
+
+  timerId = setInterval(() => {
+    expiresInSec.value -= 1
+
+    if (expiresInSec.value <= 0) {
+      expiresInSec.value = 0
+      clearInterval(timerId)
+      timerId = null
+
+      // 만료 처리 UX
+      openModal('인증 시간이 만료되었습니다. 재요청 해주세요.', null, 'warning')
+    }
+  }, 1000)
+}
+
+const stopCountdown = () => {
+  if (timerId) clearInterval(timerId)
+  timerId = null
+  expiresInSec.value = 0
+}
+
+// 페이지 떠날 때 타이머 정리
+onBeforeUnmount(() => {
+  stopCountdown()
+})
 
 /* ======================
-   ✅ 이메일 input 변경 시 초기화
+   이메일 input 변경 시 초기화
    (템플릿에서 multiline @input 쓰지 말고 함수로!)
 ====================== */
 const handleEmailInput = () => {
@@ -246,11 +336,11 @@ const handleEmailInput = () => {
   emailVerified.value = false
   showVerificationInput.value = false
   verificationCodeInput.value = ''
-  sentVerificationCode.value = ''
+  stopCountdown() // 타이머 초기화
 }
 
 /* ======================
-   ✅ 이메일 인증 요청
+   이메일 인증 요청
 ====================== */
 const requestEmailVerification = async () => {
   if (emailVerified.value) return
@@ -271,49 +361,52 @@ const requestEmailVerification = async () => {
 
   isEmailSending.value = true
 
-  // ✅ 여기서 실제 API 호출하면 됨
-  // await api.post('/email/send', { email: formData.value.email })
-  setTimeout(() => {
-    isEmailSending.value = false
-    showVerificationInput.value = true
+  // 이메일 전송
+  try {
+    await api.post('/member/emailSend', { email: formData.value.email })
 
-    // 데모용 "서버가 보낸 코드"
-    sentVerificationCode.value = '123456'
+    showVerificationInput.value = true
+    startCountdown(300) // 타이머 5분 시작
 
     openModal('인증번호가 전송되었습니다.', null, 'info', async () => {
       await nextTick()
       verificationCodeRef.value?.focus()
     })
-  }, 900)
+  } catch (e) {
+    const msg = e?.response?.data?.message || '인증번호 전송 실패'
+    openModal(msg, 'email', 'warning')
+  } finally {
+    isEmailSending.value = false
+  }
 }
 
 /* ======================
-   ✅ 인증번호 확인
+   인증번호 확인
 ====================== */
-const confirmVerificationCode = () => {
+const confirmVerificationCode = async () => {
   if (!showVerificationInput.value) return
 
   if (!verificationCodeInput.value) {
     return openModal('인증번호를 입력해주세요.', 'verificationCode', 'warning')
   }
 
-  const ok = verificationCodeInput.value.trim() === sentVerificationCode.value
+  try {
+    await api.post('/member/emailVerify', {
+      email: formData.value.email,
+      code: verificationCodeInput.value.trim(),
+    })
 
-  if (!ok) {
-    return openModal(
-      '인증번호가 일치하지 않습니다.',
-      'verificationCode',
-      'warning'
-    )
+    // 인증 성공 상태
+    emailVerified.value = true
+    showVerificationInput.value = false
+    verificationCodeInput.value = ''
+    stopCountdown() // 인증 성공 시 타이머 종료
+
+    openModal('인증이 완료되었습니다.', 'password', 'success')
+  } catch (e) {
+    const msg = e?.response?.data?.message || '인증번호 확인 실패'
+    openModal(msg, 'verificationCode', 'warning')
   }
-
-  // ✅ 인증 성공 상태
-  emailVerified.value = true
-  showVerificationInput.value = false
-  verificationCodeInput.value = ''
-  sentVerificationCode.value = ''
-
-  openModal('인증이 완료되었습니다.', null, 'info')
 }
 
 /* ======================
@@ -322,7 +415,7 @@ const confirmVerificationCode = () => {
    - submit일 때만 이메일 인증여부까지 체크
 ====================== */
 const validateField = (field, mode = 'blur') => {
-  // ✅ 이전 blur에서 뜬 말풍선 제거
+  // 이전 blur에서 뜬 말풍선 제거
   if (mode === 'blur' && lastBlurField.value && lastBlurField.value !== field) {
     fieldErrors.value[lastBlurField.value] = ''
   }
@@ -363,7 +456,7 @@ const validateField = (field, mode = 'blur') => {
     case 'password':
       if (!value) message = '비밀번호를 입력해주세요.'
 
-      // ✅ blur 시에는 안내 말풍선 숨김 (입력중에만 보이게)
+      // blur 시에는 안내 말풍선 숨김 (입력중에만 보이게)
       if (mode === 'blur') passwordGuide.value = ''
       break
 
@@ -384,7 +477,7 @@ const validateField = (field, mode = 'blur') => {
 }
 
 /* ======================
-   회원가입버튼 클릭시 검증 및 진행 
+   회원가입버튼 클릭시 검증 및 진행
 ====================== */
 const handleRegister = async () => {
   if (!validateField('firstName', 'submit'))
@@ -420,9 +513,9 @@ const handleRegister = async () => {
       password: formData.value.password,
     }
 
-    await api.post('/members/register', payload)
+    await api.post('/member/register', payload)
 
-    openModal('회원가입이 완료되었습니다.', null, 'info', () =>
+    openModal('회원가입이 완료되었습니다.', null, 'success', () =>
       router.push('/')
     )
   } catch (e) {
@@ -464,7 +557,7 @@ const getEmailButtonLabel = () => {
           novalidate
           autocomplete="off"
         >
-          <!-- ✅ Header (Login 페이지 스타일) -->
+          <!-- Header -->
           <div class="register-header">
             <div class="logo-section">
               <span class="logo-icon"><Sparkles :size="28" /></span>
@@ -477,7 +570,7 @@ const getEmailButtonLabel = () => {
             <div class="form-group">
               <label for="firstName" class="form-label">성</label>
               <div class="input-wrapper">
-                <span class="input-icon">👤</span>
+                <span class="input-icon"><User :size="18" /></span>
                 <input
                   id="firstName"
                   ref="firstNameRef"
@@ -489,7 +582,8 @@ const getEmailButtonLabel = () => {
                   @input="fieldErrors.firstName = ''"
                 />
                 <div v-if="fieldErrors.firstName" class="error-tooltip">
-                  ⚠️ {{ fieldErrors.firstName }}
+                  <TriangleAlert class="tooltip-icon" :size="14" />
+                  <span>{{ fieldErrors.firstName }}</span>
                 </div>
               </div>
             </div>
@@ -497,7 +591,7 @@ const getEmailButtonLabel = () => {
             <div class="form-group">
               <label for="lastName" class="form-label">이름</label>
               <div class="input-wrapper">
-                <span class="input-icon">👤</span>
+                <span class="input-icon"><User :size="18" /></span>
                 <input
                   id="lastName"
                   ref="lastNameRef"
@@ -509,7 +603,8 @@ const getEmailButtonLabel = () => {
                   @input="fieldErrors.lastName = ''"
                 />
                 <div v-if="fieldErrors.lastName" class="error-tooltip">
-                  ⚠️ {{ fieldErrors.lastName }}
+                  <TriangleAlert class="tooltip-icon" :size="14" />
+                  <span>{{ fieldErrors.lastName }}</span>
                 </div>
               </div>
             </div>
@@ -519,7 +614,7 @@ const getEmailButtonLabel = () => {
           <div class="form-group">
             <label for="nickname" class="form-label">닉네임</label>
             <div class="input-wrapper">
-              <span class="input-icon">🏷️</span>
+              <span class="input-icon"><Tag :size="18" /></span>
 
               <input
                 id="nickname"
@@ -547,7 +642,8 @@ const getEmailButtonLabel = () => {
               </button>
 
               <div v-if="fieldErrors.nickname" class="error-tooltip">
-                ⚠️ {{ fieldErrors.nickname }}
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.nickname }}</span>
               </div>
             </div>
           </div>
@@ -556,7 +652,7 @@ const getEmailButtonLabel = () => {
           <div class="form-group">
             <label for="email" class="form-label">이메일 주소</label>
             <div class="input-wrapper">
-              <span class="input-icon">📧</span>
+              <span class="input-icon"><Mail :size="18" /></span>
               <input
                 id="email"
                 ref="emailRef"
@@ -568,7 +664,7 @@ const getEmailButtonLabel = () => {
                 @input="handleEmailInput"
               />
 
-              <!-- ✅ 이메일 인증/재요청/인증완료 버튼 -->
+              <!-- 이메일 인증/재요청/인증완료 버튼 -->
               <button
                 type="button"
                 class="email-verify-btn"
@@ -584,17 +680,19 @@ const getEmailButtonLabel = () => {
               </button>
 
               <div v-if="fieldErrors.email" class="error-tooltip">
-                ⚠️ {{ fieldErrors.email }}
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.email }}</span>
               </div>
             </div>
 
-            <!-- ✅ 인증번호 입력칸(전송 후 & 인증 전) -->
+            <!-- 인증번호 입력칸(전송 후 & 인증 전) -->
             <div
               v-if="showVerificationInput && !emailVerified"
               class="verify-row"
             >
-              <div class="input-wrapper">
-                <span class="input-icon">🔑</span>
+              <div class="input-wrapper verify-wrapper">
+                <span class="input-icon"><KeyRound :size="18" /></span>
+
                 <input
                   ref="verificationCodeRef"
                   v-model="verificationCodeInput"
@@ -602,15 +700,24 @@ const getEmailButtonLabel = () => {
                   inputmode="numeric"
                   placeholder="인증번호 6자리"
                   class="form-input has-right-btn"
+                  :disabled="isExpired"
                   @keyup.enter="confirmVerificationCode"
                 />
+
                 <button
                   type="button"
                   class="email-verify-btn"
                   @click="confirmVerificationCode"
+                  :disabled="isExpired"
                 >
                   확인
                 </button>
+
+                <!-- 타이머: 입력칸 옆(버튼 왼쪽 아래) -->
+                <div class="verify-timer">
+                  <span v-if="!isExpired">{{ countdownText }}</span>
+                  <span v-else class="expired">만료</span>
+                </div>
               </div>
             </div>
           </div>
@@ -619,7 +726,7 @@ const getEmailButtonLabel = () => {
           <div class="form-group">
             <label for="password" class="form-label">비밀번호</label>
             <div class="input-wrapper">
-              <span class="input-icon">🔒</span>
+              <span class="input-icon"><Lock :size="18" /></span>
               <input
                 id="password"
                 ref="passwordRef"
@@ -636,12 +743,14 @@ const getEmailButtonLabel = () => {
                 @click="togglePasswordVisibility"
                 :title="showPassword ? 'Hide password' : 'Show password'"
               >
-                {{ showPassword ? '👁️' : '👁️‍🗨️' }}
+                <Eye v-if="showPassword" :size="18" />
+                <EyeOff v-else :size="18" />
               </button>
               <div v-if="fieldErrors.password" class="error-tooltip">
-                ⚠️ {{ fieldErrors.password }}
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.password }}</span>
               </div>
-              <!-- ✅ 안전/위험 안내 말풍선 (에러 없을 때만) -->
+              <!-- 안전/위험 안내 말풍선 (에러 없을 때만) -->
               <div v-else-if="passwordGuide" class="error-tooltip">
                 {{ passwordGuide }}
               </div>
@@ -672,7 +781,7 @@ const getEmailButtonLabel = () => {
               >비밀번호 확인</label
             >
             <div class="input-wrapper">
-              <span class="input-icon">🔒</span>
+              <span class="input-icon"><Lock :size="18" /></span>
               <input
                 id="confirmPassword"
                 ref="confirmPasswordRef"
@@ -690,10 +799,12 @@ const getEmailButtonLabel = () => {
                 @click="toggleConfirmPasswordVisibility"
                 :title="showConfirmPassword ? 'Hide password' : 'Show password'"
               >
-                {{ showConfirmPassword ? '👁️' : '👁️‍🗨️' }}
+                <Eye v-if="showConfirmPassword" :size="18" />
+                <EyeOff v-else :size="18" />
               </button>
               <div v-if="fieldErrors.confirmPassword" class="error-tooltip">
-                ⚠️ {{ fieldErrors.confirmPassword }}
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.confirmPassword }}</span>
               </div>
             </div>
           </div>
@@ -731,24 +842,24 @@ const getEmailButtonLabel = () => {
       <!-- Info Card -->
       <div class="info-card">
         <div class="info-header">
-          <span class="info-icon">🚀</span>
+          <span class="info-icon"><Rocket :size="22" /></span>
           <h3>계정을 생성하세요!</h3>
         </div>
         <ul class="info-list">
           <li>
-            <span class="check-icon">✓</span>
+            <span class="check-icon"><Check :size="16" /></span>
             <span>서비스 시작을 위한 계정 생성</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
+            <span class="check-icon"><Check :size="16" /></span>
             <span>결제 수단 등록 필요 없음</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
+            <span class="check-icon"><Check :size="16" /></span>
             <span>모든 도구를 즉시 사용하세요!</span>
           </li>
           <li>
-            <span class="check-icon">✓</span>
+            <span class="check-icon"><Check :size="16" /></span>
             <span>끊김 없는 고객 서포트</span>
           </li>
         </ul>
@@ -756,11 +867,12 @@ const getEmailButtonLabel = () => {
     </div>
   </div>
 
-  <!-- ✅ 전역 모달 -->
+  <!-- 전역 모달 -->
   <GlobalModal
     :open="modal.open"
     :message="modal.message"
     :type="modal.type"
+    :icon="modal.icon"
     @confirm="closeModal"
   />
 </template>
@@ -1288,6 +1400,11 @@ const getEmailButtonLabel = () => {
   z-index: 2;
 }
 
+.tooltip-icon {
+  flex-shrink: 0;
+  color: rgba(0, 212, 255, 0.95); /* 전역모달 경고 아이콘 색과 맞추기 */
+}
+
 /* 이메일/인증번호 input 오른쪽 버튼 공간 확보 */
 .form-input.has-right-btn {
   padding-right: 6.2rem; /* 버튼 폭만큼 여유 */
@@ -1335,6 +1452,29 @@ const getEmailButtonLabel = () => {
   border-top-color: rgba(0, 212, 255, 0.9);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
+}
+
+/* 인증번호 입력 wrapper */
+.verify-wrapper {
+  position: relative;
+}
+
+/* 타이머를 입력칸 오른쪽(확인 버튼 왼쪽/아래)에 띄우기 */
+.verify-timer {
+  position: absolute;
+  right: 6.7rem; /* 확인 버튼 영역만큼 왼쪽으로 */
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: rgba(224, 224, 224, 0.85);
+  pointer-events: none;
+  opacity: 0.95;
+}
+
+.verify-timer .expired {
+  color: #ff6b6b;
 }
 
 /* 인증번호 입력칸 위 여백 */

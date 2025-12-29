@@ -8,17 +8,17 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
-      path: '/',
+      path: '/',  // 홈
       name: 'home',
       component: HomeView
     },
     {
-      path: '/login',
+      path: '/login', // 로그인
       name: 'login',
       component: LoginView
     },
     {
-      path: '/register',
+      path: '/register',  // 회원가입
       name: 'register',
       component: RegisterView
     },

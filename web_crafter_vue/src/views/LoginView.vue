@@ -1,8 +1,31 @@
 <script setup>
-import { ref } from 'vue'
+/*
+  동작 흐름 (전역 모달 기반, 이메일 로그인)
+
+  [입력 검증]
+  1) 로그인 클릭
+     - 이메일 비었음 → 모달(경고) + 이메일 focus
+     - 이메일 형식 오류 → 모달(경고) + 이메일 focus
+     - 비밀번호 비었음 → 모달(경고) + 비밀번호 focus
+
+  [서버 로그인]
+  2) POST /api/member/login 요청
+     - 존재하지 않는 이메일 → 모달(경고) + email 비움 + 이메일 focus
+     - 비밀번호 불일치 → 모달(경고) + password 비움 + 비밀번호 focus
+
+  [성공]
+  3) 성공 시 응답에서 nickname 꺼냄
+  4) “[nickname]님 환영합니다.” 모달 띄움
+  5) 모달 확인 누르면 "/" 이동
+*/
+
+import { ref, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
+import GlobalModal from '@/modal/GlobalModal.vue'
+import api from '@/api/axios' // baseURL: http://localhost:8080/api
 import {
   Sparkles,
+  TriangleAlert,
   Mail,
   Lock,
   Eye,
@@ -13,42 +36,207 @@ import {
 
 const router = useRouter()
 
+/* ======================
+   입력 상태
+====================== */
 const email = ref('')
 const password = ref('')
-const rememberMe = ref(false)
+const rememberMe = ref(false) // UI만 유지(로직은 지금 무시)
 const isLoading = ref(false)
-const errorMessage = ref('')
 const showPassword = ref(false)
 
-const handleLogin = async () => {
-  errorMessage.value = ''
+/* ======================
+   input ref (포커스 이동용)
+====================== */
+const emailRef = ref(null)
+const passwordRef = ref(null)
 
-  if (!email.value || !password.value) {
-    errorMessage.value = 'Please fill in all fields'
+/* ======================
+   커스텀 말풍선 에러 상태 (회원가입 페이지 스타일)
+====================== */
+const fieldErrors = ref({
+  email: '',
+  password: '',
+})
+
+/* ======================
+   말풍선: 마지막 blur 필드 (회원가입 페이지 방식)
+====================== */
+const lastBlurField = ref(null)
+
+// 말풍선 전체 초기화
+const clearAllTooltips = () => {
+  Object.keys(fieldErrors.value).forEach((k) => {
+    fieldErrors.value[k] = ''
+  })
+  lastBlurField.value = null
+}
+
+/* ======================
+   전역 모달 상태 
+====================== */
+const modal = ref({
+  open: false,
+  message: '',
+  type: 'info', // info | warning | success | error
+  focusField: null, // 'email' | 'password'
+  onConfirm: null, // 확인 누른 뒤 실행할 함수(성공 후 이동 등)
+})
+
+/* 모달 열기 */
+const openModal = (
+  message,
+  type = 'info',
+  focusField = null,
+  onConfirm = null
+) => {
+  // 모달 띄우기 전: 기존 말풍선 싹 제거
+  clearAllTooltips()
+
+  // 포커스 줄 필드가 있으면 그 필드에만 말풍선 표시
+  if (
+    focusField &&
+    message &&
+    (focusField === 'email' || focusField === 'password')
+  ) {
+    fieldErrors.value[focusField] = message
+    lastBlurField.value = focusField
+  }
+
+  modal.value.open = true
+  modal.value.message = message
+  modal.value.type = type
+  modal.value.focusField = focusField
+  modal.value.onConfirm = onConfirm
+}
+
+/* 모달 닫기: onConfirm 우선 실행 → 아니면 focus 이동 */
+const closeModal = async () => {
+  modal.value.open = false
+  await nextTick()
+
+  // 성공 모달 등 후처리
+  if (modal.value.onConfirm) {
+    const fn = modal.value.onConfirm
+    modal.value.onConfirm = null
+    fn()
     return
+  }
+
+  // 경고/에러 모달은 해당 input으로 포커스
+  if (modal.value.focusField === 'email') emailRef.value?.focus()
+  if (modal.value.focusField === 'password') passwordRef.value?.focus()
+  modal.value.focusField = null
+}
+
+/* ======================
+   유틸: 이메일 형식 체크
+====================== */
+const isValidEmailFormat = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+
+/* ======================
+   단일 필드 검증 (회원가입 페이지 방식)
+   - onBlur 시: 이전에 blur 되었던 필드 말풍선은 제거하고, 현재 필드만 표시
+====================== */
+const validateField = (field, mode = 'blur') => {
+  // blur 검증일 때만 "이전 blur 말풍선 제거" 동작
+  if (mode === 'blur' && lastBlurField.value && lastBlurField.value !== field) {
+    fieldErrors.value[lastBlurField.value] = ''
+  }
+
+  let message = ''
+
+  if (field === 'email') {
+    const trimmedEmail = email.value.trim()
+    if (!trimmedEmail) message = '이메일을 입력해주세요.'
+    else if (!isValidEmailFormat(trimmedEmail))
+      message = '이메일 형식이 올바르지 않습니다.'
+  }
+
+  if (field === 'password') {
+    if (!password.value) message = '비밀번호를 입력해주세요.'
+  }
+
+  fieldErrors.value[field] = message
+
+  if (mode === 'blur') {
+    lastBlurField.value = field
+  }
+
+  return !message
+}
+
+/* ======================
+   로그인 요청
+====================== */
+const handleLogin = async () => {
+  const trimmedEmail = email.value.trim()
+
+  // 프론트 검증: 전부 모달로 처리
+  if (!validateField('email', 'submit')) {
+    return openModal(fieldErrors.value.email, 'warning', 'email')
+  }
+  if (!validateField('password', 'submit')) {
+    return openModal(fieldErrors.value.password, 'warning', 'password')
   }
 
   isLoading.value = true
 
-  // Simulate API call
-  setTimeout(() => {
+  try {
+    // 서버 로그인 요청
+    // 컨트롤러 매핑: @RequestMapping("/api/member")
+    // axios baseURL: /api → 여기서는 /member/login
+    const res = await api.post('/member/login', {
+      email: trimmedEmail,
+      password: password.value,
+    })
+
+    // 로그인 성공 후 내 정보 요청
+    const meRes = await api.get('/member/me')
+    const nickname = meRes?.data?.nickname || '회원'
+
+    openModal(`${nickname}님 환영합니다.`, 'success', null, () => {
+      router.push('/')
+    })
+  } catch (e) {
+    // 실패: 서버 메시지 기반 분기
+    const msg = e?.response?.data?.message || '로그인 실패'
+
+    // 존재하지 않는 이메일
+    if (msg.includes('존재') && msg.includes('이메일')) {
+      email.value = ''
+      fieldErrors.value.email = ''
+      openModal('존재하지 않는 이메일입니다.', 'warning', 'email')
+      return
+    }
+
+    // 비밀번호 불일치
+    if (msg.includes('비밀번호') && msg.includes('일치')) {
+      password.value = ''
+      fieldErrors.value.password = ''
+      openModal('비밀번호가 일치하지 않습니다.', 'warning', 'password')
+      return
+    }
+
+    // 기타 에러
+    openModal(msg, 'error')
+  } finally {
     isLoading.value = false
-    // Success - redirect to home
-    router.push('/')
-  }, 1500)
+  }
 }
 
+/* ======================
+   비밀번호 토글 UI 동작
+====================== */
 const togglePasswordVisibility = () => {
   showPassword.value = !showPassword.value
 }
 
-const handleForgotPassword = () => {
-  alert('Password reset functionality would be implemented here')
-}
+/* 이메일 찾기 / 비밀번호 찾기 라우팅 */
+const goFindEmail = () => router.push('/find-email')
+const goFindPw = () => router.push('/find-password')
 
-const handleSignUp = () => {
-  router.push('/register')
-}
+const handleSignUp = () => router.push('/register')
 </script>
 
 <template>
@@ -61,7 +249,7 @@ const handleSignUp = () => {
 
     <div class="login-wrapper">
       <div class="login-card">
-        <!-- Header -->
+        <!-- 헤더 -->
         <div class="login-header">
           <div class="logo-section">
             <span class="logo-icon"><Sparkles :size="28" /></span>
@@ -70,37 +258,54 @@ const handleSignUp = () => {
           <p class="subtitle">당신의 작업실에 오신 걸 환영합니다!</p>
         </div>
 
-        <!-- Form -->
-        <form class="login-form" @submit.prevent="handleLogin" autocomplete="off">
-          <!-- Email Input -->
+        <!-- 로그인 폼 -->
+        <form
+          class="login-form"
+          @submit.prevent="handleLogin"
+          autocomplete="off"
+          novalidate
+        >
+          <!-- 이메일 입력 -->
           <div class="form-group">
             <label for="email" class="form-label">이메일 주소</label>
             <div class="input-wrapper">
               <span class="input-icon"><Mail :size="18" /></span>
               <input
                 id="email"
+                ref="emailRef"
                 v-model="email"
                 type="email"
                 placeholder="you@example.com"
                 class="form-input"
-                required
+                @blur="validateField('email', 'blur')"
+                @input="fieldErrors.email = ''"
               />
+              <div v-if="fieldErrors.email" class="error-tooltip">
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.email }}</span>
+              </div>
             </div>
           </div>
 
-          <!-- Password Input -->
+          <!-- 비밀번호 입력 -->
           <div class="form-group">
             <label for="password" class="form-label">비밀번호</label>
             <div class="input-wrapper">
               <span class="input-icon"><Lock :size="18" /></span>
               <input
                 id="password"
+                ref="passwordRef"
                 v-model="password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="Enter your password"
+                placeholder="password"
                 class="form-input"
-                required
+                @blur="validateField('password', 'blur')"
+                @input="fieldErrors.password = ''"
               />
+              <div v-if="fieldErrors.password" class="error-tooltip">
+                <TriangleAlert class="tooltip-icon" :size="14" />
+                <span>{{ fieldErrors.password }}</span>
+              </div>
               <button
                 type="button"
                 class="password-toggle"
@@ -113,27 +318,30 @@ const handleSignUp = () => {
             </div>
           </div>
 
-          <!-- Remember Me & Forgot Password -->
+          <!-- 자동 로그인 및 찾기 링크 -->
           <div class="form-options">
             <label class="remember-me">
               <input v-model="rememberMe" type="checkbox" />
               <span>자동 로그인</span>
             </label>
-            <button
-              type="button"
-              class="forgot-password"
-              @click="handleForgotPassword"
-            >
-              비밀번호를 잊으셨나요?
-            </button>
+
+            <!-- 이메일 찾기 및 비밀번호 찾기 -->
+            <div class="find-links">
+              <button
+                type="button"
+                class="forgot-password"
+                @click="goFindEmail"
+              >
+                이메일 찾기
+              </button>
+              <span class="divider-dot">|</span>
+              <button type="button" class="forgot-password" @click="goFindPw">
+                비밀번호 찾기
+              </button>
+            </div>
           </div>
 
-          <!-- Error Message -->
-          <div v-if="errorMessage" class="error-message">
-            {{ errorMessage }}
-          </div>
-
-          <!-- Login Button -->
+          <!-- 로그인 버튼 -->
           <button type="submit" class="login-btn" :disabled="isLoading">
             <span v-if="!isLoading">로그인</span>
             <span v-else class="loading-spinner">
@@ -143,12 +351,12 @@ const handleSignUp = () => {
           </button>
         </form>
 
-        <!-- Divider -->
+        <!-- 구분선 -->
         <div class="divider">
           <span>or</span>
         </div>
 
-        <!-- Social Login -->
+        <!-- 소셜 로그인 -->
         <div class="social-login">
           <button type="button" class="social-btn google">
             <span>🔍</span>
@@ -160,7 +368,7 @@ const handleSignUp = () => {
           </button>
         </div>
 
-        <!-- Sign Up Link -->
+        <!-- 회원가입 링크 -->
         <div class="signup-section">
           <p>
             아직 계정이 없으신가요?
@@ -171,7 +379,7 @@ const handleSignUp = () => {
         </div>
       </div>
 
-      <!-- Decorative Card -->
+      <!-- 안내 카드 -->
       <div class="info-card">
         <div class="info-header">
           <span class="info-icon"><Palette :size="26" /></span>
@@ -198,9 +406,78 @@ const handleSignUp = () => {
       </div>
     </div>
   </div>
+
+  <!-- 전역 모달 -->
+  <GlobalModal
+    :open="modal.open"
+    :message="modal.message"
+    :type="modal.type"
+    @confirm="closeModal"
+  />
 </template>
 
 <style scoped>
+.error-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 10px;
+  padding: 7px 12px;
+  background: #0b1220; /* 딥 네이비 다크 */
+  color: #e5e7eb; /* 소프트 화이트 */
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.4;
+  border-radius: 8px;
+  border: 1.5px solid rgba(0, 212, 255, 0.75);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 20;
+  letter-spacing: 0.01em;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 212, 255, 0.12);
+}
+
+/* 🔻 바깥 테두리 삼각형 */
+.error-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -14px;
+  left: 22px;
+  border: 7px solid transparent;
+  border-bottom-color: rgba(0, 212, 255, 0.85);
+  z-index: 1;
+}
+
+/* 🔻 안쪽 배경 삼각형 */
+.error-tooltip::after {
+  content: '';
+  position: absolute;
+  top: -12px;
+  left: 22px;
+  border: 7px solid transparent;
+  border-bottom-color: #0b1220;
+  z-index: 2;
+}
+
+.tooltip-icon {
+  flex-shrink: 0;
+  color: rgba(0, 212, 255, 0.95); /* 전역모달 경고 아이콘 색과 맞추기 */
+}
+
+.find-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.divider-dot {
+  color: #606060;
+  user-select: none;
+}
+
 .login-container {
   position: relative;
   min-height: 100vh;

@@ -1,50 +1,55 @@
 <script setup>
 import { computed } from 'vue'
-import { AlertTriangle, CheckCircle } from 'lucide-vue-next'
+import {
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  CircleHelp,
+} from 'lucide-vue-next'
 
 const props = defineProps({
   open: Boolean,
   message: String,
   type: {
     type: String,
-    default: 'info', // 'warning' | 'info'
+    default: 'info', // warning | info | success | error
+  },
+  icon: {
+    type: [Object, Function], // Lucide 아이콘 컴포넌트
+    default: null,
   },
 })
 
-defineEmits(['confirm'])
+const emit = defineEmits(['confirm'])
 
-/* ===============================
-   type별 아이콘 / 스타일 계산
-================================ */
+/* type별 기본 아이콘 (icon이 없을 때만 사용) */
+const defaultIconMap = {
+  warning: AlertTriangle,
+  info: CircleHelp,
+  success: CheckCircle,
+  error: XCircle,
+}
+
+/* 상황별 최종 아이콘 결정: icon prop > type 기본 */
 const IconComponent = computed(() => {
-  return props.type === 'warning' ? AlertTriangle : CheckCircle
+  return props.icon || defaultIconMap[props.type] || CircleHelp
 })
-
-const iconClass = computed(() => {
-  return props.type === 'warning' ? 'icon-warning' : 'icon-info'
-})
-
 </script>
 
 <template>
   <transition name="modal-fade">
     <div v-if="open" class="modal-backdrop">
       <div class="modal-card">
-        <!-- ✅ 아이콘 래퍼 (중앙 정렬 핵심) -->
-        <div class="modal-icon-wrapper" :class="type">
-          <component
-            :is="IconComponent"
-            class="modal-icon"
-          />
+        <!-- 아이콘 래퍼 -->
+        <div class="modal-icon-wrapper" :class="props.type">
+          <component :is="IconComponent" class="modal-icon" />
         </div>
 
         <!-- 메시지 -->
         <p class="modal-message">{{ message }}</p>
 
         <!-- 확인 버튼 -->
-        <button class="modal-btn" @click="$emit('confirm')">
-          확인
-        </button>
+        <button class="modal-btn" @click="$emit('confirm')">확인</button>
       </div>
     </div>
   </transition>
@@ -116,6 +121,14 @@ const iconClass = computed(() => {
   background: rgba(0, 212, 255, 0.15);
 }
 
+.modal-icon-wrapper.success {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.modal-icon-wrapper.error {
+  background: rgba(255, 80, 80, 0.15);
+}
+
 /* ===============================
    SVG 아이콘 자체
 ================================ */
@@ -132,6 +145,14 @@ const iconClass = computed(() => {
 
 .modal-icon-wrapper.info .modal-icon {
   color: #00d4ff;
+}
+
+.modal-icon-wrapper.success .modal-icon {
+  color: #22c55e;
+}
+
+.modal-icon-wrapper.error .modal-icon {
+  color: #ff6b6b;
 }
 
 /* ===============================
