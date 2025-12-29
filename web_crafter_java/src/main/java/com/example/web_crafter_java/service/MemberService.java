@@ -1,6 +1,12 @@
 package com.example.web_crafter_java.service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Base64;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -11,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.example.web_crafter_java.dao.MemberDao;
+import com.example.web_crafter_java.dao.RememberTokenDao;
 import com.example.web_crafter_java.dto.CodeInfo;
 import com.example.web_crafter_java.dto.Member;
 import com.example.web_crafter_java.dto.MemberRegisterReq;
@@ -21,11 +28,63 @@ public class MemberService {
 	private final MemberDao memberDao;
 	private final JavaMailSender javaMailSender;
 	private final BCryptPasswordEncoder encoder;
+	private final RememberTokenDao rememberTokenDao;
 
-	public MemberService(MemberDao memberDao, JavaMailSender javaMailSender, BCryptPasswordEncoder encoder) {
+	public MemberService(MemberDao memberDao, JavaMailSender javaMailSender, BCryptPasswordEncoder encoder,
+			RememberTokenDao rememberTokenDao) {
 		this.memberDao = memberDao;
 		this.javaMailSender = javaMailSender;
 		this.encoder = encoder;
+		this.rememberTokenDao = rememberTokenDao;
+	}
+
+	private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+	private static final DateTimeFormatter DT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+	private String generateRawToken() {
+		byte[] b = new byte[64];
+		SECURE_RANDOM.nextBytes(b);
+		return Base64.getUrlEncoder().withoutPadding().encodeToString(b);
+	}
+
+	private String sha256Base64(String raw) {
+		try {
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			byte[] digest = md.digest(raw.getBytes(StandardCharsets.UTF_8));
+			return Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
+		} catch (Exception e) {
+			throw new RuntimeException(e);
+		}
+	}
+
+	// remember 토큰 발급 (7일)
+	public String issueRememberToken(Integer userId) {
+		String raw = generateRawToken();
+		String hash = sha256Base64(raw);
+
+		String expiresAt = LocalDateTime.now().plusDays(7).format(DT);
+
+		// 한 유저는 1개만 유지하고 싶으면 기존 토큰 revoke
+		rememberTokenDao.revokeAllByUserId(userId);
+
+		rememberTokenDao.insert(userId, hash, expiresAt);
+		return raw; // 쿠키에 넣을 값(원문)
+	}
+
+	// 쿠키로 들어온 remember 토큰 검증 → userId 반환
+	public Integer verifyRememberToken(String rawToken) {
+		if (rawToken == null || rawToken.isBlank())
+			return null;
+		String hash = sha256Base64(rawToken);
+		return rememberTokenDao.findUserIdByValidTokenHash(hash);
+	}
+
+	// 로그아웃 시 토큰 폐기
+	public void revokeRememberToken(String rawToken) {
+		if (rawToken == null || rawToken.isBlank())
+			return;
+		String hash = sha256Base64(rawToken);
+		rememberTokenDao.revokeByTokenHash(hash);
 	}
 
 	@Transactional(readOnly = true)

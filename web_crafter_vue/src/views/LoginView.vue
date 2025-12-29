@@ -19,10 +19,10 @@
   5) 모달 확인 누르면 "/" 이동
 */
 
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import GlobalModal from '@/modal/GlobalModal.vue'
-import api from '@/api/axios' // baseURL: http://localhost:8080/api
+import api from '@/api/axios' // baseURL: http://localhost:8080/api (※ 다른 곳에서 쓸 수 있으니 유지)
 import {
   Sparkles,
   TriangleAlert,
@@ -33,8 +33,30 @@ import {
   Palette,
   Check,
 } from 'lucide-vue-next'
+import { useAuthStore } from '@/stores/auth'
 
+const auth = useAuthStore()
 const router = useRouter()
+
+// 엔터키로 모달 끌 수 있게
+const handleKeydown = (e) => {
+  // 모달 열려 있을 때만
+  if (!modal.value.open) return
+
+  // Enter 키
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    closeModal()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+})
 
 /* ======================
    입력 상태
@@ -73,7 +95,7 @@ const clearAllTooltips = () => {
 }
 
 /* ======================
-   전역 모달 상태 
+   전역 모달 상태
 ====================== */
 const modal = ref({
   open: false,
@@ -170,6 +192,9 @@ const validateField = (field, mode = 'blur') => {
    로그인 요청
 ====================== */
 const handleLogin = async () => {
+  // 모달 떠 있으면 Enter로 재submit 방지
+  if (modal.value.open) return
+
   const trimmedEmail = email.value.trim()
 
   // 프론트 검증: 전부 모달로 처리
@@ -183,17 +208,14 @@ const handleLogin = async () => {
   isLoading.value = true
 
   try {
-    // 서버 로그인 요청
-    // 컨트롤러 매핑: @RequestMapping("/api/member")
-    // axios baseURL: /api → 여기서는 /member/login
-    const res = await api.post('/member/login', {
+    // Pinia 전역 상태로 로그인 처리 (로그인 직후 NavBar 즉시 반영)
+    await auth.login({
       email: trimmedEmail,
       password: password.value,
+      rememberMe: rememberMe.value, // 자동로그인 체크 유무
     })
 
-    // 로그인 성공 후 내 정보 요청
-    const meRes = await api.get('/member/me')
-    const nickname = meRes?.data?.nickname || '회원'
+    const nickname = auth.nickname || '회원'
 
     openModal(`${nickname}님 환영합니다.`, 'success', null, () => {
       router.push('/')
@@ -204,7 +226,6 @@ const handleLogin = async () => {
 
     // 존재하지 않는 이메일
     if (msg.includes('존재') && msg.includes('이메일')) {
-      email.value = ''
       fieldErrors.value.email = ''
       openModal('존재하지 않는 이메일입니다.', 'warning', 'email')
       return

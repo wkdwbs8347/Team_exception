@@ -3,14 +3,14 @@
 // 1️⃣ Vue 반응형 API import
 // ==============================
 
-// ref는 반응형 상태를 만들기 위한 함수
-import { ref } from 'vue'
-
-// 상단 네비게이션 바 컴포넌트
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import api from '@/api/axios'
 import NavBar from '@/components/NavBar.vue'
-
-// 하단 푸터
 import Footer from '@/components/Footer.vue'
+
+// 전역 로그인상태 관리용
+const auth = useAuthStore()
 
 // ==============================
 // 2️⃣ 전역 스크롤 상태 정의
@@ -33,17 +33,14 @@ const handleScroll = () => {
   scrollY.value = window.scrollY
 }
 
-// ==============================
-// 4️⃣ 브라우저 환경 체크 후 이벤트 등록
-// ==============================
-
-// Vite는 SSR도 가능하기 때문에
-// window 객체가 존재하는지 먼저 확인
-if (typeof window !== 'undefined') {
-  // 스크롤 이벤트가 발생할 때마다
-  // handleScroll 함수 실행
+onMounted(async () => {
   window.addEventListener('scroll', handleScroll)
-}
+  await auth.bootstrap() // 여기서만 복원 시도
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleScroll)
+})
 </script>
 
 <template>
@@ -51,7 +48,7 @@ if (typeof window !== 'undefined') {
        5️⃣ 앱 최상위 레이아웃
        ============================== -->
   <div class="app">
-       <!--   👉 NavBar 내부에서는
+    <!--   👉 NavBar 내부에서는
       props.scrollY 값을 이용해
       - 스크롤에 따라 배경 변경
       - 그림자 표시
@@ -71,7 +68,7 @@ if (typeof window !== 'undefined') {
       App.vue는 공통 레이아웃 역할만 수행
     -->
     <RouterView />
-        <!-- 하단 푸터 -->
+    <!-- 하단 푸터 -->
     <Footer />
   </div>
 </template>

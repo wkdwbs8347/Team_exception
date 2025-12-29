@@ -15,6 +15,9 @@ import com.example.web_crafter_java.dto.MemberLoginReq;
 import com.example.web_crafter_java.dto.MemberRegisterReq;
 import com.example.web_crafter_java.service.MemberService;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 
 @RestController
@@ -75,12 +78,25 @@ public class MemberController {
 
 	// 로그인
 	@PostMapping("/login")
-	public ResponseEntity<?> login(@RequestBody MemberLoginReq req, HttpSession session) {
+	public ResponseEntity<?> login(@RequestBody MemberLoginReq req,
+			HttpSession session,
+			HttpServletResponse response) {
 		try {
 			Integer memberId = memberService.login(req.getEmail(), req.getPassword());
-
-			// login 성공 시 "인증 + 세션 저장"
 			session.setAttribute("loginedMemberId", memberId);
+
+			// rememberMe면 토큰 발급 + 쿠키 세팅
+			if (Boolean.TRUE.equals(req.getRememberMe())) {
+				String rawToken = memberService.issueRememberToken(memberId);
+
+				Cookie c = new Cookie("REMEMBER", rawToken);
+				c.setHttpOnly(true);
+				c.setPath("/");
+				c.setMaxAge(60 * 60 * 24 * 7); // 7일
+				// 운영 HTTPS면 true 권장
+				// c.setSecure(true);
+				response.addCookie(c);
+			}
 
 			return ResponseEntity.ok(Map.of("message", "로그인 성공"));
 		} catch (IllegalArgumentException e) {
@@ -90,7 +106,63 @@ public class MemberController {
 		}
 	}
 
-	// 로그인된 사용자 정보(필요한 값만)
+	// 자동 로그인
+	@PostMapping("/refresh")
+	public ResponseEntity<?> refresh(HttpSession session,
+			HttpServletRequest request) {
+
+		Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+		if (memberId != null) {
+			return ResponseEntity.ok(Map.of("message", "already logged in"));
+		}
+
+		String remember = null;
+		if (request.getCookies() != null) {
+			for (Cookie c : request.getCookies()) {
+				if ("REMEMBER".equals(c.getName()))
+					remember = c.getValue();
+			}
+		}
+
+		Integer newMemberId = memberService.verifyRememberToken(remember);
+		if (newMemberId == null) {
+			return ResponseEntity.status(401).body(Map.of("message", "자동 로그인 토큰이 유효하지 않습니다."));
+		}
+
+		session.setAttribute("loginedMemberId", newMemberId);
+		return ResponseEntity.ok(Map.of("message", "refreshed"));
+
+	}
+
+	// 로그아웃
+	@PostMapping("/logout")
+	public ResponseEntity<?> logout(HttpSession session,
+			HttpServletRequest request,
+			HttpServletResponse response) {
+
+		// remember 토큰 revoke
+		String remember = null;
+		if (request.getCookies() != null) {
+			for (Cookie c : request.getCookies()) {
+				if ("REMEMBER".equals(c.getName()))
+					remember = c.getValue();
+			}
+		}
+		memberService.revokeRememberToken(remember);
+
+		// 세션 종료
+		session.invalidate();
+
+		// 쿠키 삭제
+		Cookie del = new Cookie("REMEMBER", "");
+		del.setPath("/");
+		del.setMaxAge(0);
+		response.addCookie(del);
+
+		return ResponseEntity.ok(Map.of("message", "로그아웃 되었습니다."));
+	}
+
+	// 로그인체크 및 사용자 정보(필요한 값만)
 	@GetMapping("/me")
 	public ResponseEntity<?> me(HttpSession session) {
 		Integer memberId = (Integer) session.getAttribute("loginedMemberId");

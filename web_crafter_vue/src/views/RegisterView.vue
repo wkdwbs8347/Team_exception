@@ -15,7 +15,7 @@
       5) 인증 성공 시 인증완료 버튼으로 변경 + 입력칸 제거
 */
 
-import { ref, nextTick, computed, onBeforeUnmount } from 'vue'
+import { ref, nextTick, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import GlobalModal from '@/modal/GlobalModal.vue' // 알림 모달
 import api from '@/api/axios' // 스프링부트 통신
@@ -84,6 +84,27 @@ const verificationCodeRef = ref(null)
    말풍선: 마지막 blur 필드
 ====================== */
 const lastBlurField = ref(null)
+
+// 엔터키로 모달 끌 수 있게
+const handleKeydown = (e) => {
+  // 모달 열려 있을 때만
+  if (!modal.value.open) return
+
+  // Enter 키
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    e.stopPropagation()
+    closeModal()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown, true)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown, true)
+})
 
 /* ======================
    전역 모달 상태
@@ -172,6 +193,7 @@ const handleNicknameInput = () => {
 // 닉네임 중복체크 API호출
 const checkNickname = async () => {
   if (isNicknameChecking.value) return
+  if (nicknameAvailable.value) return // 이미 사용가능이면 재요청 막기
 
   const nick = formData.value.nickname?.trim()
 
@@ -201,20 +223,28 @@ const checkNickname = async () => {
     nicknameAvailable.value = !!res.data.available
 
     if (nicknameAvailable.value) {
+      // 모달만 (말풍선 없음)
       openModal(
         '사용 가능한 닉네임입니다',
-        'email', // 확인 누르면 이메일로 포커스
-        'success',
         null,
-        CheckCircle // ✅ 아이콘
+        'success',
+        async () => {
+          await nextTick()
+          emailRef.value?.focus()
+        },
+        CheckCircle
       )
     } else {
+      // 모달만 (말풍선 없음)
       openModal(
         '이미 사용중인 닉네임입니다',
-        'nickname',
-        'error',
         null,
-        XCircle // ❌ 아이콘
+        'error',
+        async () => {
+          await nextTick()
+          nicknameRef.value?.focus()
+        },
+        XCircle
       )
     }
   } catch (e) {
@@ -225,6 +255,19 @@ const checkNickname = async () => {
   } finally {
     isNicknameChecking.value = false
   }
+}
+
+// 모달 열려있을때 닉네임 중복체크 중복요청 방지
+const onEnterNickname = () => {
+  if (modal.value.open) return
+  if (nicknameAvailable.value) return // 사용가능일때 막기
+  checkNickname()
+}
+
+// 닉네임 버튼 라벨
+const getNicknameButtonLabel = () => {
+  if (nicknameAvailable.value) return '사용가능'
+  return '중복체크'
 }
 
 // 비밀번호 입력중일때
@@ -380,6 +423,17 @@ const requestEmailVerification = async () => {
   }
 }
 
+// 엔터로 이메일 인증 중복요청 방지
+const onEnterEmail = () => {
+  // 모달 떠 있으면 → 닫기만 (전역 keydown에서 처리됨)
+  if (modal.value.open) return
+
+  // 이미 인증 완료면 아무 것도 안 함
+  if (emailVerified.value) return
+
+  requestEmailVerification()
+}
+
 /* ======================
    인증번호 확인
 ====================== */
@@ -407,6 +461,12 @@ const confirmVerificationCode = async () => {
     const msg = e?.response?.data?.message || '인증번호 확인 실패'
     openModal(msg, 'verificationCode', 'warning')
   }
+}
+
+// 엔터로 인증번호 입력 재요청 방지
+const onEnterVerificationCode = () => {
+  if (modal.value.open) return
+  confirmVerificationCode()
 }
 
 /* ======================
@@ -480,6 +540,9 @@ const validateField = (field, mode = 'blur') => {
    회원가입버튼 클릭시 검증 및 진행
 ====================== */
 const handleRegister = async () => {
+  // 모달 떠있으면 Enter로 재submit 방지
+  if (modal.value.open) return
+
   if (!validateField('firstName', 'submit'))
     return openModal(fieldErrors.value.firstName, 'firstName', 'warning')
 
@@ -625,16 +688,18 @@ const getEmailButtonLabel = () => {
                 class="form-input has-right-btn"
                 @blur="validateField('nickname', 'blur')"
                 @input="handleNicknameInput"
-                @keyup.enter="checkNickname"
+                @keydown.enter.prevent="onEnterNickname"
               />
 
               <button
                 type="button"
                 class="email-verify-btn"
-                :disabled="isNicknameChecking"
+                :disabled="isNicknameChecking || nicknameAvailable"
                 @click="checkNickname"
               >
-                <span v-if="!isNicknameChecking">중복체크</span>
+                <span v-if="!isNicknameChecking">{{
+                  getNicknameButtonLabel()
+                }}</span>
                 <span v-else class="email-btn-loading">
                   <span class="mini-spinner"></span>
                   확인중
@@ -662,6 +727,7 @@ const getEmailButtonLabel = () => {
                 class="form-input has-right-btn"
                 @blur="validateField('email', 'blur')"
                 @input="handleEmailInput"
+                @keydown.enter.prevent="onEnterEmail"
               />
 
               <!-- 이메일 인증/재요청/인증완료 버튼 -->
@@ -701,7 +767,7 @@ const getEmailButtonLabel = () => {
                   placeholder="인증번호 6자리"
                   class="form-input has-right-btn"
                   :disabled="isExpired"
-                  @keyup.enter="confirmVerificationCode"
+                  @keydown.enter.prevent="onEnterVerificationCode"
                 />
 
                 <button

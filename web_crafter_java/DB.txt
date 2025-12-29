@@ -27,3 +27,20 @@ CREATE TABLE userWeb (
       ON DELETE CASCADE  -- 유저가 탈퇴하면 해당 유저의 웹 프로젝트도 같이 삭제
       ON UPDATE CASCADE  -- 유저 ID가 바뀌면 같이 바뀜
 );
+
+/* 자동로그인 토큰 관리 */
+CREATE TABLE remember_token (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
+  , user_id INT UNSIGNED NOT NULL COMMENT 'user.id FK'
+  , token_hash VARCHAR(255) NOT NULL COMMENT 'SHA-256 해시된 토큰'
+  , expires_at DATETIME NOT NULL COMMENT '토큰 만료 시각'
+  , revoked TINYINT NOT NULL DEFAULT 0 COMMENT '0: 유효, 1: 폐기'
+  , created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '발급 시각'
+  , INDEX idx_user_id (user_id)
+  , INDEX idx_token_hash (token_hash)
+  , CONSTRAINT fk_remember_user
+    FOREIGN KEY (user_id)
+    REFERENCES `user`(id)
+    ON DELETE CASCADE
+    ON UPDATE CASCADE
+);
