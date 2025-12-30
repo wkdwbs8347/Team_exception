@@ -15,10 +15,10 @@
       5) 인증 성공 시 인증완료 버튼으로 변경 + 입력칸 제거
 */
 
-import { ref, nextTick, computed, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import GlobalModal from '@/modal/GlobalModal.vue' // 알림 모달
-import api from '@/api/axios' // 스프링부트 통신
+import { ref, nextTick, computed, onMounted, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
+import GlobalModal from '@/modal/GlobalModal.vue'; // 알림 모달
+import api from '@/api/axios'; // 스프링부트 통신
 import {
   Sparkles,
   TriangleAlert,
@@ -33,9 +33,9 @@ import {
   EyeOff,
   Rocket,
   Check,
-} from 'lucide-vue-next' // 아이콘
+} from 'lucide-vue-next'; // 아이콘
 
-const router = useRouter()
+const router = useRouter();
 
 /* ======================
    입력 데이터
@@ -47,19 +47,18 @@ const formData = ref({
   email: '',
   password: '',
   confirmPassword: '',
-})
+});
 
 /* =====================
 공백 입력 불가능하게 처리
 ========================*/
 // 모든 공백(스페이스/탭/줄바꿈) 제거
-const removeAllSpaces = (v) => (v ?? '').replace(/\s+/g, '')
+const removeAllSpaces = (v) => (v ?? '').replace(/\s+/g, '');
 
 // v-model 값 자체를 "공백 없는 값"으로 강제
 const enforceNoSpace = (field) => {
-  formData.value[field] = removeAllSpaces(formData.value[field])
-}
-
+  formData.value[field] = removeAllSpaces(formData.value[field]);
+};
 
 /* ======================
    필드별 에러 (말풍선)
@@ -71,52 +70,52 @@ const fieldErrors = ref({
   email: '',
   password: '',
   confirmPassword: '',
-})
+});
 
 // 말풍선 초기화
 const clearAllTooltips = () => {
   Object.keys(fieldErrors.value).forEach((k) => {
-    fieldErrors.value[k] = ''
-  })
-  lastBlurField.value = null
-}
+    fieldErrors.value[k] = '';
+  });
+  lastBlurField.value = null;
+};
 
 /* ======================
    input ref (포커스 이동용)
 ====================== */
-const firstNameRef = ref(null)
-const lastNameRef = ref(null)
-const nicknameRef = ref(null)
-const emailRef = ref(null)
-const passwordRef = ref(null)
-const confirmPasswordRef = ref(null)
-const verificationCodeRef = ref(null)
+const firstNameRef = ref(null);
+const lastNameRef = ref(null);
+const nicknameRef = ref(null);
+const emailRef = ref(null);
+const passwordRef = ref(null);
+const confirmPasswordRef = ref(null);
+const verificationCodeRef = ref(null);
 
 /* ======================
    말풍선: 마지막 blur 필드
 ====================== */
-const lastBlurField = ref(null)
+const lastBlurField = ref(null);
 
 // 엔터키로 모달 끌 수 있게
 const handleKeydown = (e) => {
   // 모달 열려 있을 때만
-  if (!modal.value.open) return
+  if (!modal.value.open) return;
 
   // Enter 키
   if (e.key === 'Enter') {
-    e.preventDefault()
-    e.stopPropagation()
-    closeModal()
+    e.preventDefault();
+    e.stopPropagation();
+    closeModal();
   }
-}
+};
 
 onMounted(() => {
-  window.addEventListener('keydown', handleKeydown, true)
-})
+  window.addEventListener('keydown', handleKeydown, true);
+});
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown, true)
-})
+  window.removeEventListener('keydown', handleKeydown, true);
+});
 
 /* ======================
    전역 모달 상태
@@ -128,7 +127,7 @@ const modal = ref({
   type: 'info', // info | warning | success | error
   icon: null, // lucide icon name
   onConfirm: null,
-})
+});
 
 const openModal = (
   message,
@@ -138,32 +137,32 @@ const openModal = (
   icon = null
 ) => {
   // 모달을 띄우기 전에 기존 말풍선 정리
-  clearAllTooltips()
+  clearAllTooltips();
 
   // 포커스 줄 필드가 있으면 그 필드에만 말풍선 표시
   if (field && message) {
-    fieldErrors.value[field] = message
-    lastBlurField.value = field
+    fieldErrors.value[field] = message;
+    lastBlurField.value = field;
   }
 
-  modal.value.open = true
-  modal.value.message = message
-  modal.value.focusField = field
-  modal.value.type = type
-  modal.value.onConfirm = onConfirm
-  modal.value.icon = icon
-}
+  modal.value.open = true;
+  modal.value.message = message;
+  modal.value.focusField = field;
+  modal.value.type = type;
+  modal.value.onConfirm = onConfirm;
+  modal.value.icon = icon;
+};
 
 const closeModal = async () => {
-  modal.value.open = false
-  await nextTick()
+  modal.value.open = false;
+  await nextTick();
 
   // 안내/성공 모달에서 후처리 동작(페이지 이동 등)
   if (modal.value.onConfirm) {
-    const fn = modal.value.onConfirm
-    modal.value.onConfirm = null
-    fn()
-    return
+    const fn = modal.value.onConfirm;
+    modal.value.onConfirm = null;
+    fn();
+    return;
   }
 
   // 경고 모달: 해당 input으로 포커스 이동
@@ -175,57 +174,51 @@ const closeModal = async () => {
     password: passwordRef,
     confirmPassword: confirmPasswordRef,
     verificationCode: verificationCodeRef,
-  }
+  };
 
   if (modal.value.focusField) {
-    focusMap[modal.value.focusField]?.value?.focus()
+    focusMap[modal.value.focusField]?.value?.focus();
   }
-}
-
+};
 
 /* ======================
    상태 관리
 ====================== */
-const isLoading = ref(false) 
+const isLoading = ref(false);
 // ✅ 회원가입 요청 처리중 여부
 // - true면 회원가입 버튼 비활성화 + "계정 생성중..." 로딩 UI 표시
 // - handleRegister() 시작에서 true, finally에서 false로 복구
 
-const errorMessage = ref('')
+const errorMessage = ref('');
 // ✅ 폼 하단에 띄울 커스텀 말풍선 “전체 에러 메시지”용 문자열
 // - v-if="errorMessage"로 화면에 보여줄 때 사용
 // - 현재 코드에선 거의 안 쓰고(대부분 openModal 사용), 필요하면 catch에서 설정 가능
 
-const showPassword = ref(false)
+const showPassword = ref(false);
 // ✅ 비밀번호 input 표시/숨김 토글 상태
 // - true면 type="text", false면 type="password"
 // - Eye/EyeOff 아이콘 토글에 사용
 
-const showConfirmPassword = ref(false)
+const showConfirmPassword = ref(false);
 // ✅ 비밀번호 확인 input 표시/숨김 토글 상태
 // - 동작은 showPassword와 동일하지만 confirmPassword용
 
-const passwordStrength = ref(0)
+const passwordStrength = ref(0);
 // ✅ 비밀번호 강도 점수(0~4)
 // - validatePassword()에서 계산
 // - 강도 바(%)와 라벨(Weak~Very Strong) 표시 기준 값
 
-const passwordGuide = ref('')
-// ✅ 비밀번호 입력 중에만 보여주는 안내 말풍선 문구
-// - handlePasswordInput()에서 strength 기반으로 "안전/위험" 문구 넣음
-// - blur 시 validateField('password','blur')에서 ''로 비워서 숨김 처리
-
-const isNicknameChecking = ref(false)
+const isNicknameChecking = ref(false);
 // ✅ 닉네임 중복체크 API 요청중인지 여부
 // - true면 버튼 disabled + 로딩 스피너/“확인중” 표시
 // - checkNickname() try에서 true, finally에서 false
 
-const nicknameChecked = ref(false)
+const nicknameChecked = ref(false);
 // ✅ 사용자가 “중복체크를 한 적이 있는가” 상태
 // - 닉네임 입력이 바뀌면 false로 초기화(handleNicknameInput)
 // - 중복체크 API 성공 응답 오면 true로 변경
 
-const nicknameAvailable = ref(false)
+const nicknameAvailable = ref(false);
 // ✅ 현재 닉네임이 “사용 가능한 상태인지” 여부
 // - 중복체크 결과로 결정(res.data.available)
 // - true면 버튼 라벨 "사용가능" 표시 + 버튼 disabled + 초록색 처리
@@ -233,42 +226,42 @@ const nicknameAvailable = ref(false)
 
 // 닉네임 입력이 바뀌면 중복체크 초기화
 const handleNicknameInput = () => {
-  fieldErrors.value.nickname = ''
-  nicknameChecked.value = false
-  nicknameAvailable.value = false
-}
+  fieldErrors.value.nickname = '';
+  nicknameChecked.value = false;
+  nicknameAvailable.value = false;
+};
 
 // 닉네임 중복체크 API호출
 const checkNickname = async () => {
-  if (isNicknameChecking.value) return
-  if (nicknameAvailable.value) return // 이미 사용가능이면 재요청 막기
+  if (isNicknameChecking.value) return;
+  if (nicknameAvailable.value) return; // 이미 사용가능이면 재요청 막기
 
-  const nick = formData.value.nickname?.trim()
+  const nick = formData.value.nickname?.trim();
 
   if (!nick) {
-    fieldErrors.value.nickname = '닉네임을 입력해주세요.'
-    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+    fieldErrors.value.nickname = '닉네임을 입력해주세요.';
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning');
   }
 
   // 닉네임 입력값 간단 규칙
   if (nick.length < 2 || nick.length > 20) {
-    fieldErrors.value.nickname = '닉네임은 2~20자여야 합니다.'
-    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+    fieldErrors.value.nickname = '닉네임은 2~20자여야 합니다.';
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning');
   }
   if (nick.includes(' ')) {
-    fieldErrors.value.nickname = '닉네임에는 공백을 사용할 수 없습니다.'
-    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+    fieldErrors.value.nickname = '닉네임에는 공백을 사용할 수 없습니다.';
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning');
   }
 
   try {
-    isNicknameChecking.value = true
+    isNicknameChecking.value = true;
 
     const res = await api.get('/member/nicknameCheck', {
       params: { nickname: nick },
-    })
+    });
 
-    nicknameChecked.value = true
-    nicknameAvailable.value = !!res.data.available
+    nicknameChecked.value = true;
+    nicknameAvailable.value = !!res.data.available;
 
     if (nicknameAvailable.value) {
       // 모달만 (말풍선 없음)
@@ -277,11 +270,11 @@ const checkNickname = async () => {
         null,
         'success',
         async () => {
-          await nextTick()
-          emailRef.value?.focus()
+          await nextTick();
+          emailRef.value?.focus();
         },
         CheckCircle
-      )
+      );
     } else {
       // 모달만 (말풍선 없음)
       openModal(
@@ -289,233 +282,242 @@ const checkNickname = async () => {
         null,
         'error',
         async () => {
-          await nextTick()
-          nicknameRef.value?.focus()
+          await nextTick();
+          nicknameRef.value?.focus();
         },
         XCircle
-      )
+      );
     }
   } catch (e) {
-    nicknameChecked.value = false
-    nicknameAvailable.value = false
-    const msg = e?.response?.data?.message || '닉네임 확인 실패'
-    openModal(msg, 'nickname', 'warning')
+    nicknameChecked.value = false;
+    nicknameAvailable.value = false;
+    const msg = e?.response?.data?.message || '닉네임 확인 실패';
+    openModal(msg, 'nickname', 'warning');
   } finally {
-    isNicknameChecking.value = false
+    isNicknameChecking.value = false;
   }
-}
+};
 
 // 모달 열린상태로 엔터 누를때 닉네임 중복체크 중복요청 방지
 const onEnterNickname = () => {
-  if (modal.value.open) return
-  if (nicknameAvailable.value) return // 사용가능일때 막기
-  checkNickname()
-}
+  if (modal.value.open) return;
+  if (nicknameAvailable.value) return; // 사용가능일때 막기
+  checkNickname();
+};
 
 // 상황에 따른 닉네임 버튼 라벨
 const getNicknameButtonLabel = () => {
-  if (nicknameAvailable.value) return '사용가능'
-  return '중복체크'
-}
+  if (nicknameAvailable.value) return '사용가능';
+  return '중복체크';
+};
 
 // 비밀번호 입력중일때
 const handlePasswordInput = () => {
-  validatePassword()
-  fieldErrors.value.password = ''
-
-  // 입력중일때만 안내 말풍선 세팅
-  const password = formData.value.password
-  if (!password) {
-    passwordGuide.value = ''
-  } else if (passwordStrength.value <= 1) {
-    passwordGuide.value = '안전하지 않은 비밀번호입니다'
-  } else {
-    passwordGuide.value = '안전한 비밀번호입니다'
-  }
-}
+  validatePassword();
+  fieldErrors.value.password = '';
+};
 
 // 비밀번호 강도 계산
 const validatePassword = () => {
-  const password = formData.value.password
-  let strength = 0
+  const password = formData.value.password || '';
 
-  if (password.length >= 8) strength++
-  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++
-  if (/[0-9]/.test(password)) strength++
-  if (/[^a-zA-Z0-9]/.test(password)) strength++
+  // 8자 미만이면 어떤 조합이든 Good(2) 이상 못 찍게 강제
+  if (password.length < 8) {
+    let strength = 0;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+    else if (/[0-9]/.test(password)) strength++;
+    else if (/[^a-zA-Z0-9]/.test(password)) strength++;
 
-  passwordStrength.value = strength
-}
+    passwordStrength.value = Math.min(strength, 1); // 최대 1까지만
+    return;
+  }
+
+  // 8자 이상일 때만 정상 강도 계산
+  let strength = 0;
+  if (password.length >= 8) strength++;
+  if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+  if (/[0-9]/.test(password)) strength++;
+  if (/[^a-zA-Z0-9]/.test(password)) strength++;
+
+  passwordStrength.value = strength;
+};
 
 // 비밀번호 강도기준
 const getPasswordStrengthLabel = () =>
   ['Weak', 'Fair', 'Good', 'Strong', 'Very Strong'][passwordStrength.value] ||
-  'Weak'
+  'Weak';
 
 const getPasswordStrengthColor = () =>
   ['#ff6b6b', '#ffa500', '#ffd700', '#90ee90', '#00d4ff'][
     passwordStrength.value
-  ] || '#ff6b6b'
+  ] || '#ff6b6b';
 
 const togglePasswordVisibility = () => {
-  showPassword.value = !showPassword.value
-}
+  showPassword.value = !showPassword.value;
+};
 const toggleConfirmPasswordVisibility = () => {
-  showConfirmPassword.value = !showConfirmPassword.value
-}
+  showConfirmPassword.value = !showConfirmPassword.value;
+};
 
 /* ======================
    이메일 인증 상태
 ====================== */
-const isEmailSending = ref(false) // 전송중(버튼 disable)
-const showVerificationInput = ref(false) // 인증번호 입력칸 노출
-const verificationCodeInput = ref('') // 사용자가 입력한 인증번호
-const emailVerified = ref(false) // 인증 완료 여부
-const isValidEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) // 이메일 형식
+const isEmailSending = ref(false); // 전송중(버튼 disable)
+const showVerificationInput = ref(false); // 인증번호 입력칸 노출
+const verificationCodeInput = ref(''); // 사용자가 입력한 인증번호
+const emailVerified = ref(false); // 인증 완료 여부
+const isValidEmailFormat = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); // 이메일 형식
 // 인증번호 입력 타이머 (5분)
-const expiresInSec = ref(0) // 남은 초
-let timerId = null
+const expiresInSec = ref(0); // 남은 초
+let timerId = null;
 
 const formatTime = (sec) => {
-  const m = String(Math.floor(sec / 60)).padStart(2, '0')
-  const s = String(sec % 60).padStart(2, '0')
-  return `${m}:${s}`
-}
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  const s = String(sec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+};
 
-const countdownText = computed(() => formatTime(expiresInSec.value))
-const isExpired = computed(() => expiresInSec.value <= 0)
+const countdownText = computed(() => formatTime(expiresInSec.value));
+const isExpired = computed(() => expiresInSec.value <= 0);
 
 const startCountdown = (seconds = 300) => {
   // 기존 타이머 정리
-  if (timerId) clearInterval(timerId)
+  if (timerId) clearInterval(timerId);
 
-  expiresInSec.value = seconds
+  expiresInSec.value = seconds;
 
   timerId = setInterval(() => {
-    expiresInSec.value -= 1
+    expiresInSec.value -= 1;
 
     if (expiresInSec.value <= 0) {
-      expiresInSec.value = 0
-      clearInterval(timerId)
-      timerId = null
+      expiresInSec.value = 0;
+      clearInterval(timerId);
+      timerId = null;
 
       // 만료 처리 UX
-      openModal('인증 시간이 만료되었습니다. 재요청 해주세요.', null, 'warning')
+      openModal(
+        '인증 시간이 만료되었습니다. 재요청 해주세요.',
+        null,
+        'warning'
+      );
     }
-  }, 1000)
-}
+  }, 1000);
+};
 
 const stopCountdown = () => {
-  if (timerId) clearInterval(timerId)
-  timerId = null
-  expiresInSec.value = 0
-}
+  if (timerId) clearInterval(timerId);
+  timerId = null;
+  expiresInSec.value = 0;
+};
 
 // 페이지 떠날 때 타이머 정리
 onBeforeUnmount(() => {
-  stopCountdown()
-})
+  stopCountdown();
+});
 
 /* ======================
    이메일 input 변경 시 초기화
    (템플릿에서 multiline @input 쓰지 말고 함수로!)
 ====================== */
 const handleEmailInput = () => {
-  fieldErrors.value.email = ''
+  fieldErrors.value.email = '';
 
   // 이메일이 바뀌면 인증 상태 초기화(안전)
-  emailVerified.value = false
-  showVerificationInput.value = false
-  verificationCodeInput.value = ''
-  stopCountdown() // 타이머 초기화
-}
+  emailVerified.value = false;
+  showVerificationInput.value = false;
+  verificationCodeInput.value = '';
+  stopCountdown(); // 타이머 초기화
+};
 
 /* ======================
    이메일 인증 요청
 ====================== */
 const requestEmailVerification = async () => {
-  if (emailVerified.value) return
-  if (isEmailSending.value) return
+  if (emailVerified.value) return;
+  if (isEmailSending.value) return;
 
   // 이메일 기본 검증
   if (!formData.value.email) {
-    fieldErrors.value.email = '이메일을 입력해주세요.'
-    return openModal(fieldErrors.value.email, 'email', 'warning')
+    fieldErrors.value.email = '이메일을 입력해주세요.';
+    return openModal(fieldErrors.value.email, 'email', 'warning');
   }
   if (!isValidEmailFormat(formData.value.email)) {
-    fieldErrors.value.email = '이메일 형식이 올바르지 않습니다.'
-    return openModal(fieldErrors.value.email, 'email', 'warning')
+    fieldErrors.value.email = '이메일 형식이 올바르지 않습니다.';
+    return openModal(fieldErrors.value.email, 'email', 'warning');
   }
 
   // 재요청이면 입력칸 값 초기화
-  verificationCodeInput.value = ''
+  verificationCodeInput.value = '';
 
-  isEmailSending.value = true
+  isEmailSending.value = true;
 
   // 이메일 전송
   try {
-    await api.post('/member/emailSend', { email: formData.value.email })
+    await api.post('/member/emailSend', { email: formData.value.email });
 
-    showVerificationInput.value = true
-    startCountdown(300) // 타이머 5분 시작
+    showVerificationInput.value = true;
+    startCountdown(300); // 타이머 5분 시작
 
     openModal('인증번호가 전송되었습니다.', null, 'info', async () => {
-      await nextTick()
-      verificationCodeRef.value?.focus()
-    })
+      await nextTick();
+      verificationCodeRef.value?.focus();
+    });
   } catch (e) {
-    const msg = e?.response?.data?.message || '인증번호 전송 실패'
-    openModal(msg, 'email', 'warning')
+    const msg = e?.response?.data?.message || '인증번호 전송 실패';
+    openModal(msg, 'email', 'warning');
   } finally {
-    isEmailSending.value = false
+    isEmailSending.value = false;
   }
-}
+};
 
 // 엔터로 이메일 인증 중복요청 방지
 const onEnterEmail = () => {
   // 모달 떠 있으면 → 닫기만 (전역 keydown에서 처리됨)
-  if (modal.value.open) return
+  if (modal.value.open) return;
 
   // 이미 인증 완료면 아무 것도 안 함
-  if (emailVerified.value) return
+  if (emailVerified.value) return;
 
-  requestEmailVerification()
-}
+  requestEmailVerification();
+};
 
 /* ======================
    인증번호 확인
 ====================== */
 const confirmVerificationCode = async () => {
-  if (!showVerificationInput.value) return
+  if (!showVerificationInput.value) return;
 
   if (!verificationCodeInput.value) {
-    return openModal('인증번호를 입력해주세요.', 'verificationCode', 'warning')
+    return openModal('인증번호를 입력해주세요.', 'verificationCode', 'warning');
   }
 
   try {
     await api.post('/member/emailVerify', {
       email: formData.value.email,
       code: verificationCodeInput.value.trim(),
-    })
+    });
 
     // 인증 성공 상태
-    emailVerified.value = true
-    showVerificationInput.value = false
-    verificationCodeInput.value = ''
-    stopCountdown() // 인증 성공 시 타이머 종료
+    emailVerified.value = true;
+    showVerificationInput.value = false;
+    verificationCodeInput.value = '';
+    stopCountdown(); // 인증 성공 시 타이머 종료
 
-    openModal('인증이 완료되었습니다.', 'password', 'success')
+    openModal('인증이 완료되었습니다.', null, 'success', async () => {
+      await nextTick();
+      passwordRef.value?.focus();
+    });
   } catch (e) {
-    const msg = e?.response?.data?.message || '인증번호 확인 실패'
-    openModal(msg, 'verificationCode', 'warning')
+    const msg = e?.response?.data?.message || '인증번호 확인 실패';
+    openModal(msg, 'verificationCode', 'warning');
   }
-}
+};
 
 // 엔터로 인증번호 입력 재요청 방지
 const onEnterVerificationCode = () => {
-  if (modal.value.open) return
-  confirmVerificationCode()
-}
+  if (modal.value.open) return;
+  confirmVerificationCode();
+};
 
 /* ======================
    단일 필드 검증
@@ -523,98 +525,113 @@ const onEnterVerificationCode = () => {
    - submit일 때만 이메일 인증여부까지 체크
 ====================== */
 const validateField = (field, mode = 'blur') => {
+  // 모달이 열려있을 때 blur로 인한 말풍선 생성 방지
+  if (mode === 'blur' && modal.value.open) return true;
   // 이전 blur에서 뜬 말풍선 제거
   if (mode === 'blur' && lastBlurField.value && lastBlurField.value !== field) {
-    fieldErrors.value[lastBlurField.value] = ''
+    fieldErrors.value[lastBlurField.value] = '';
   }
 
-  const value = formData.value[field]
-  let message = ''
+  const value = formData.value[field];
+  let message = '';
 
   switch (field) {
     case 'firstName':
-      if (!value) message = '성을 입력해주세요.'
-      break
+      if (!value) message = '성을 입력해주세요.';
+      break;
 
     case 'lastName':
-      if (!value) message = '이름을 입력해주세요.'
-      break
+      if (!value) message = '이름을 입력해주세요.';
+      break;
 
     case 'nickname':
-      if (!value) message = '닉네임을 입력해주세요.'
+      if (!value) message = '닉네임을 입력해주세요.';
       else if (value.trim().length < 2 || value.trim().length > 20)
-        message = '닉네임은 2~20자여야 합니다.'
+        message = '닉네임은 2~20자여야 합니다.';
       else if (value.includes(' '))
-        message = '닉네임에는 공백을 사용할 수 없습니다.'
+        message = '닉네임에는 공백을 사용할 수 없습니다.';
       else if (mode === 'submit') {
-        if (!nicknameChecked.value) message = '닉네임 중복체크를 해주세요.'
+        if (!nicknameChecked.value) message = '닉네임 중복체크를 해주세요.';
         else if (!nicknameAvailable.value)
-          message = '사용 가능한 닉네임으로 변경해주세요.'
+          message = '사용 가능한 닉네임으로 변경해주세요.';
       }
-      break
+      break;
 
     case 'email':
-      if (!value) message = '이메일을 입력해주세요.'
+      if (!value) message = '이메일을 입력해주세요.';
       else if (!isValidEmailFormat(value))
-        message = '이메일 형식이 올바르지 않습니다.'
+        message = '이메일 형식이 올바르지 않습니다.';
       else if (mode === 'submit' && !emailVerified.value)
-        message = '이메일 인증을 완료해주세요.'
-      break
+        message = '이메일 인증을 완료해주세요.';
+      break;
 
     case 'password':
-      if (!value) message = '비밀번호를 입력해주세요.'
-
-      // blur 시에는 안내 말풍선 숨김 (입력중에만 보이게)
-      if (mode === 'blur') passwordGuide.value = ''
-      break
+      if (!value) message = '비밀번호를 입력해주세요.';
+      break;
 
     case 'confirmPassword':
-      if (!value) message = '비밀번호 확인을 입력해주세요.'
+      if (!value) message = '비밀번호 확인을 입력해주세요.';
       else if (value !== formData.value.password)
-        message = '비밀번호가 일치하지 않습니다.'
-      break
+        message = '비밀번호가 일치하지 않습니다.';
+      break;
   }
 
-  fieldErrors.value[field] = message
+  fieldErrors.value[field] = message;
 
   if (mode === 'blur') {
-    lastBlurField.value = field
+    lastBlurField.value = field;
   }
 
-  return !message
-}
+  return !message;
+};
 
 /* ======================
    회원가입버튼 클릭시 검증 및 진행
 ====================== */
 const handleRegister = async () => {
   // 모달 떠있으면 Enter로 재submit 방지
-  if (modal.value.open) return
+  if (modal.value.open) return;
 
   if (!validateField('firstName', 'submit'))
-    return openModal(fieldErrors.value.firstName, 'firstName', 'warning')
+    return openModal(fieldErrors.value.firstName, 'firstName', 'warning');
 
   if (!validateField('lastName', 'submit'))
-    return openModal(fieldErrors.value.lastName, 'lastName', 'warning')
+    return openModal(fieldErrors.value.lastName, 'lastName', 'warning');
 
   if (!validateField('nickname', 'submit'))
-    return openModal(fieldErrors.value.nickname, 'nickname', 'warning')
+    return openModal(fieldErrors.value.nickname, 'nickname', 'warning');
 
   if (!validateField('email', 'submit'))
-    return openModal(fieldErrors.value.email, 'email', 'warning')
+    return openModal(fieldErrors.value.email, 'email', 'warning');
 
   if (!validateField('password', 'submit'))
-    return openModal(fieldErrors.value.password, 'password', 'warning')
+    return openModal(fieldErrors.value.password, 'password', 'warning');
 
   if (!validateField('confirmPassword', 'submit'))
     return openModal(
       fieldErrors.value.confirmPassword,
       'confirmPassword',
       'warning'
-    )
+    );
+
+  // password 필드 기본 검증 통과 후, 강도 Good(2) 미만이면 막기
+  if (passwordStrength.value < 2) {
+    formData.value.password = '';
+    formData.value.confirmPassword = '';
+    passwordStrength.value = 0;
+
+    // confirmPassword 말풍선 미리 제거
+    fieldErrors.value.confirmPassword = '';
+
+    return openModal(
+      '비밀번호는 8자 이상, 영문·숫자·특수문자 조합으로 입력해주세요.',
+      'password',
+      'warning'
+    );
+  }
 
   try {
-    isLoading.value = true
+    isLoading.value = true;
 
     const payload = {
       firstName: formData.value.firstName.trim(),
@@ -622,33 +639,33 @@ const handleRegister = async () => {
       nickname: formData.value.nickname.trim(),
       email: formData.value.email.trim(),
       password: formData.value.password.trim(),
-    }
+    };
 
-    await api.post('/member/register', payload)
+    await api.post('/member/register', payload);
 
     openModal('회원가입이 완료되었습니다.', null, 'success', () =>
       router.push('/')
-    )
+    );
   } catch (e) {
-    const msg = e?.response?.data?.message || '회원가입 실패'
-    openModal(msg, null, 'warning')
+    const msg = e?.response?.data?.message || '회원가입 실패';
+    openModal(msg, null, 'warning');
   } finally {
-    isLoading.value = false
+    isLoading.value = false;
   }
-}
+};
 
 const handleLoginRedirect = () => {
-  router.push('/login')
-}
+  router.push('/login');
+};
 
 /* ======================
    이메일 버튼 라벨
 ====================== */
 const getEmailButtonLabel = () => {
-  if (emailVerified.value) return '인증완료'
-  if (showVerificationInput.value) return '재요청'
-  return '인증'
-}
+  if (emailVerified.value) return '인증완료';
+  if (showVerificationInput.value) return '재요청';
+  return '인증';
+};
 </script>
 
 <template>
@@ -690,7 +707,10 @@ const getEmailButtonLabel = () => {
                   placeholder="CHA"
                   class="form-input"
                   @blur="validateField('firstName', 'blur')"
-                  @input="enforceNoSpace('firstName'); fieldErrors.firstName = ''"
+                  @input="
+                    enforceNoSpace('firstName');
+                    fieldErrors.firstName = '';
+                  "
                 />
                 <div v-if="fieldErrors.firstName" class="error-tooltip">
                   <TriangleAlert class="tooltip-icon" :size="14" />
@@ -711,7 +731,10 @@ const getEmailButtonLabel = () => {
                   placeholder="EUNWOO"
                   class="form-input"
                   @blur="validateField('lastName', 'blur')"
-                  @input="enforceNoSpace('lastName'); fieldErrors.lastName = ''"
+                  @input="
+                    enforceNoSpace('lastName');
+                    fieldErrors.lastName = '';
+                  "
                 />
                 <div v-if="fieldErrors.lastName" class="error-tooltip">
                   <TriangleAlert class="tooltip-icon" :size="14" />
@@ -735,7 +758,10 @@ const getEmailButtonLabel = () => {
                 placeholder="닉네임을 입력하세요"
                 class="form-input has-right-btn"
                 @blur="validateField('nickname', 'blur')"
-                @input="enforceNoSpace('nickname'); handleNicknameInput()"
+                @input="
+                  enforceNoSpace('nickname');
+                  handleNicknameInput();
+                "
                 @keydown.enter.prevent="onEnterNickname"
               />
 
@@ -775,7 +801,10 @@ const getEmailButtonLabel = () => {
                 placeholder="you@example.com"
                 class="form-input has-right-btn"
                 @blur="validateField('email', 'blur')"
-                @input="enforceNoSpace('email'); handleEmailInput()"
+                @input="
+                  enforceNoSpace('email');
+                  handleEmailInput();
+                "
                 @keydown.enter.prevent="onEnterEmail"
               />
 
@@ -818,7 +847,11 @@ const getEmailButtonLabel = () => {
                   class="form-input has-right-btn"
                   :disabled="isExpired"
                   maxlength="6"
-                  @input="verificationCodeInput = removeAllSpaces(verificationCodeInput)"
+                  @input="
+                    verificationCodeInput = removeAllSpaces(
+                      verificationCodeInput
+                    )
+                  "
                   @keydown.enter.prevent="onEnterVerificationCode"
                 />
 
@@ -850,10 +883,13 @@ const getEmailButtonLabel = () => {
                 ref="passwordRef"
                 v-model="formData.password"
                 :type="showPassword ? 'text' : 'password'"
-                placeholder="Create a strong password"
+                placeholder="8자 이상, 영문·숫자·특수문자 조합"
                 class="form-input"
                 @blur="validateField('password', 'blur')"
-                @input="enforceNoSpace('password'); handlePasswordInput()"
+                @input="
+                  enforceNoSpace('password');
+                  handlePasswordInput();
+                "
               />
               <button
                 type="button"
@@ -867,10 +903,6 @@ const getEmailButtonLabel = () => {
               <div v-if="fieldErrors.password" class="error-tooltip">
                 <TriangleAlert class="tooltip-icon" :size="14" />
                 <span>{{ fieldErrors.password }}</span>
-              </div>
-              <!-- 안전/위험 안내 말풍선 (에러 없을 때만) -->
-              <div v-else-if="passwordGuide" class="error-tooltip">
-                {{ passwordGuide }}
               </div>
             </div>
 
@@ -905,10 +937,13 @@ const getEmailButtonLabel = () => {
                 ref="confirmPasswordRef"
                 v-model="formData.confirmPassword"
                 :type="showConfirmPassword ? 'text' : 'password'"
-                placeholder="Confirm your password"
+                placeholder="비밀번호 확인"
                 class="form-input"
                 @blur="validateField('confirmPassword', 'blur')"
-                @input="enforceNoSpace('confirmPassword'); fieldErrors.confirmPassword = ''"
+                @input="
+                  enforceNoSpace('confirmPassword');
+                  fieldErrors.confirmPassword = '';
+                "
                 required
               />
               <button
