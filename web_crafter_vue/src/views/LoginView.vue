@@ -404,24 +404,28 @@ const handleSignUp = () => router.push('/register')
       <div class="info-card">
         <div class="info-header">
           <span class="info-icon"><Palette :size="26" /></span>
-          <h3>웹페이지 제작 경험이 없으신가요?</h3>
+          <h3>이제, 웹을 직접 만들어볼 차례입니다</h3>
         </div>
         <ul class="info-list">
           <li>
             <span class="check-icon"><Check :size="14" /></span>
-            <span>코드블럭을 활용한 학습과 창작 경험 제공</span>
+            <span>블록을 조합해 웹페이지 구성</span>
           </li>
           <li>
             <span class="check-icon"><Check :size="14" /></span>
-            <span>쉽게 만드는 나만의 웹사이트</span>
+            <span>직접 만들며 배우는 웹 구조</span>
           </li>
           <li>
             <span class="check-icon"><Check :size="14" /></span>
-            <span>모든 변화가 즉시 반영</span>
+            <span>복잡한 설정 없이 바로 시작</span>
           </li>
           <li>
             <span class="check-icon"><Check :size="14" /></span>
-            <span>안심하고 쓰는 보안</span>
+            <span>창작에만 집중할 수 있는 환경</span>
+          </li>
+          <li>
+            <span class="check-icon"><Check :size="14" /></span>
+            <span>당신만의 웹 프로젝트를 시작하세요</span>
           </li>
         </ul>
       </div>

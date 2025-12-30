@@ -11,30 +11,64 @@ import * as Content from '@/components/categories/Content.vue'
 import * as Style from '@/components/categories/Style.vue'
 import * as Interaction from '@/components/categories/Interaction.vue'
 import * as Flow from '@/components/categories/Flow.vue'
+import * as Logic from '@/components/categories/Logic.vue'
+import * as Form from '@/components/categories/Form.vue'
+import * as Responsive from '@/components/categories/Responsive.vue'
 
 // ===== 상태 관리 =====
 const activeTab = ref(null)
 const generatedCode = ref('')
 const previewSrc = ref('')
-const activeRightTab = ref('objects') 
+const activeRightTab = ref('objects')
 const isRunning = ref(false)
 let workspace = null
 
-// [AI 관련 상태]
+// [AI 관련 상태 (프록시 사용)]
 const showAiModal = ref(false)
 const aiPrompt = ref('')
 const isGenerating = ref(false)
-const apiKey = ref('') // ⚠️ 실제 사용시엔 여기에 키를 넣거나, 모달창에서 입력받으세요.
+const aiPromptError = ref(false);
 
-// 더미 데이터
+// 페이지 및 객체 상태
+// 고유한 페이지 ID 생성기
+const generateUniquePageId = () => {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `page-${crypto.randomUUID()}`
+    }
+  } catch (e) {
+    // ignore and fallback
+  }
+  return `page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`
+}
+
 const pages = ref([
-  { id: 'page1', name: '메인화면 (Home)' },
-  { id: 'page2', name: '로그인 (Login)' }
+  { id: generateUniquePageId(), name: '메인화면 (Home)', xml: '<xml></xml>' },
+  { id: generateUniquePageId(), name: '로그인 (Login)', xml: '<xml></xml>' }
 ])
-const objects = ref([
-  { id: 'obj1', name: '헤더 섹션', type: 'section' },
-  { id: 'obj2', name: '가입 버튼', type: 'button' }
-])
+const selectedPageId = ref(pages.value[0].id)
+const objects = ref([])
+
+const editingPageId = ref(null)
+const editingPageName = ref('')
+
+// 로컬 스토리지 유틸
+const loadPagesFromStorage = () => {
+  try {
+    const raw = localStorage.getItem('wc_pages')
+    return raw ? JSON.parse(raw) : null
+  } catch (e) {
+    console.warn('loadPagesFromStorage failed', e)
+    return null
+  }
+}
+const savePagesToStorage = () => {
+  try {
+    localStorage.setItem('wc_pages', JSON.stringify(pages.value))
+  } catch (e) {
+    console.warn('savePagesToStorage failed', e)
+  }
+}
 
 watch(objects, (newObjects) => {
   if (Interaction.updateObjectList) {
@@ -42,21 +76,71 @@ watch(objects, (newObjects) => {
   }
 }, { deep: true, immediate: true });
 
+// Blockly 워크스페이스에서 객체 목록 업데이트
+const updateObjectListFromWorkspace = () => {
+  if (!workspace) return;
+  const currentObjects = [];
+  const blocks = workspace.getAllBlocks(false); // 최상위 블록만 가져오기
+
+  // interaction(스크립트) 블록 타입은 객체 목록에서 제외
+  const ignoredTypes = new Set(['event_click', 'event_page_load', 'action_alert']);
+
+  blocks.forEach(block => {
+    let name = '';
+    let type = block.type;
+
+    // 1. [기존] interaction 블록 무시
+    if (ignoredTypes.has(block.type)) return;
+
+    // 2. [추가됨] 스타일 블록(style_로 시작)도 객체 목록에서 숨김 처리 ✨
+    if (block.type.startsWith('style_')) return; 
+
+    // 우선 NAME 필드가 있으면 사용
+    const nameField = block.getFieldValue && block.getFieldValue('NAME')
+    if (nameField) {
+      name = nameField
+    } else {
+      switch (block.type) {
+        case 'layout_div':
+          name = block.getFieldValue('ELEMENT_CLASS') ? `DIV (${block.getFieldValue('ELEMENT_CLASS')})` : 'DIV';
+          break;
+        case 'content_button':
+          name = `버튼 (${block.getFieldValue('LABEL')})`;
+          break;
+        case 'content_text':
+          name = `텍스트 (${(block.getFieldValue('TEXT')||'').substring(0, 10)}...)`;
+          break;
+        case 'content_image':
+          name = `이미지 (${(block.getFieldValue('SRC')||'').substring(0, 15)}...)`;
+          break;
+        default:
+          name = block.type;
+          break;
+      }
+    }
+    currentObjects.push({ id: block.id, name: name, type: type });
+  });
+  objects.value = currentObjects;
+  if (Interaction.updateObjectList) {
+    Interaction.updateObjectList(currentObjects);
+  }
+};
+
 // ===== 카테고리 정의 =====
 const categories = {
-  interaction: Interaction.category,
-  layout: Layout.category,
-  content: Content.category,
-  style: Style.category,
-  flow: Flow.category,
-  page:        { label: '페이지',   color: '#8d6e63', icon: '🗂️' },
-  form:        { label: '폼',      color: '#43a047', icon: '📝' },
-  data:        { label: '데이터',   color: '#26a69a', icon: '🔗' },
-  responsive:  { label: '반응형',   color: '#0091ea', icon: '📱' },
-  animation:   { label: '애니메이션', color: '#ff6f00', icon: '✨' },
-  component:   { label: '컴포넌트', color: '#5c6bc0', icon: '🧱' },
-  seo:         { label: 'SEO',      color: '#607d8b', icon: '🔍' },
-  advanced:    { label: '고급',     color: '#424242', icon: '⚙️' }
+  layout: Layout.category,      // 구조 (📏)
+  content: Content.category,    // 콘텐츠 (🧩)
+  style: Style.category,        // 스타일 (🎨)
+  flow: Flow.category,          // 흐름 (🔄)
+  logic: Logic.category,        // 조건 (🔗)
+  interaction: Interaction.category, // 상호작용 (🖱️)
+  form: Form.category,          // 폼 (📝)
+  data: { label: '데이터', color: '#26a69a', icon: '💾' },
+  responsive: Responsive.category, // 반응형 (📱)
+  animation: { label: '애니메이션', color: '#ff6f00', icon: '✨' },
+  component: { label: '컴포넌트', color: '#5c6bc0', icon: '🧱' },
+  seo: { label: 'SEO', color: '#607d8b', icon: '🔍' },
+  advanced: { label: '고급', color: '#424242', icon: '⚙️' }
 }
 
 const toolboxXMLs = {
@@ -65,6 +149,9 @@ const toolboxXMLs = {
   style: Style.toolbox,
   interaction: Interaction.toolbox,
   flow: Flow.toolbox,
+  logic: Logic.toolbox,
+  form: Form.toolbox,
+  responsive: Responsive.toolbox,
   empty: `<xml></xml>`
 }
 
@@ -74,6 +161,9 @@ const defineCustomBlocks = () => {
   Style.defineBlocks()
   Interaction.defineBlocks()
   Flow.defineBlocks()
+  Logic.defineBlocks()
+  Form.defineBlocks()
+  Responsive.defineBlocks()
 }
 
 // ============================================================
@@ -81,70 +171,44 @@ const defineCustomBlocks = () => {
 // ============================================================
 
 const callOpenAI = async () => {
-  if (!aiPrompt.value) return alert("만들고 싶은 내용을 적어주세요!");
-  if (!apiKey.value) return alert("OpenAI API Key를 입력해주세요.");
+  aiPromptError.value = false;
+
+  if (!aiPrompt.value) {
+    aiPromptError.value = true;
+    return;
+  }
 
   isGenerating.value = true;
 
-  // [중요] 시스템 프롬프트: AI에게 우리 블록의 'type' 이름을 알려주는 역할
-  // 실제 Layout.vue, Content.vue 등에서 정의한 블록 type 이름과 일치해야 합니다.
-  const systemPrompt = `
-    You are a Blockly XML generator assistant. 
-    User will describe a web page structure. 
-    You must output ONLY valid XML code compatible with Blockly.
-    Do NOT include any markdown formatting (like \`\`\`xml). 
-    
-    Available Block Types (Use these exact names):
-    - Structure: layout_section, layout_div, layout_row, layout_col
-    - Elements: content_text, content_button, content_image, content_input
-    - Style: style_css
-    
-    Rules:
-    1. Nest blocks correctly using <statement name="DO">.
-    2. Set fields using <field name="TEXT"> or appropriate field names.
-    3. Output minimal standard Blockly XML starting with <xml>.
-  `;
+  const systemPrompt = `You are a Blockly XML generator assistant. User will describe a web page structure. You must output ONLY valid Blockly-compatible XML starting with <xml>. Do NOT include markdown formatting.`;
+  const promptText = `${systemPrompt}\n\nUser: Create XML blocks for: ${aiPrompt.value}`;
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey.value}`
-      },
-      body: JSON.stringify({
-        model: "gpt-3.5-turbo", 
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: `Create XML blocks for: ${aiPrompt.value}` }
-        ],
-        temperature: 0.2
-      })
+    // 서버 프록시 엔드포인트로 요청
+    const resp = await fetch('/api/gemini/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: promptText })
     });
 
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(data.error.message);
+    if (!resp.ok) {
+      const err = await resp.text();
+      throw new Error(err || `Proxy request failed: ${resp.status}`);
     }
 
-    let xmlText = data.choices[0].message.content;
-    
-    // AI가 가끔 마크다운(```xml ... ```)을 붙일 때가 있어서 제거
-    xmlText = xmlText.replace(/```xml/g, '').replace(/```/g, '').trim();
+    const data = await resp.json();
+    const xmlText = (data && data.xml) ? data.xml : '';
+    if (!xmlText) throw new Error('Proxy returned empty xml');
 
-    console.log("AI Generated XML:", xmlText); // 디버깅용
-
-    // [핵심] 텍스트를 실제 블록으로 변환하여 워크스페이스에 추가
-    const xmlDom = Blockly.utils.xml.textToDom(xmlText);
+    const cleaned = xmlText.replace(/```xml/g, '').replace(/```/g, '').trim();
+    const xmlDom = Blockly.utils.xml.textToDom(cleaned);
     Blockly.Xml.domToWorkspace(xmlDom, workspace);
-    
+
     showAiModal.value = false;
     aiPrompt.value = '';
-
   } catch (error) {
     console.error(error);
-    alert("AI 생성 실패: " + error.message);
+    alert('AI 생성 실패: ' + (error.message || JSON.stringify(error)));
   } finally {
     isGenerating.value = false;
   }
@@ -163,8 +227,12 @@ const updatePreview = () => {
   const fullCode = generatedCode.value;
 
   if (isRunning.value) {
+    // [실행 모드] 모든 코드 적용 (스크립트 실행됨)
     previewSrc.value = fullCode;
   } else {
+    // [디자인 모드] 복잡한 줄 단위 필터링 제거! 
+    // removeScripts 함수가 <script> 태그만 깔끔하게 지워줍니다.
+    // 따라서 <style>과 HTML은 그대로 남아서 화면에 보입니다.
     previewSrc.value = removeScripts(fullCode);
   }
 }
@@ -195,19 +263,71 @@ onMounted(async () => {
     trashcan: true
   });
 
-  workspace.addChangeListener((e) => {
-    if (e.type === Blockly.Events.UI) return;
-    try {
-      const code = pythonGenerator.workspaceToCode(workspace);
-      generatedCode.value = code;
-      if (!isRunning.value) {
-        updatePreview();
-      }
-    } catch (e) {
-      console.warn(e);
-    }
-  });
+  let saveTimer = null;
+  const scheduleSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      saveCurrentWorkspaceToPage();
+    }, 600);
+  }
 
+workspace.addChangeListener((e) => {
+  if (e.type === Blockly.Events.UI) return;
+  try {
+    let code = pythonGenerator.workspaceToCode(workspace);
+    
+    // [추가] 모든 한 줄 주석(//)과 그 뒤의 내용을 삭제합니다.
+    code = code.replace(/\/\/.*$/gm, ''); 
+    
+    // [추가] 빈 줄이 너무 많아지면 정리 (선택 사항)
+    code = code.replace(/^\s*[\r\n]/gm, '');
+
+    generatedCode.value = code;
+    updatePreview();
+    updateObjectListFromWorkspace();
+    scheduleSave();
+  } catch (e) {
+    console.warn(e);
+  }
+});
+
+  // 로컬 스토리지에서 페이지 로드 (있으면 덮어씀)
+  const stored = loadPagesFromStorage();
+  if (stored && Array.isArray(stored) && stored.length > 0) {
+    // 정규화: 각 페이지에 고유한 id를 보장합니다.
+    const seen = new Set();
+    const normalized = stored.map(p => {
+      const copy = { ...p };
+      if (!copy.id || seen.has(copy.id)) {
+        let newId = generateUniquePageId();
+        while (seen.has(newId)) {
+          newId = generateUniquePageId();
+        }
+        copy.id = newId;
+      }
+      seen.add(copy.id);
+      return copy;
+    });
+    pages.value = normalized;
+    // 보정된 id를 저장하여 이후 중복 문제를 예방
+    savePagesToStorage();
+  }
+  // 선택된 페이지 초기값
+  if (!selectedPageId.value && pages.value.length > 0) selectedPageId.value = pages.value[0].id;
+
+  // 선택된 페이지 불러오기
+  if (pages.value.length > 0) {
+    const initial = pages.value.find(p => p.id === selectedPageId.value) || pages.value[0];
+    try {
+      const xmlDom = Blockly.utils.xml.textToDom(initial.xml || '<xml></xml>');
+      Blockly.Xml.domToWorkspace(xmlDom, workspace);
+    } catch (e) {
+      console.warn('Failed to load initial page xml', e);
+    }
+  }
+
+  // 초기 로드 시에도 객체 목록 업데이트
+  updateObjectListFromWorkspace();
   generatedCode.value = pythonGenerator.workspaceToCode(workspace);
   updatePreview();
 
@@ -217,15 +337,124 @@ onMounted(async () => {
 const toggleCategory = (key) => {
   if (activeTab.value === key) {
     activeTab.value = null;
+    try {
+      workspace.updateToolbox(toolboxXMLs.empty);
+    } catch (e) {
+      // workspace may not be ready yet
+    }
   } else {
     activeTab.value = key;
     workspace.updateToolbox(toolboxXMLs[key] || toolboxXMLs.empty);
   }
 }
 
+const closeCategory = (key) => {
+  if (activeTab.value !== key) return;
+  activeTab.value = null;
+  try {
+    workspace.updateToolbox(toolboxXMLs.empty);
+  } catch (e) {
+    // ignore if workspace not ready
+  }
+}
+
+// 현재 워크스페이스 XML을 선택된 페이지에 저장
+const saveCurrentWorkspaceToPage = () => {
+  if (!workspace || !selectedPageId.value) return;
+  try {
+    const dom = Blockly.Xml.workspaceToDom(workspace);
+    const xmlText = Blockly.Xml.domToText(dom);
+    const idx = pages.value.findIndex(p => p.id === selectedPageId.value);
+    if (idx !== -1) {
+      pages.value[idx].xml = xmlText;
+      savePagesToStorage();
+    }
+  } catch (e) {
+    console.warn('saveCurrentWorkspaceToPage failed', e);
+  }
+}
+
+const loadPageById = (pageId) => {
+  if (!workspace) return;
+  const page = pages.value.find(p => p.id === pageId);
+  if (!page) return;
+  try {
+    workspace.clear();
+    const xmlText = page.xml || '<xml></xml>';
+    const xmlDom = Blockly.utils.xml.textToDom(xmlText);
+    Blockly.Xml.domToWorkspace(xmlDom, workspace);
+    selectedPageId.value = pageId;
+    updateObjectListFromWorkspace();
+    generatedCode.value = pythonGenerator.workspaceToCode(workspace);
+    updatePreview();
+  } catch (e) {
+    console.warn('loadPageById failed', e);
+  }
+}
+
+const selectPage = (pageId) => {
+  if (pageId === selectedPageId.value) return;
+  // 현재 저장
+  saveCurrentWorkspaceToPage();
+  loadPageById(pageId);
+}
+
+const deletePage = (pageId) => {
+  const idx = pages.value.findIndex(p => p.id === pageId);
+  if (idx === -1) return;
+  if (pages.value.length <= 1) {
+    alert('최소 하나의 페이지가 필요합니다.');
+    return;
+  }
+  pages.value.splice(idx, 1);
+  savePagesToStorage();
+  if (selectedPageId.value === pageId) {
+    const next = pages.value[0];
+    if (next) loadPageById(next.id);
+  }
+}
+
 const addPage = () => {
-  const newId = `page${pages.value.length + 1}`;
-  pages.value.push({ id: newId, name: `새 페이지 ${pages.value.length + 1}` });
+  // 현재 워크스페이스 저장
+  saveCurrentWorkspaceToPage();
+  let newId = generateUniquePageId();
+  while (pages.value.find(p => p.id === newId)) {
+    newId = generateUniquePageId();
+  }
+  const newPage = { id: newId, name: `새 페이지`, xml: '<xml></xml>' };
+  pages.value.push(newPage);
+  savePagesToStorage();
+  loadPageById(newId);
+}
+
+const startEditPageName = (page) => {
+  editingPageId.value = page.id
+  editingPageName.value = page.name
+  // focus the newly rendered input
+  nextTick(() => {
+    const el = document.querySelector('.page-edit-input')
+    if (el) el.focus()
+  })
+}
+
+const commitEditPageName = (pageId) => {
+  const id = pageId || editingPageId.value
+  console.log('commitEditPageName', id, editingPageName.value)
+  const idx = pages.value.findIndex(p => p.id === id)
+  if (idx === -1) {
+    editingPageId.value = null
+    editingPageName.value = ''
+    return
+  }
+  pages.value[idx].name = editingPageName.value || '새 페이지'
+  savePagesToStorage()
+  editingPageId.value = null
+  editingPageName.value = ''
+}
+
+const cancelEditPageName = () => {
+  editingPageId.value = null
+  editingPageName.value = ''
 }
 </script>
 
@@ -241,9 +470,9 @@ const addPage = () => {
             <div class="control-buttons">
               <button class="btn-ai" @click="showAiModal = true">✨ AI</button>
 
-              <button 
-                class="btn-toggle" 
-                :class="{ 'running': isRunning }" 
+              <button
+                class="btn-toggle"
+                :class="{ 'running': isRunning }"
                 @click="toggleRun"
               >
                 {{ isRunning ? '⏹ 정지' : '▶ 시작' }}
@@ -258,7 +487,7 @@ const addPage = () => {
           
           <div class="browser-mockup">
             <div class="url-bar">https://web-crafter.app/preview</div>
-            <iframe id="previewFrame" :srcdoc="previewSrc" frameborder="0"></iframe>
+            <iframe id="previewFrame" :srcdoc="previewSrc" frameborder="0" sandbox="allow-same-origin allow-scripts allow-modals"></iframe>
           </div>
         </div>
 
@@ -275,16 +504,32 @@ const addPage = () => {
               <button class="btn-add-mini" @click="addPage">➕ 추가</button>
             </div>
             <ul class="item-list">
-              <li v-for="page in pages" :key="page.id" class="list-item">
+              <li v-for="page in pages" :key="page.id" class="list-item" :class="{ 'active': selectedPageId === page.id }" @click="editingPageId === page.id ? null : selectPage(page.id)">
                 <span class="item-icon">📄</span>
-                <span class="item-name">{{ page.name }}</span>
-                <button class="btn-del">✕</button>
+                <template v-if="editingPageId === page.id">
+                  <input
+                    class="page-edit-input"
+                    v-model="editingPageName"
+                    @blur="commitEditPageName()"
+                    @click.stop
+                    @keydown.enter.prevent="commitEditPageName()"
+                    @keydown.esc.prevent="cancelEditPageName()"
+                    ref="pageEdit"
+                    />
+                </template>
+                <template v-else>
+                  <span class="item-name" @dblclick.stop="startEditPageName(page)">{{ page.name }}</span>
+                </template>
+                <button class="btn-del" @click.stop="deletePage(page.id)">✕</button>
               </li>
             </ul>
           </div>
 
           <div v-if="activeRightTab === 'objects'" class="tab-content">
-            <div class="empty-msg" v-if="objects.length === 0">배치된 요소가 없습니다.</div>
+            <div class="empty-msg" v-if="objects.length === 0">
+              <p>배치된 요소가 없습니다.</p>
+              <p class="text-sm text-gray-500 mt-2">블록을 사용하여 요소를 추가해 보세요!</p>
+            </div>
             <ul class="item-list" v-else>
               <li v-for="obj in objects" :key="obj.id" class="list-item">
                 <span class="item-icon">💠</span>
@@ -302,11 +547,12 @@ const addPage = () => {
 
       <nav class="sidebar">
         <div v-for="(cat, key) in categories" :key="key"
-             class="cat-item" :class="{ active: activeTab === key }"
-             @click="toggleCategory(key)">
+            class="cat-item" :class="{ active: activeTab === key }"
+            @click="toggleCategory(key)">
           <div class="icon">{{ cat.icon }}</div>
           <div class="label">{{ cat.label }}</div>
           <div class="indicator" :style="{ backgroundColor: cat.color }"></div>
+          <button v-if="activeTab === key" class="cat-close" @click.stop="closeCategory(key)">✕</button>
         </div>
       </nav>
 
@@ -320,9 +566,15 @@ const addPage = () => {
         <h3>✨ AI로 페이지 만들기</h3>
         <p class="desc">원하는 디자인을 설명하면 블록을 조립해줍니다.<br>(예: "로그인 버튼이 있는 파란색 섹션을 만들어줘")</p>
         
-        <input v-model="apiKey" type="password" placeholder="OpenAI API Key (sk-...)" class="api-input"/>
+        <p class="desc">서버 프록시를 사용합니다. API 키는 서버에서 관리하세요.</p>
         
-        <textarea v-model="aiPrompt" placeholder="요청사항 입력..." class="ai-textarea"></textarea>
+        <textarea 
+          v-model="aiPrompt" 
+          placeholder="요청사항 입력..." 
+          class="ai-textarea" 
+          :class="{ 'input-error': aiPromptError }"
+        ></textarea>
+        <p v-if="aiPromptError" class="error-message">만들고 싶은 내용을 적어주세요!</p>
         
         <div class="modal-actions">
           <button @click="showAiModal = false" class="btn-cancel">취소</button>
@@ -350,11 +602,14 @@ const addPage = () => {
 .indicator { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; display: none; }
 .cat-item.active .indicator { display: block; }
 
+.cat-close { position: absolute; right: 6px; top: 6px; background: transparent; border: none; color: #ccc; cursor: pointer; padding: 4px; border-radius: 4px; font-size: 0.8rem; }
+.cat-close:hover { background: rgba(255,255,255,0.06); color: white; }
+
 .workspace-wrapper { flex: 1; position: relative; background: #fff; transition: all 0.3s ease; }
 #blocklyDiv { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
 
-:deep(.blocklyToolboxDiv) { background-color: #f9f9f9; border-right: 1px solid #ddd; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); transform-origin: left top; width: auto !important; max-width: 300px; min-width: 50px; opacity: 1; overflow: hidden; white-space: nowrap; display: block !important; transform: scaleX(1); }
-.workspace-wrapper:not(.drawer-open) :deep(.blocklyToolboxDiv) { min-width: 0px !important; width: 0px !important; max-width: 0px !important; transform: scaleX(0); padding: 0 !important; border: none !important; opacity: 0; pointer-events: none; }
+:deep(.blocklyToolboxDiv) { background-color: #f9f9f9; border-right: 1px solid #ddd; transform-origin: left top; width: auto !important; max-width: 300px; min-width: 50px; opacity: 1; overflow: hidden; white-space: nowrap; display: block !important; transform: scaleX(1); transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 200ms ease-in-out, width 260ms ease-in-out; }
+.workspace-wrapper:not(.drawer-open) :deep(.blocklyToolboxDiv) { min-width: 0px !important; width: 0px !important; max-width: 0px !important; transform: scaleX(0); padding: 0 !important; border: none !important; opacity: 0; pointer-events: none; background: transparent !important; }
 
 .entry-panel { width: 360px; background: #f5f5f5; border-left: 1px solid #252535; display: flex; flex-direction: column; flex-shrink: 0; z-index: 30; }
 .preview-section { flex: 1; background: #1a1a2e; padding: 10px; display: flex; flex-direction: column; border-bottom: 1px solid #252535; }
@@ -408,6 +663,14 @@ iframe { flex: 1; width: 100%; height: 100%; border: none; background: white; }
 .btn-cancel { background: #ddd; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
 .btn-generate { background: #9c27b0; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; }
 .btn-generate:disabled { background: #ccc; cursor: not-allowed; }
+
+.input-error { border-color: #f44336; box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2); }
+.error-message { color: #f44336; font-size: 0.75rem; margin-top: -8px; margin-bottom: 10px; }
+
+.page-edit-input { width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; }
+
+.list-item.active { background: #eaf4ff; border-color: #4c97ff; box-shadow: inset 4px 0 0 #4c97ff; }
+.list-item.active .item-name { font-weight: 700; color: #0b3d91; }
 
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 </style>

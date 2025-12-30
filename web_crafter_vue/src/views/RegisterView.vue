@@ -49,6 +49,18 @@ const formData = ref({
   confirmPassword: '',
 })
 
+/* =====================
+공백 입력 불가능하게 처리
+========================*/
+// 모든 공백(스페이스/탭/줄바꿈) 제거
+const removeAllSpaces = (v) => (v ?? '').replace(/\s+/g, '')
+
+// v-model 값 자체를 "공백 없는 값"으로 강제
+const enforceNoSpace = (field) => {
+  formData.value[field] = removeAllSpaces(formData.value[field])
+}
+
+
 /* ======================
    필드별 에러 (말풍선)
 ====================== */
@@ -170,18 +182,54 @@ const closeModal = async () => {
   }
 }
 
+
 /* ======================
    상태 관리
 ====================== */
-const isLoading = ref(false)
+const isLoading = ref(false) 
+// ✅ 회원가입 요청 처리중 여부
+// - true면 회원가입 버튼 비활성화 + "계정 생성중..." 로딩 UI 표시
+// - handleRegister() 시작에서 true, finally에서 false로 복구
+
 const errorMessage = ref('')
+// ✅ 폼 하단에 띄울 커스텀 말풍선 “전체 에러 메시지”용 문자열
+// - v-if="errorMessage"로 화면에 보여줄 때 사용
+// - 현재 코드에선 거의 안 쓰고(대부분 openModal 사용), 필요하면 catch에서 설정 가능
+
 const showPassword = ref(false)
+// ✅ 비밀번호 input 표시/숨김 토글 상태
+// - true면 type="text", false면 type="password"
+// - Eye/EyeOff 아이콘 토글에 사용
+
 const showConfirmPassword = ref(false)
+// ✅ 비밀번호 확인 input 표시/숨김 토글 상태
+// - 동작은 showPassword와 동일하지만 confirmPassword용
+
 const passwordStrength = ref(0)
-const passwordGuide = ref('') // 안전/위험 안내 말풍선
+// ✅ 비밀번호 강도 점수(0~4)
+// - validatePassword()에서 계산
+// - 강도 바(%)와 라벨(Weak~Very Strong) 표시 기준 값
+
+const passwordGuide = ref('')
+// ✅ 비밀번호 입력 중에만 보여주는 안내 말풍선 문구
+// - handlePasswordInput()에서 strength 기반으로 "안전/위험" 문구 넣음
+// - blur 시 validateField('password','blur')에서 ''로 비워서 숨김 처리
+
 const isNicknameChecking = ref(false)
-const nicknameChecked = ref(false) // 중복체크 했는지
-const nicknameAvailable = ref(false) // 사용 가능한지
+// ✅ 닉네임 중복체크 API 요청중인지 여부
+// - true면 버튼 disabled + 로딩 스피너/“확인중” 표시
+// - checkNickname() try에서 true, finally에서 false
+
+const nicknameChecked = ref(false)
+// ✅ 사용자가 “중복체크를 한 적이 있는가” 상태
+// - 닉네임 입력이 바뀌면 false로 초기화(handleNicknameInput)
+// - 중복체크 API 성공 응답 오면 true로 변경
+
+const nicknameAvailable = ref(false)
+// ✅ 현재 닉네임이 “사용 가능한 상태인지” 여부
+// - 중복체크 결과로 결정(res.data.available)
+// - true면 버튼 라벨 "사용가능" 표시 + 버튼 disabled + 초록색 처리
+// - 닉네임을 다시 수정하면 false로 초기화(handleNicknameInput)
 
 // 닉네임 입력이 바뀌면 중복체크 초기화
 const handleNicknameInput = () => {
@@ -257,14 +305,14 @@ const checkNickname = async () => {
   }
 }
 
-// 모달 열려있을때 닉네임 중복체크 중복요청 방지
+// 모달 열린상태로 엔터 누를때 닉네임 중복체크 중복요청 방지
 const onEnterNickname = () => {
   if (modal.value.open) return
   if (nicknameAvailable.value) return // 사용가능일때 막기
   checkNickname()
 }
 
-// 닉네임 버튼 라벨
+// 상황에 따른 닉네임 버튼 라벨
 const getNicknameButtonLabel = () => {
   if (nicknameAvailable.value) return '사용가능'
   return '중복체크'
@@ -569,11 +617,11 @@ const handleRegister = async () => {
     isLoading.value = true
 
     const payload = {
-      firstName: formData.value.firstName,
-      lastName: formData.value.lastName,
+      firstName: formData.value.firstName.trim(),
+      lastName: formData.value.lastName.trim(),
       nickname: formData.value.nickname.trim(),
-      email: formData.value.email,
-      password: formData.value.password,
+      email: formData.value.email.trim(),
+      password: formData.value.password.trim(),
     }
 
     await api.post('/member/register', payload)
@@ -642,7 +690,7 @@ const getEmailButtonLabel = () => {
                   placeholder="CHA"
                   class="form-input"
                   @blur="validateField('firstName', 'blur')"
-                  @input="fieldErrors.firstName = ''"
+                  @input="enforceNoSpace('firstName'); fieldErrors.firstName = ''"
                 />
                 <div v-if="fieldErrors.firstName" class="error-tooltip">
                   <TriangleAlert class="tooltip-icon" :size="14" />
@@ -663,7 +711,7 @@ const getEmailButtonLabel = () => {
                   placeholder="EUNWOO"
                   class="form-input"
                   @blur="validateField('lastName', 'blur')"
-                  @input="fieldErrors.lastName = ''"
+                  @input="enforceNoSpace('lastName'); fieldErrors.lastName = ''"
                 />
                 <div v-if="fieldErrors.lastName" class="error-tooltip">
                   <TriangleAlert class="tooltip-icon" :size="14" />
@@ -687,13 +735,14 @@ const getEmailButtonLabel = () => {
                 placeholder="닉네임을 입력하세요"
                 class="form-input has-right-btn"
                 @blur="validateField('nickname', 'blur')"
-                @input="handleNicknameInput"
+                @input="enforceNoSpace('nickname'); handleNicknameInput()"
                 @keydown.enter.prevent="onEnterNickname"
               />
 
               <button
                 type="button"
                 class="email-verify-btn"
+                :class="{ 'is-available': nicknameAvailable }"
                 :disabled="isNicknameChecking || nicknameAvailable"
                 @click="checkNickname"
               >
@@ -722,11 +771,11 @@ const getEmailButtonLabel = () => {
                 id="email"
                 ref="emailRef"
                 v-model="formData.email"
-                type="email"
+                type="text"
                 placeholder="you@example.com"
                 class="form-input has-right-btn"
                 @blur="validateField('email', 'blur')"
-                @input="handleEmailInput"
+                @input="enforceNoSpace('email'); handleEmailInput()"
                 @keydown.enter.prevent="onEnterEmail"
               />
 
@@ -734,6 +783,7 @@ const getEmailButtonLabel = () => {
               <button
                 type="button"
                 class="email-verify-btn"
+                :class="{ 'is-verified': emailVerified }"
                 :disabled="isEmailSending || emailVerified"
                 @click="requestEmailVerification"
                 :title="emailVerified ? '이미 인증 완료' : ''"
@@ -767,6 +817,8 @@ const getEmailButtonLabel = () => {
                   placeholder="인증번호 6자리"
                   class="form-input has-right-btn"
                   :disabled="isExpired"
+                  maxlength="6"
+                  @input="verificationCodeInput = removeAllSpaces(verificationCodeInput)"
                   @keydown.enter.prevent="onEnterVerificationCode"
                 />
 
@@ -801,7 +853,7 @@ const getEmailButtonLabel = () => {
                 placeholder="Create a strong password"
                 class="form-input"
                 @blur="validateField('password', 'blur')"
-                @input="handlePasswordInput"
+                @input="enforceNoSpace('password'); handlePasswordInput()"
               />
               <button
                 type="button"
@@ -856,7 +908,7 @@ const getEmailButtonLabel = () => {
                 placeholder="Confirm your password"
                 class="form-input"
                 @blur="validateField('confirmPassword', 'blur')"
-                @input="fieldErrors.confirmPassword = ''"
+                @input="enforceNoSpace('confirmPassword'); fieldErrors.confirmPassword = ''"
                 required
               />
               <button
@@ -909,7 +961,7 @@ const getEmailButtonLabel = () => {
       <div class="info-card">
         <div class="info-header">
           <span class="info-icon"><Rocket :size="22" /></span>
-          <h3>계정을 생성하세요!</h3>
+          <h3>블록으로 웹을 만들어보세요!</h3>
         </div>
         <ul class="info-list">
           <li>
@@ -918,15 +970,19 @@ const getEmailButtonLabel = () => {
           </li>
           <li>
             <span class="check-icon"><Check :size="16" /></span>
-            <span>결제 수단 등록 필요 없음</span>
+            <span>코드 블록을 조합해 웹사이트를 제작</span>
           </li>
           <li>
             <span class="check-icon"><Check :size="16" /></span>
-            <span>모든 도구를 즉시 사용하세요!</span>
+            <span>코딩 지식 없이도 바로 시작 가능</span>
           </li>
           <li>
             <span class="check-icon"><Check :size="16" /></span>
-            <span>끊김 없는 고객 서포트</span>
+            <span>실시간 미리보기로 결과 확인</span>
+          </li>
+          <li>
+            <span class="check-icon"><Check :size="16" /></span>
+            <span>내가 만든 웹사이트를 바로 실행</span>
           </li>
         </ul>
       </div>
@@ -1498,9 +1554,20 @@ const getEmailButtonLabel = () => {
   border-color: rgba(0, 212, 255, 0.45);
 }
 
+/* 닉네임 중복체크, 이메일 인증버튼 검증완료시 살짝 투명하게 */
 .email-verify-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.75;
   cursor: not-allowed;
+}
+
+/* 닉네임 버튼 사용가능일때 색 변경 */
+.email-verify-btn.is-available:disabled {
+  color: rgba(51, 255, 153, 1);
+}
+
+/* 이메일 인증버튼 인증완료일때 색 변경 */
+.email-verify-btn.is-verified:disabled {
+  color: rgba(51, 255, 153, 1);
 }
 
 /* 전송중 표시 */

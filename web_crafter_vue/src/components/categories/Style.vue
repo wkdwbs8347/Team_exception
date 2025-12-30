@@ -1,17 +1,17 @@
 <script>
 import * as Blockly from 'blockly'
+// 파이썬 생성기 사용 (원하시는 대로 유지)
 import { pythonGenerator } from 'blockly/python'
 
-// ===== Style 카테고리 메타데이터 =====
 export const category = {
   label: '스타일',
   color: '#ab47bc',
   icon: '🎨'
 }
 
-// ===== Style 툴박스 XML =====
 export const toolbox = `
 <xml>
+  <block type="style_tag"></block>
   <block type="style_color"></block>
   <block type="style_size"></block>
   <block type="style_padding"></block>
@@ -20,10 +20,35 @@ export const toolbox = `
 </xml>
 `
 
-// ===== Style 블록 정의 및 코드 생성기 =====
 export const defineBlocks = () => {
-  
-  // [1] 색상 설정 (배경색 + 텍스트 색)
+
+  /* ===== style_tag: 부모 블록 (껍데기 담당) ===== */
+  if (!Blockly.Blocks['style_tag']) {
+    Blockly.Blocks['style_tag'] = {
+      init() {
+        this.appendDummyInput()
+            .appendField('🎨 스타일')
+            .appendField('적용 대상')
+            .appendField(new Blockly.FieldTextInput('my-element'), 'SELECTOR');
+        this.appendStatementInput('BODY').setCheck(null).appendField('내용');
+        this.setPreviousStatement(false, null);
+        this.setNextStatement(false, null);
+        this.setColour('#ab47bc');
+        this.setTooltip('여기에 스타일 규칙을 넣으세요.');
+        this.setStyle('hat_blocks');
+      }
+    };
+  }
+  pythonGenerator.forBlock['style_tag'] = (block) => {
+    // 1. 여기서만 선택자를 처리합니다.
+    const selector = '.' + (block.getFieldValue('SELECTOR') || '').trim();
+    // 2. 내부 블록들의 코드를 가져옵니다.
+    const body = pythonGenerator.statementToCode(block, 'BODY');
+    // 3. 최종 조립: <style> 선택자 { 내용 } </style>
+    return `<style>\n${selector} {\n${body}}\n</style>\n`;
+  };
+
+  /* ===== style_color: 자식 (속성만 리턴) ===== */
   if (!Blockly.Blocks['style_color']) {
     Blockly.Blocks['style_color'] = {
       init() {
@@ -33,7 +58,6 @@ export const defineBlocks = () => {
             .appendField(new Blockly.FieldTextInput('#ffffff'), "BG_COLOR")
             .appendField("글자")
             .appendField(new Blockly.FieldTextInput('#000000'), "TEXT_COLOR");
-        this.appendStatementInput("CONTENT").setCheck(null);
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setColour('#ab47bc');
@@ -44,11 +68,10 @@ export const defineBlocks = () => {
   pythonGenerator.forBlock['style_color'] = (block) => {
     const bgColor = block.getFieldValue('BG_COLOR');
     const textColor = block.getFieldValue('TEXT_COLOR');
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    return `<div style="background-color:${bgColor}; color:${textColor}; padding:10px;">\n${content}</div>\n`;
+    return `  background-color: ${bgColor};\n  color: ${textColor};\n`;
   };
 
-  // [2] 크기 설정 (너비 + 높이)
+  /* ===== style_size: 자식 (속성만 리턴) ===== */
   if (!Blockly.Blocks['style_size']) {
     Blockly.Blocks['style_size'] = {
       init() {
@@ -58,22 +81,19 @@ export const defineBlocks = () => {
             .appendField(new Blockly.FieldTextInput("200"), "WIDTH")
             .appendField("높이")
             .appendField(new Blockly.FieldTextInput("100"), "HEIGHT");
-        this.appendStatementInput("CONTENT").setCheck(null);
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setColour('#ab47bc');
-        this.setTooltip("너비와 높이 설정 (px)");
       }
     };
   }
   pythonGenerator.forBlock['style_size'] = (block) => {
     const width = block.getFieldValue('WIDTH');
     const height = block.getFieldValue('HEIGHT');
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    return `<div style="width:${width}px; height:${height}px; border:1px solid #ddd;">\n${content}</div>\n`;
+    return `  width: ${width}px;\n  height: ${height}px;\n`;
   };
 
-  // [3] 여백 설정 (padding + margin)
+  /* ===== style_padding: 자식 (속성만 리턴) ===== */
   if (!Blockly.Blocks['style_padding']) {
     Blockly.Blocks['style_padding'] = {
       init() {
@@ -83,22 +103,19 @@ export const defineBlocks = () => {
             .appendField(new Blockly.FieldNumber(20, 0), "PADDING")
             .appendField("바깥")
             .appendField(new Blockly.FieldNumber(10, 0), "MARGIN");
-        this.appendStatementInput("CONTENT").setCheck(null);
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setColour('#ab47bc');
-        this.setTooltip("안쪽 여백(padding)과 바깥 여백(margin) 설정");
       }
     };
   }
   pythonGenerator.forBlock['style_padding'] = (block) => {
     const padding = block.getFieldValue('PADDING');
     const margin = block.getFieldValue('MARGIN');
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    return `<div style="padding:${padding}px; margin:${margin}px; background:#f5f5f5;">\n${content}</div>\n`;
+    return `  padding: ${padding}px;\n  margin: ${margin}px;\n`;
   };
 
-  // [4] 텍스트 정렬
+  /* ===== style_text_align: 자식 (속성만 리턴) ===== */
   if (!Blockly.Blocks['style_text_align']) {
     Blockly.Blocks['style_text_align'] = {
       init() {
@@ -109,21 +126,18 @@ export const defineBlocks = () => {
               ["가운데", "center"],
               ["오른쪽", "right"]
             ]), "ALIGN");
-        this.appendStatementInput("CONTENT").setCheck(null);
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setColour('#ab47bc');
-        this.setTooltip("텍스트 정렬");
       }
     };
   }
   pythonGenerator.forBlock['style_text_align'] = (block) => {
     const align = block.getFieldValue('ALIGN');
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    return `<div style="text-align:${align};">\n${content}</div>\n`;
+    return `  text-align: ${align};\n`;
   };
 
-  // [5] 둥근 모서리
+  /* ===== style_border_radius: 자식 (속성만 리턴) ===== */
   if (!Blockly.Blocks['style_border_radius']) {
     Blockly.Blocks['style_border_radius'] = {
       init() {
@@ -131,18 +145,15 @@ export const defineBlocks = () => {
             .appendField("🔘 둥근 모서리")
             .appendField(new Blockly.FieldNumber(10, 0, 100), "RADIUS")
             .appendField("px");
-        this.appendStatementInput("CONTENT").setCheck(null);
         this.setPreviousStatement(true);
         this.setNextStatement(true);
         this.setColour('#ab47bc');
-        this.setTooltip("모서리를 둥글게");
       }
     };
   }
   pythonGenerator.forBlock['style_border_radius'] = (block) => {
     const radius = block.getFieldValue('RADIUS');
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    return `<div style="border-radius:${radius}px; border:2px solid #ddd; padding:15px; overflow:hidden;">\n${content}</div>\n`;
+    return `  border-radius: ${radius}px;\n`;
   };
 }
 </script>

@@ -21,7 +21,9 @@ export const defineBlocks = () => {
     Blockly.Blocks['layout_div'] = {
       init() {
         this.appendDummyInput()
-          .appendField("Class:")
+          .appendField("DIV 박스");
+        this.appendDummyInput()
+          .appendField("이름:")
           .appendField(new Blockly.FieldTextInput("btn-group"), "ELEMENT_CLASS");
           
         this.appendStatementInput("CONTENT").setCheck(null);
@@ -34,12 +36,19 @@ export const defineBlocks = () => {
 
   // HTML 생성 로직
   pythonGenerator.forBlock['layout_div'] = (block) => {
-    // 입력받은 클래스명 가져오기
-    const className = block.getFieldValue('ELEMENT_CLASS');
+    // 입력받은 클래스명 및 이름 가져오기
+    const className = block.getFieldValue('ELEMENT_CLASS') || '';
+    const name = block.getFieldValue('NAME') || '';
+    const safeName = name.replace(/\"/g, '&quot;');
     const content = pythonGenerator.statementToCode(block, 'CONTENT');
-    
-    // HTML 태그에 class="..." 속성 추가
-    return `<div class="${className}" style="border:1px solid #ccc; padding:10px; margin:5px; cursor:pointer;">\n${content}</div>\n`;
+
+    // class와 data-name 속성 구성 (이름이 있으면 class에 추가하고 data-name도 추가)
+    let classAttr = '';
+    if (className && name) classAttr = ` class=\"${className} ${safeName}\"`;
+    else if (className) classAttr = ` class=\"${className}\"`;
+    else if (name) classAttr = ` class=\"${safeName}\"`;
+
+    return `<div${classAttr} style=\"border:1px solid #ccc; padding:10px; margin:5px; cursor:pointer;\">\n${content}</div>\n`;
   };
 }
 </script>

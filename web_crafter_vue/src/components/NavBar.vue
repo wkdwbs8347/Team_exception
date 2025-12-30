@@ -172,19 +172,18 @@ const handleIdeClick = () => {
   left: 0;
   right: 0;
   z-index: 1000;
-  background: rgba(15, 15, 30, 0.8);
+  background: #1a1a2e;
   backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+  border-bottom: 1px solid #353525;
   transition: all 0.3s ease;
 }
 
 .navbar.scrolled {
-  background: rgba(15, 15, 30, 0.95);
+  background: #1a1a2e;
   box-shadow: 0 4px 20px rgba(0, 212, 255, 0.1);
 }
 
 .navbar-container {
-  max-width: 1200px;
   margin: 0 auto;
   padding: 1rem 2rem;
   display: flex;
