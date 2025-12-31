@@ -4,14 +4,14 @@
 
   [입력 검증]
   1) 로그인 클릭
-     - 이메일 비었음 → 모달(경고) + 이메일 focus
-     - 이메일 형식 오류 → 모달(경고) + 이메일 focus
-     - 비밀번호 비었음 → 모달(경고) + 비밀번호 focus
+    - 이메일 비었음 → 모달(경고) + 이메일 focus
+    - 이메일 형식 오류 → 모달(경고) + 이메일 focus
+    - 비밀번호 비었음 → 모달(경고) + 비밀번호 focus
 
   [서버 로그인]
   2) POST /api/member/login 요청
-     - 존재하지 않는 이메일 → 모달(경고) + email 비움 + 이메일 focus
-     - 비밀번호 불일치 → 모달(경고) + password 비움 + 비밀번호 focus
+    - 존재하지 않는 이메일 → 모달(경고) + email 비움 + 이메일 focus
+    - 비밀번호 불일치 → 모달(경고) + password 비움 + 비밀번호 focus
 
   [성공]
   3) 성공 시 응답에서 nickname 꺼냄
@@ -19,59 +19,63 @@
   5) 모달 확인 누르면 "/" 이동
 */
 
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
-import GlobalModal from '@/modal/GlobalModal.vue'
-import api from '@/api/axios' // baseURL: http://localhost:8080/api (※ 다른 곳에서 쓸 수 있으니 유지)
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue';
+import { useRouter } from 'vue-router';
+import GlobalModal from '@/modal/GlobalModal.vue';
+import api from '@/api/axios'; // baseURL: http://localhost:8080/api (※ 다른 곳에서 쓸 수 있으니 유지)
 import {
-  Sparkles,
   TriangleAlert,
   Mail,
   Lock,
   Eye,
   EyeOff,
-  Palette,
-  Check,
-} from 'lucide-vue-next'
-import { useAuthStore } from '@/stores/auth'
+  Blocks, // 로고
+  LayoutGrid, // 블록 조합
+  Braces, // 코드 생성/구조
+  Monitor, // 미리보기
+  Settings2, // 설정 없이 바로 시작
+  Play, // 실행
+  Github, // GitHub 버튼 아이콘
+} from 'lucide-vue-next';
+import { useAuthStore } from '@/stores/auth';
 
-const auth = useAuthStore()
-const router = useRouter()
+const auth = useAuthStore();
+const router = useRouter();
 
 // 엔터키로 모달 끌 수 있게
 const handleKeydown = (e) => {
   // 모달 열려 있을 때만
-  if (!modal.value.open) return
+  if (!modal.value.open) return;
 
   // Enter 키
   if (e.key === 'Enter') {
-    e.preventDefault()
-    closeModal()
+    e.preventDefault();
+    closeModal();
   }
-}
+};
 
 onMounted(() => {
-  window.addEventListener('keydown', handleKeydown)
-})
+  window.addEventListener('keydown', handleKeydown);
+});
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown)
-})
+  window.removeEventListener('keydown', handleKeydown);
+});
 
 /* ======================
    입력 상태
 ====================== */
-const email = ref('')
-const password = ref('')
-const rememberMe = ref(false) // UI만 유지(로직은 지금 무시)
-const isLoading = ref(false)
-const showPassword = ref(false)
+const email = ref('');
+const password = ref('');
+const rememberMe = ref(false); // UI만 유지(로직은 지금 무시)
+const isLoading = ref(false);
+const showPassword = ref(false);
 
 /* ======================
    input ref (포커스 이동용)
 ====================== */
-const emailRef = ref(null)
-const passwordRef = ref(null)
+const emailRef = ref(null);
+const passwordRef = ref(null);
 
 /* ======================
    커스텀 말풍선 에러 상태 (회원가입 페이지 스타일)
@@ -79,20 +83,20 @@ const passwordRef = ref(null)
 const fieldErrors = ref({
   email: '',
   password: '',
-})
+});
 
 /* ======================
    말풍선: 마지막 blur 필드 (회원가입 페이지 방식)
 ====================== */
-const lastBlurField = ref(null)
+const lastBlurField = ref(null);
 
 // 말풍선 전체 초기화
 const clearAllTooltips = () => {
   Object.keys(fieldErrors.value).forEach((k) => {
-    fieldErrors.value[k] = ''
-  })
-  lastBlurField.value = null
-}
+    fieldErrors.value[k] = '';
+  });
+  lastBlurField.value = null;
+};
 
 /* ======================
    전역 모달 상태
@@ -103,7 +107,7 @@ const modal = ref({
   type: 'info', // info | warning | success | error
   focusField: null, // 'email' | 'password'
   onConfirm: null, // 확인 누른 뒤 실행할 함수(성공 후 이동 등)
-})
+});
 
 /* 모달 열기 */
 const openModal = (
@@ -113,7 +117,7 @@ const openModal = (
   onConfirm = null
 ) => {
   // 모달 띄우기 전: 기존 말풍선 싹 제거
-  clearAllTooltips()
+  clearAllTooltips();
 
   // 포커스 줄 필드가 있으면 그 필드에만 말풍선 표시
   if (
@@ -121,40 +125,40 @@ const openModal = (
     message &&
     (focusField === 'email' || focusField === 'password')
   ) {
-    fieldErrors.value[focusField] = message
-    lastBlurField.value = focusField
+    fieldErrors.value[focusField] = message;
+    lastBlurField.value = focusField;
   }
 
-  modal.value.open = true
-  modal.value.message = message
-  modal.value.type = type
-  modal.value.focusField = focusField
-  modal.value.onConfirm = onConfirm
-}
+  modal.value.open = true;
+  modal.value.message = message;
+  modal.value.type = type;
+  modal.value.focusField = focusField;
+  modal.value.onConfirm = onConfirm;
+};
 
 /* 모달 닫기: onConfirm 우선 실행 → 아니면 focus 이동 */
 const closeModal = async () => {
-  modal.value.open = false
-  await nextTick()
+  modal.value.open = false;
+  await nextTick();
 
   // 성공 모달 등 후처리
   if (modal.value.onConfirm) {
-    const fn = modal.value.onConfirm
-    modal.value.onConfirm = null
-    fn()
-    return
+    const fn = modal.value.onConfirm;
+    modal.value.onConfirm = null;
+    fn();
+    return;
   }
 
   // 경고/에러 모달은 해당 input으로 포커스
-  if (modal.value.focusField === 'email') emailRef.value?.focus()
-  if (modal.value.focusField === 'password') passwordRef.value?.focus()
-  modal.value.focusField = null
-}
+  if (modal.value.focusField === 'email') emailRef.value?.focus();
+  if (modal.value.focusField === 'password') passwordRef.value?.focus();
+  modal.value.focusField = null;
+};
 
 /* ======================
    유틸: 이메일 형식 체크
 ====================== */
-const isValidEmailFormat = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+const isValidEmailFormat = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 
 /* ======================
    단일 필드 검증 (회원가입 페이지 방식)
@@ -163,49 +167,49 @@ const isValidEmailFormat = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
 const validateField = (field, mode = 'blur') => {
   // blur 검증일 때만 "이전 blur 말풍선 제거" 동작
   if (mode === 'blur' && lastBlurField.value && lastBlurField.value !== field) {
-    fieldErrors.value[lastBlurField.value] = ''
+    fieldErrors.value[lastBlurField.value] = '';
   }
 
-  let message = ''
+  let message = '';
 
   if (field === 'email') {
-    const trimmedEmail = email.value.trim()
-    if (!trimmedEmail) message = '이메일을 입력해주세요.'
+    const trimmedEmail = email.value.trim();
+    if (!trimmedEmail) message = '이메일을 입력해주세요.';
     else if (!isValidEmailFormat(trimmedEmail))
-      message = '이메일 형식이 올바르지 않습니다.'
+      message = '이메일 형식이 올바르지 않습니다.';
   }
 
   if (field === 'password') {
-    if (!password.value) message = '비밀번호를 입력해주세요.'
+    if (!password.value) message = '비밀번호를 입력해주세요.';
   }
 
-  fieldErrors.value[field] = message
+  fieldErrors.value[field] = message;
 
   if (mode === 'blur') {
-    lastBlurField.value = field
+    lastBlurField.value = field;
   }
 
-  return !message
-}
+  return !message;
+};
 
 /* ======================
    로그인 요청
 ====================== */
 const handleLogin = async () => {
   // 모달 떠 있으면 Enter로 재submit 방지
-  if (modal.value.open) return
+  if (modal.value.open) return;
 
-  const trimmedEmail = email.value.trim()
+  const trimmedEmail = email.value.trim();
 
   // 프론트 검증: 전부 모달로 처리
   if (!validateField('email', 'submit')) {
-    return openModal(fieldErrors.value.email, 'warning', 'email')
+    return openModal(fieldErrors.value.email, 'warning', 'email');
   }
   if (!validateField('password', 'submit')) {
-    return openModal(fieldErrors.value.password, 'warning', 'password')
+    return openModal(fieldErrors.value.password, 'warning', 'password');
   }
 
-  isLoading.value = true
+  isLoading.value = true;
 
   try {
     // Pinia 전역 상태로 로그인 처리 (로그인 직후 NavBar 즉시 반영)
@@ -213,51 +217,51 @@ const handleLogin = async () => {
       email: trimmedEmail,
       password: password.value,
       rememberMe: rememberMe.value, // 자동로그인 체크 유무
-    })
+    });
 
-    const nickname = auth.nickname || '회원'
+    const nickname = auth.nickname || '회원';
 
     openModal(`${nickname}님 환영합니다.`, 'success', null, () => {
-      router.push('/')
-    })
+      router.push('/');
+    });
   } catch (e) {
     // 실패: 서버 메시지 기반 분기
-    const msg = e?.response?.data?.message || '로그인 실패'
+    const msg = e?.response?.data?.message || '로그인 실패';
 
     // 존재하지 않는 이메일
     if (msg.includes('존재') && msg.includes('이메일')) {
-      fieldErrors.value.email = ''
-      openModal('존재하지 않는 이메일입니다.', 'warning', 'email')
-      return
+      fieldErrors.value.email = '';
+      openModal('존재하지 않는 이메일입니다.', 'warning', 'email');
+      return;
     }
 
     // 비밀번호 불일치
     if (msg.includes('비밀번호') && msg.includes('일치')) {
-      password.value = ''
-      fieldErrors.value.password = ''
-      openModal('비밀번호가 일치하지 않습니다.', 'warning', 'password')
-      return
+      password.value = '';
+      fieldErrors.value.password = '';
+      openModal('비밀번호가 일치하지 않습니다.', 'warning', 'password');
+      return;
     }
 
     // 기타 에러
-    openModal(msg, 'error')
+    openModal(msg, 'error');
   } finally {
-    isLoading.value = false
+    isLoading.value = false;
   }
-}
+};
 
 /* ======================
    비밀번호 토글 UI 동작
 ====================== */
 const togglePasswordVisibility = () => {
-  showPassword.value = !showPassword.value
-}
+  showPassword.value = !showPassword.value;
+};
 
 /* 이메일 찾기 / 비밀번호 찾기 라우팅 */
-const goFindEmail = () => router.push('/find-email')
-const goFindPw = () => router.push('/find-password')
+const goFindEmail = () => router.push('/find-email');
+const goFindPw = () => router.push('/find-password');
 
-const handleSignUp = () => router.push('/register')
+const handleSignUp = () => router.push('/register');
 </script>
 
 <template>
@@ -273,7 +277,7 @@ const handleSignUp = () => router.push('/register')
         <!-- 헤더 -->
         <div class="login-header">
           <div class="logo-section">
-            <span class="logo-icon"><Sparkles :size="28" /></span>
+            <span class="logo-icon"><Blocks :size="28" /></span>
             <h1 class="logo-text">Web Crafter</h1>
           </div>
           <p class="subtitle">당신의 작업실에 오신 걸 환영합니다!</p>
@@ -380,11 +384,11 @@ const handleSignUp = () => router.push('/register')
         <!-- 소셜 로그인 -->
         <div class="social-login">
           <button type="button" class="social-btn google">
-            <span>🔍</span>
+            <span> <svg aria-label="Google logo" width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><g><path fill="#34a853" d="M153 292c30 82 118 95 171 60h62v48A192 192 0 0190 341"></path><path fill="#4285f4" d="m386 400a140 175 0 0053-179H260v74h102q-7 37-38 57"></path><path fill="#fbbc02" d="m90 341a208 200 0 010-171l63 49q-12 37 0 73"></path><path fill="#ea4335" d="m153 219c22-69 116-109 179-50l55-54c-78-75-230-72-297 55"></path></g></svg></span>
             Google
           </button>
           <button type="button" class="social-btn github">
-            <span>💻</span>
+            <span><Github :size="18" /></span>
             GitHub
           </button>
         </div>
@@ -403,28 +407,28 @@ const handleSignUp = () => router.push('/register')
       <!-- 안내 카드 -->
       <div class="info-card">
         <div class="info-header">
-          <span class="info-icon"><Palette :size="26" /></span>
+          <span class="info-icon"><Blocks :size="26" /></span>
           <h3>이제, 웹을 직접 만들어볼 차례입니다</h3>
         </div>
         <ul class="info-list">
           <li>
-            <span class="check-icon"><Check :size="14" /></span>
+            <span class="check-icon"><LayoutGrid :size="14" /></span>
             <span>블록을 조합해 웹페이지 구성</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="14" /></span>
+            <span class="check-icon"><Braces :size="14" /></span>
             <span>직접 만들며 배우는 웹 구조</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="14" /></span>
+            <span class="check-icon"><Settings2 :size="14" /></span>
             <span>복잡한 설정 없이 바로 시작</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="14" /></span>
+            <span class="check-icon"><Monitor :size="14" /></span>
             <span>창작에만 집중할 수 있는 환경</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="14" /></span>
+            <span class="check-icon"><Play :size="14" /></span>
             <span>당신만의 웹 프로젝트를 시작하세요</span>
           </li>
         </ul>

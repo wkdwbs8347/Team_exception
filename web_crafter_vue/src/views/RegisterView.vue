@@ -20,7 +20,6 @@ import { useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue'; // 알림 모달
 import api from '@/api/axios'; // 스프링부트 통신
 import {
-  Sparkles,
   TriangleAlert,
   CheckCircle,
   XCircle,
@@ -31,7 +30,12 @@ import {
   Lock,
   Eye,
   EyeOff,
-  Rocket,
+  Blocks, // 로고(블록 빌더)
+  Wand2, // "만들기/생성" 느낌 
+  Braces, // 코드/웹 생성 느낌 (설명 카드 리스트용)
+  LayoutGrid, // 블록/레이아웃 조합 느낌 (설명 카드 리스트용)
+  Monitor, // 미리보기/실행 느낌 (설명 카드 리스트용)
+  Play, // 실행 느낌 (설명 카드 리스트용)
   Check,
 } from 'lucide-vue-next'; // 아이콘
 
@@ -69,7 +73,6 @@ const fieldErrors = ref({
   nickname: '',
   email: '',
   password: '',
-  confirmPassword: '',
 });
 
 // 말풍선 초기화
@@ -124,6 +127,7 @@ const modal = ref({
   open: false,
   message: '',
   focusField: null,
+  tooltipMessage: null,
   type: 'info', // info | warning | success | error
   icon: null, // lucide icon name
   onConfirm: null,
@@ -139,15 +143,10 @@ const openModal = (
   // 모달을 띄우기 전에 기존 말풍선 정리
   clearAllTooltips();
 
-  // 포커스 줄 필드가 있으면 그 필드에만 말풍선 표시
-  if (field && message) {
-    fieldErrors.value[field] = message;
-    lastBlurField.value = field;
-  }
-
   modal.value.open = true;
   modal.value.message = message;
   modal.value.focusField = field;
+  modal.value.tooltipMessage = field ? message : null;
   modal.value.type = type;
   modal.value.onConfirm = onConfirm;
   modal.value.icon = icon;
@@ -176,8 +175,19 @@ const closeModal = async () => {
     verificationCode: verificationCodeRef,
   };
 
-  if (modal.value.focusField) {
-    focusMap[modal.value.focusField]?.value?.focus();
+  const field = modal.value.focusField;
+  const tooltip = modal.value.tooltipMessage;
+
+  if (field) {
+    // ✅ 1) 포커스 먼저
+    focusMap[field]?.value?.focus();
+
+    // ✅ 2) 포커스가 잡힌 다음 말풍선 띄우기(타이밍 안정화)
+    await nextTick();
+    if (tooltip) {
+      fieldErrors.value[field] = tooltip;
+      lastBlurField.value = field;
+    }
   }
 };
 
@@ -568,12 +578,6 @@ const validateField = (field, mode = 'blur') => {
     case 'password':
       if (!value) message = '비밀번호를 입력해주세요.';
       break;
-
-    case 'confirmPassword':
-      if (!value) message = '비밀번호 확인을 입력해주세요.';
-      else if (value !== formData.value.password)
-        message = '비밀번호가 일치하지 않습니다.';
-      break;
   }
 
   fieldErrors.value[field] = message;
@@ -607,12 +611,21 @@ const handleRegister = async () => {
   if (!validateField('password', 'submit'))
     return openModal(fieldErrors.value.password, 'password', 'warning');
 
-  if (!validateField('confirmPassword', 'submit'))
+  if (formData.value.confirmPassword !== formData.value.password) {
     return openModal(
-      fieldErrors.value.confirmPassword,
-      'confirmPassword',
-      'warning'
+      '비밀번호가 일치하지 않습니다.',
+      null,
+      'warning',
+      async () => {
+        formData.value.password = '';
+        formData.value.confirmPassword = '';
+        passwordStrength.value = 0; // 강도 초기화도 같이
+
+        await nextTick();
+        passwordRef.value?.focus();
+      }
     );
+  }
 
   // password 필드 기본 검증 통과 후, 강도 Good(2) 미만이면 막기
   if (passwordStrength.value < 2) {
@@ -688,7 +701,7 @@ const getEmailButtonLabel = () => {
           <!-- Header -->
           <div class="register-header">
             <div class="logo-section">
-              <span class="logo-icon"><Sparkles :size="28" /></span>
+              <span class="logo-icon"><Blocks :size="28" /></span>
               <h1 class="logo-text">Web Crafter</h1>
             </div>
             <p class="subtitle">계정을 생성하고 작업실을 시작하세요!</p>
@@ -939,11 +952,7 @@ const getEmailButtonLabel = () => {
                 :type="showConfirmPassword ? 'text' : 'password'"
                 placeholder="비밀번호 확인"
                 class="form-input"
-                @blur="validateField('confirmPassword', 'blur')"
-                @input="
-                  enforceNoSpace('confirmPassword');
-                  fieldErrors.confirmPassword = '';
-                "
+                @input="enforceNoSpace('confirmPassword')"
                 required
               />
               <button
@@ -955,10 +964,6 @@ const getEmailButtonLabel = () => {
                 <Eye v-if="showConfirmPassword" :size="18" />
                 <EyeOff v-else :size="18" />
               </button>
-              <div v-if="fieldErrors.confirmPassword" class="error-tooltip">
-                <TriangleAlert class="tooltip-icon" :size="14" />
-                <span>{{ fieldErrors.confirmPassword }}</span>
-              </div>
             </div>
           </div>
 
@@ -986,7 +991,7 @@ const getEmailButtonLabel = () => {
               class="login-link"
               @click="handleLoginRedirect"
             >
-              Sign in
+              로그인
             </button>
           </p>
         </div>
@@ -995,28 +1000,28 @@ const getEmailButtonLabel = () => {
       <!-- Info Card -->
       <div class="info-card">
         <div class="info-header">
-          <span class="info-icon"><Rocket :size="22" /></span>
+          <span class="info-icon"><Blocks :size="22" /></span>
           <h3>블록으로 웹을 만들어보세요!</h3>
         </div>
         <ul class="info-list">
           <li>
-            <span class="check-icon"><Check :size="16" /></span>
+            <span class="check-icon"><Wand2 :size="16" /></span>
             <span>서비스 시작을 위한 계정 생성</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="16" /></span>
+            <span class="check-icon"><LayoutGrid :size="16" /></span>
             <span>코드 블록을 조합해 웹사이트를 제작</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="16" /></span>
+            <span class="check-icon"><Braces :size="16" /></span>
             <span>코딩 지식 없이도 바로 시작 가능</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="16" /></span>
+            <span class="check-icon"><Monitor :size="16" /></span>
             <span>실시간 미리보기로 결과 확인</span>
           </li>
           <li>
-            <span class="check-icon"><Check :size="16" /></span>
+            <span class="check-icon"><Play :size="16" /></span>
             <span>내가 만든 웹사이트를 바로 실행</span>
           </li>
         </ul>
