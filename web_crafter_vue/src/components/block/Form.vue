@@ -1,6 +1,6 @@
 <script>
 import * as Blockly from 'blockly'
-import { pythonGenerator } from 'blockly/python'
+import { javascriptGenerator } from 'blockly/javascript';
 
 /* [PART 1] 카테고리 설정
   - 블록 메뉴에서 '폼' 카테고리의 이름, 색상, 아이콘을 지정합니다.
@@ -97,32 +97,34 @@ export const defineBlocks = () => {
   */
 
   // 폼 박스 생성 (테두리 및 둥근 모서리 적용)
-  pythonGenerator.forBlock['form_container'] = function(block) {
-    const content = pythonGenerator.statementToCode(block, 'CONTENT');
+  javascriptGenerator.forBlock['form_container'] = function(block, gen) {
+    // 내부 블록의 코드를 가져옵니다. (PythonGenerator -> JavascriptGenerator로 변경)
+    // 값이 없을 경우 'null'이 찍히지 않도록 빈 문자열 처리(|| '')를 추가했습니다.
+    const content = javascriptGenerator.statementToCode(block, 'CONTENT') || '';
     return `<form style="border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin: 10px 0;">\n${content}</form>\n`;
   }
 
   // 입력창 생성 (박스 크기 계산 방식 box-sizing: border-box 적용)
-  pythonGenerator.forBlock['form_input'] = function(block) {
+  javascriptGenerator.forBlock['form_input'] = function(block, gen) {
     const type = block.getFieldValue('TYPE');
     const placeholder = block.getFieldValue('PLACEHOLDER');
     return `<input type="${type}" placeholder="${placeholder}" style="display: block; width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;">\n`;
   }
 
   // 여러 줄 입력창 생성 (높이 80px 지정 및 세로 조절 허용)
-  pythonGenerator.forBlock['form_textarea'] = function(block) {
+  javascriptGenerator.forBlock['form_textarea'] = function(block, gen) {
     const placeholder = block.getFieldValue('PLACEHOLDER');
     return `<textarea placeholder="${placeholder}" style="display: block; width: 100%; height: 80px; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; resize: vertical;"></textarea>\n`;
   }
 
   // 라벨 생성 (굵은 글씨 및 아래쪽 여백 적용)
-  pythonGenerator.forBlock['form_label'] = function(block) {
+  javascriptGenerator.forBlock['form_label'] = function(block, gen) {
     const text = block.getFieldValue('TEXT');
     return `<label style="display: block; font-weight: bold; margin-bottom: 5px; color: #333;">${text}</label>\n`;
   }
 
   // 버튼 생성 (배경색 지정 및 마우스 커서 변경 효과)
-  pythonGenerator.forBlock['form_submit'] = function(block) {
+  javascriptGenerator.forBlock['form_submit'] = function(block, gen) {
     const label = block.getFieldValue('LABEL');
     return `<button type="submit" style="background-color: #43a047; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold;">${label}</button>\n`;
   }

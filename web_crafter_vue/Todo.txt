@@ -1,0 +1,2 @@
+1. 스타일 카테고리에 디스플레이 바꾸는거 추가
+2. IDEView에 블록 놓이는 곳 투명도 좀 제발 어떻게하는건데 feat( blocklyToolboxDiv  )

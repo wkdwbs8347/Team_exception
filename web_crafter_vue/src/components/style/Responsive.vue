@@ -1,6 +1,7 @@
 <script>
 import * as Blockly from 'blockly';
-import { pythonGenerator } from 'blockly/python';
+import { javascriptGenerator } from 'blockly/javascript';
+import { pythonGenerator } from 'blockly/python'
 
 /* [PART 1] 카테고리 메타데이터 정의
   - 블록 선택 메뉴(Toolbox)에서 보여질 이름, 색상, 아이콘을 설정합니다.

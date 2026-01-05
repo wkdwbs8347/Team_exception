@@ -1,6 +1,6 @@
 <script>
 import * as Blockly from 'blockly';
-import { pythonGenerator } from 'blockly/python';
+import { javascriptGenerator } from 'blockly/javascript';
 
 /* =========================
   카테고리 정의
