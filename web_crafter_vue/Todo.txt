@@ -1,2 +1,5 @@
 1. 스타일 카테고리에 디스플레이 바꾸는거 추가
 2. IDEView에 블록 놓이는 곳 투명도 좀 제발 어떻게하는건데 feat( blocklyToolboxDiv  )
+3. 자바스크립트 DOM(화면조작) 문들 추가 키보드입력
+4. block += ol / css += list-style
+5. preview에 블럭 여러개 올려놓았을 때 이격 생기는거 제거

@@ -15,6 +15,13 @@ export const toolbox = `
 <xml>
   <block type="style_text_color"></block>
   <block type="style_bg_color"></block>
+  <block type="style_border_combined"></block>
+
+  <label text="──────────────────────"></label>
+  <block type="style_custom_font"></block>
+  <block type="font_url"></block>
+  <block type="font_weight"></block>
+  <block type="font_display"></block>
 </xml>
 `;
 
@@ -110,7 +117,116 @@ export const defineBlocks = () => {
     const color = block.getFieldValue('COLOR');
     return `  color: ${color} !important;\n`;
   };
+
+
+// 블록 정의 (defineBlocks 함수 내부에 추가)
+if (!Blockly.Blocks['style_border_combined']) {
+  Blockly.Blocks['style_border_combined'] = {
+    init() {
+      // 첫 번째 줄: 제목과 두께
+      this.appendDummyInput()
+          .appendField("🔲 테두리")
+          .appendField(new Blockly.FieldTextInput("1"), "WIDTH")
+          .appendField("px");
+      
+      // 두 번째 줄: 종류와 색상 (줄바꿈)
+      this.appendDummyInput()
+          .appendField("종류")
+          .appendField(new Blockly.FieldDropdown([
+            ["실선", "solid"], 
+            ["점선(짧은)", "dotted"], 
+            ["점선(긴)", "dashed"],
+            ["이중선", "double"]
+          ]), "STYLE")
+          .appendField("색")
+          .appendField(new FieldModalColor('#cccccc'), 'COLOR');
+
+      this.setPreviousStatement(true);
+      this.setNextStatement(true);
+      this.setColour('#e91e63');
+    }
+  };
 }
+}
+
+  // 2. 조립형 폰트 설정 블록들
+  if (!Blockly.Blocks['style_custom_font']) {
+    Blockly.Blocks['style_custom_font'] = {
+      init() {
+        this.appendDummyInput().appendField("🔤 폰트 이름").appendField(new Blockly.FieldTextInput("PyeojinGothic"), "NAME");
+        this.appendStatementInput("PROPERTIES").setCheck(null).appendField("설정 내용");
+        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      }
+    };
+  }
+  if (!Blockly.Blocks['font_url']) {
+    Blockly.Blocks['font_url'] = {
+      init() {
+        this.appendDummyInput().appendField("🔗 주소").appendField(new Blockly.FieldTextInput("https://..."), "VAL");
+        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      }
+    };
+  }
+  if (!Blockly.Blocks['font_weight']) {
+    Blockly.Blocks['font_weight'] = {
+      init() {
+        this.appendDummyInput().appendField("⚖️ 두께").appendField(new Blockly.FieldDropdown([["300(Light)","300"],["400(Regular)","400"],["700(Bold)","700"]]), "VAL");
+        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      }
+    };
+  }
+  if (!Blockly.Blocks['font_display']) {
+    Blockly.Blocks['font_display'] = {
+      init() {
+        this.appendDummyInput().appendField("📺 출력").appendField(new Blockly.FieldDropdown([["교체(swap)","swap"],["숨김(block)","block"]]), "VAL");
+        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      }
+    };
+  }
+
+  // --- 제너레이터 완성본 ---
+
+javascriptGenerator.forBlock['style_tag'] = (block) => {
+  let selector = (block.getFieldValue('SELECTOR') || '제목').trim();
+  if (selector && !selector.startsWith('.') && !selector.startsWith('#')) selector = '.' + selector;
+  let rawBody = javascriptGenerator.statementToCode(block, 'BODY').trim();
+  let fontFaceDeclarations = '';
+  let styleProperties = '';
+  const lines = rawBody.split('\n');
+  const fontFaceRegex = /\/\*\s*@FONT-FACE:\s*([^|]+)\|([^|]+)\|([^|]+)\|([^\*]+)\s*\*\//;
+  lines.forEach(line => {
+    const match = line.match(fontFaceRegex);
+    if (match) {
+      const name = match[1].trim(); const url = match[2].trim(); const display = match[4].trim();
+      fontFaceDeclarations += `@font-face {\n  font-family: '${name}';\n  src: url('${url}') format('woff2');\n  font-weight: 100 900; /* 가짜 굵기 활성화 */\n  font-display: ${display};\n}\n\n`;
+    } else {
+      const trimmedLine = line.trim();
+      if (trimmedLine) styleProperties += `  ${trimmedLine}\n`;
+    }
+  });
+  return `<style>\n${fontFaceDeclarations}${selector} {\n${styleProperties}}\n</style>\n`;
+};
+
+javascriptGenerator.forBlock['style_custom_font'] = (block) => {
+  const name = block.getFieldValue('NAME');
+  const properties = javascriptGenerator.statementToCode(block, 'PROPERTIES');
+  const urlMatch = properties.match(/URL:([^\n]+)/);
+  const weightMatch = properties.match(/WEIGHT:([^\n]+)/);
+  const displayMatch = properties.match(/DISPLAY:([^\n]+)/);
+  const url = urlMatch ? urlMatch[1].trim() : '';
+  const weight = weightMatch ? weightMatch[1].trim() : '400';
+  const display = displayMatch ? displayMatch[1].trim() : 'swap';
+  return `/* @FONT-FACE: ${name}|${url}|${weight}|${display} */\nfont-family: '${name}', sans-serif !important;\nfont-weight: ${weight} !important;\n`;
+};
+
+javascriptGenerator.forBlock['font_url'] = (block) => `URL:${block.getFieldValue('VAL')}\n`;
+javascriptGenerator.forBlock['font_weight'] = (block) => `WEIGHT:${block.getFieldValue('VAL')}\n`;
+javascriptGenerator.forBlock['font_display'] = (block) => `DISPLAY:${block.getFieldValue('VAL')}\n`;
+javascriptGenerator.forBlock['style_bg_color'] = (block) => `background-color: ${block.getFieldValue('COLOR')} !important;\n`;
+javascriptGenerator.forBlock['style_text_color'] = (block) => `color: ${block.getFieldValue('COLOR')} !important;\n`;
+javascriptGenerator.forBlock['style_border_combined'] = (block) => {
+  return `border: ${block.getFieldValue('WIDTH')}px ${block.getFieldValue('STYLE')} ${block.getFieldValue('COLOR')} !important;\n`;
+};
 </script>
 
 <style>
