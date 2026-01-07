@@ -88,8 +88,8 @@ export const defineBlocks = () => {
             .appendField("🎨 배경색")
             // [변경] 커스텀 필드 적용
             .appendField(new FieldModalColor('#ffffff'), 'COLOR');
-        this.setPreviousStatement(true); 
-        this.setNextStatement(true); 
+        this.setPreviousStatement(true, "STYLE");
+        this.setNextStatement(true, "STYLE");
         this.setColour('#e91e63');
       }
     };
@@ -107,8 +107,8 @@ export const defineBlocks = () => {
             .appendField("🎨 글자색")
             // [변경] 커스텀 필드 적용
             .appendField(new FieldModalColor('#000000'), 'COLOR');
-        this.setPreviousStatement(true); 
-        this.setNextStatement(true); 
+        this.setPreviousStatement(true, "STYLE");
+        this.setNextStatement(true, "STYLE");
         this.setColour('#e91e63');
       }
     };
@@ -140,9 +140,8 @@ if (!Blockly.Blocks['style_border_combined']) {
           ]), "STYLE")
           .appendField("색")
           .appendField(new FieldModalColor('#cccccc'), 'COLOR');
-
-      this.setPreviousStatement(true);
-      this.setNextStatement(true);
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
       this.setColour('#e91e63');
     }
   };
@@ -155,15 +154,19 @@ if (!Blockly.Blocks['style_border_combined']) {
       init() {
         this.appendDummyInput().appendField("🔤 폰트 이름").appendField(new Blockly.FieldTextInput("PyeojinGothic"), "NAME");
         this.appendStatementInput("PROPERTIES").setCheck(null).appendField("설정 내용");
-        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      this.setColour('#e91e63');
       }
     };
   }
   if (!Blockly.Blocks['font_url']) {
     Blockly.Blocks['font_url'] = {
       init() {
-        this.appendDummyInput().appendField("🔗 주소").appendField(new Blockly.FieldTextInput("https://..."), "VAL");
-        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+        this.appendDummyInput().appendField("🔗 폰트 주소").appendField(new Blockly.FieldTextInput("https://..."), "VAL");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      this.setColour('#e91e63');
       }
     };
   }
@@ -171,7 +174,9 @@ if (!Blockly.Blocks['style_border_combined']) {
     Blockly.Blocks['font_weight'] = {
       init() {
         this.appendDummyInput().appendField("⚖️ 두께").appendField(new Blockly.FieldDropdown([["300(Light)","300"],["400(Regular)","400"],["700(Bold)","700"]]), "VAL");
-        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      this.setColour('#e91e63');
       }
     };
   }
@@ -179,7 +184,9 @@ if (!Blockly.Blocks['style_border_combined']) {
     Blockly.Blocks['font_display'] = {
       init() {
         this.appendDummyInput().appendField("📺 출력").appendField(new Blockly.FieldDropdown([["교체(swap)","swap"],["숨김(block)","block"]]), "VAL");
-        this.setPreviousStatement(true); this.setNextStatement(true); this.setColour('#e91e63');
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      this.setColour('#e91e63');
       }
     };
   }

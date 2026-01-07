@@ -1,25 +1,15 @@
 <script setup>
 /**
+ *    data-block-id="BLOCK_ID"
+ *    data-draggable="true"   (최상위 요소만)
+ *
+ * - 좌표는 block.data(JSON)에 저장하지만,
+ *   ✅ 사용자 코드보기(generatedCode)에는 절대 노출되지 않게
+ *   ✅ iframe(프리뷰) 내부에서만 좌표를 적용(applyPositions)
+ *
+ * - 드래그 대상은:
+ *   ✅ #wrapper 직계 자식 중 [data-draggable="true"][data-block-id] 만
  * ============================================================
- * ✅ A안(Grid 정착) 최종 구조 요약
- * ============================================================
- *
- * 1) 생성된 HTML은 LayoutBlocks.js에서 아래 구조로 나온다고 가정:
- *
- *   <div class="wc-drag" data-block-id="BLOCK_ID" data-draggable="true">
- *     <section/div/form/ul ...> ... 실제 태그(고유 특성 유지) ... </section/div/...>
- *   </div>
- *
- * 2) #wrapper는 CSS Grid 컨테이너가 된다.
- *    - 각 .wc-drag는 Grid item으로 "정착"한다 (문서 흐름 유지)
- *
- * 3) 드래그 중에는 .wc-drag를 position:absolute로 잠깐 띄워 자유 이동
- *    - 드랍(end) 시 현재 좌표를 Grid (row, col)로 변환해서 저장
- *    - 저장된 값은 block.data(JSON)로 보관
- *
- * 4) 리렌더/추가/삭제/모드변경에도 위치 유지:
- *    - refreshCodeAndPreview()에서 생성된 HTML에
- *      injectGridStyles()로 grid-row/column 스타일 주입
  */
 
 import { ref, onMounted, nextTick, watch, computed } from 'vue';
@@ -27,17 +17,16 @@ import * as Blockly from 'blockly';
 import { javascriptGenerator } from 'blockly/javascript';
 import * as Ko from 'blockly/msg/ko';
 import 'blockly/blocks';
+import ConfirmModal from '@/modal/ConfirmModal.vue'; // 컨펌(삭제/취소) 모달
+import GlobalModal from '@/modal/GlobalModal.vue'; // 단순 안내용 확인 모달
 
 // ===== 카테고리 블록 import =====
-//blockly 블록 정의 및 툴박스/카테고리 XML
 import * as Layout from '@/components/block/Layout.vue';
 import * as Content from '@/components/block/Content.vue';
 import * as Form from '@/components/block/Form.vue';
-//js 블록 정의
 import * as Interaction from '@/components/js/Interaction.vue';
 import * as Flow from '@/components/js/Flow.vue';
 import * as Logic from '@/components/js/Logic.vue';
-//style 블록 정의
 import * as Style from '@/components/style/Style.vue';
 import * as Responsive from '@/components/style/Responsive.vue';
 import * as Color from '@/components/style/Color.vue';
@@ -47,12 +36,60 @@ import * as Animation from '@/components/style/Animation.vue';
 // ===== 상태 관리 =====
 const activeParent = ref('structure');
 const activeTab = ref(null);
-const generatedCode = ref('');
 const previewSrc = ref('');
 const activeRightTab = ref('objects');
 const isRunning = ref(false);
 const isPhone = ref(false);
 let workspace = null;
+
+// 페이지 삭제 확인 모달 상태
+const confirmModal = ref({
+  open: false,
+  message: '',
+  payload: null, // 삭제할 pageId 저장
+});
+
+// 열기
+const openDeleteConfirm = (pageId) => {
+  confirmModal.value.open = true;
+  confirmModal.value.message = '이 페이지를 삭제하시겠습니까?';
+  confirmModal.value.payload = { pageId };
+};
+
+// 닫기
+const closeDeleteConfirm = () => {
+  confirmModal.value.open = false;
+  confirmModal.value.message = '';
+  confirmModal.value.payload = null;
+};
+
+// 확인 눌렀을 때 실제 삭제 실행
+const confirmDeletePage = () => {
+  const pageId = confirmModal.value.payload?.pageId;
+  closeDeleteConfirm();
+  if (pageId) deletePageNow(pageId);
+};
+
+// 전역 안내 모달(단일 확인)
+const modal = ref({ open: false, message: '', type: 'info', onConfirm: null });
+
+const openModal = (message, type = 'info', onConfirm = null) => {
+  modal.value.open = true;
+  modal.value.message = message;
+  modal.value.type = type;
+  modal.value.onConfirm = onConfirm;
+};
+
+const closeModal = () => {
+  modal.value.open = false;
+  const fn = modal.value.onConfirm;
+  modal.value.onConfirm = null;
+  fn?.();
+};
+
+// ✅ 사용자 코드보기 / 프리뷰용 분리
+const generatedCode = ref(''); // 코드보기: 빌더용 data-* 제거
+const generatedCodeForPreview = ref(''); // 프리뷰: 빌더용 data-* 포함
 
 // ✅ 선택 상태(오브젝트 리스트/블록 선택/프리뷰 하이라이트 동기화)
 const selectedBlockId = ref(null);
@@ -101,15 +138,37 @@ function savePagesToStorage() {
 }
 
 // ====================================================
-// 2) 코드 후처리 유틸
+// 2) 코드 후처리 유틸 (✅ data-block-id/data-draggable만 제거)
 // ====================================================
 const cleanCodeForView = (code) => {
   if (!code) return '';
-  return code
-    .replace(/\s!important/g, '')
-    .replace(/data-block-id="[^"]*"/g, '')
-    .replace(/style="[^"]*"/g, '')
-    .trim();
+
+  try {
+    const container = document.createElement('div');
+    container.innerHTML = code;
+
+    // ✅ 우리가 빌더에서만 쓰는 속성만 제거 (href/type/src 등은 유지)
+    const REMOVE_ATTRS = new Set([
+      'data-block-id',
+      'data-draggable',
+      'data-x',
+      'data-y',
+      'style',
+    ]);
+    container.querySelectorAll('*').forEach((el) => {
+      for (const name of REMOVE_ATTRS) el.removeAttribute(name);
+    });
+
+    return container.innerHTML.trim();
+  } catch (e) {
+    return (code || '')
+      .replace(/\sdata-block-id="[^"]*"/g, '')
+      .replace(/\sdata-draggable="[^"]*"/g, '')
+      .replace(/\sdata-x="[^"]*"/g, '')
+      .replace(/\sdata-y="[^"]*"/g, '')
+      .replace(/\sstyle="[^"]*"/g, '')
+      .trim();
+  }
 };
 
 const removeScripts = (html) => {
@@ -117,61 +176,25 @@ const removeScripts = (html) => {
 };
 
 // ====================================================
-// 3) ✅ 핵심: block.data(자유배치 좌표)를 HTML에 주입하는 함수
+// 3) ✅ 좌표: 코드에 주입하지 않고 iframe 내부에서만 적용
 // ====================================================
-/**
- * block.data는 다음 형태로 저장됨:
- *   { x: number, y: number, w?: number, h?: number }
- *
- * injectFreeStyles(rawCode):
- *  - workspace의 모든 블록을 돌면서
- *  - 해당 blockId를 가진 DOM 요소(.wc-drag wrapper)를 찾아
- *  - position:absolute + left/top(+ w/h 선택)을 style에 주입
- *
- * 이렇게 하면:
- *  - DESIGN/RUN 모드 변경
- *  - 블럭 추가/삭제
- *  - 코드 재생성(refresh)
- *  - iframe 리렌더
- * 에도 위치가 "자유배치" 상태로 유지됨
- */
-const injectFreeStyles = (rawCode) => {
-  if (!workspace || !rawCode) return rawCode;
-
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(rawCode, 'text/html');
+const getPositionsMap = () => {
+  const map = {};
+  if (!workspace) return map;
 
   const blocks = workspace.getAllBlocks(false);
-  blocks.forEach((block) => {
-    if (!block.data) return;
-
+  blocks.forEach((b) => {
+    if (!b.data) return;
     try {
-      const pos = JSON.parse(block.data);
-      const el = doc.querySelector(`[data-block-id="${block.id}"]`);
-      if (!el) return;
-
-      const x = Number(pos.x || 0);
-      const y = Number(pos.y || 0);
-      const w = pos.w != null ? Number(pos.w) : null;
-      const h = pos.h != null ? Number(pos.h) : null;
-
-      const existingStyle = el.getAttribute('style') || '';
-
-      const freeStyle =
-        `position:absolute; left:${x}px; top:${y}px; ` +
-        `transform:none; ` +
-        (w ? `width:${w}px; ` : '') +
-        (h ? `height:${h}px; ` : '');
-
-      el.setAttribute('style', `${existingStyle} ${freeStyle}`.trim());
-
-      // (선택) 디버깅/유틸
-      el.setAttribute('data-x', x);
-      el.setAttribute('data-y', y);
+      const p = JSON.parse(b.data);
+      map[b.id] = {
+        x: Number(p.x || 0),
+        y: Number(p.y || 0),
+      };
     } catch (e) {}
   });
 
-  return doc.body.innerHTML;
+  return map;
 };
 
 // ====================================================
@@ -230,6 +253,7 @@ const updateObjectListFromWorkspace = () => {
 
   blocks.forEach((block) => {
     if (ignoredTypes.has(block.type) || block.type.startsWith('style_')) return;
+    if (ignoredTypes.has(block.type) || block.type.startsWith('script')) return;
     const name = block.getFieldValue('NAME') || block.type;
     current.push({ id: block.id, name, type: block.type });
   });
@@ -237,42 +261,50 @@ const updateObjectListFromWorkspace = () => {
 };
 
 // ====================================================
-// 6) ✅ 코드 생성 + free 좌표 주입 + preview 갱신
+// 6) ✅ 코드 생성 + preview 갱신 (좌표는 HTML에 주입 ❌)
 // ====================================================
 const refreshCodeAndPreview = () => {
   if (!workspace) return;
   try {
     javascriptGenerator.init(workspace);
 
-    // 1) Blockly -> HTML 생성
+    // 1) Blockly -> HTML 생성(프리뷰용: data-* 포함)
     const raw = javascriptGenerator.workspaceToCode(workspace);
 
-    // 2) ✅ 저장된 free 좌표(x,y,w,h)를 HTML에 주입
-    const injected = injectFreeStyles(raw);
+    // 2) 프리뷰용 코드 저장
+    generatedCodeForPreview.value = raw;
 
-    // 3) 저장 및 preview 갱신
-    generatedCode.value = injected;
+    // 3) 코드보기용: 우리가 붙인 data-*만 제거
+    generatedCode.value = cleanCodeForView(raw);
+
+    // 4) preview 갱신
     updatePreview();
     updateObjectListFromWorkspace();
   } catch (e) {}
 };
 
 // ====================================================
-// 7) ✅ Preview (iframe) - 자유배치(absolute) + "기준선 있을 때만" 스냅
+// 7) ✅ Preview (iframe) - Free 배치 + "기준선 있을 때만" 스냅
+//    - wc-drag 없음
+//    - 드래그 대상: #wrapper > [data-draggable="true"][data-block-id]
+// ====================================================
+// ====================================================
+// 7) ✅ Preview (iframe) - Free 배치 + "기준선 있을 때만" 스냅
+//    - interactjs 제거(의존 X) -> PointerEvent로 드래그 구현
+//    - 드래그 대상: #wrapper > [data-draggable="true"][data-block-id]
 // ====================================================
 const updatePreview = () => {
-  // DESIGN 모드에서 script 제거
-  let codeToRender = generatedCode.value;
+  let codeToRender = generatedCodeForPreview.value;
   if (!isRunning.value) codeToRender = removeScripts(codeToRender);
 
   const modeClass = isRunning.value ? 'is-running' : 'is-design';
+  const positionsJSON = JSON.stringify(getPositionsMap());
 
   previewSrc.value = `<!DOCTYPE html><html><head><meta charset="utf-8">
 <style>
   html, body { margin:0; padding:0; width:100%; min-height:100vh; overflow:hidden; }
   * { box-sizing: border-box; }
 
-  /* ✅ (1) wrapper = 자유배치 캔버스 */
   #wrapper{
     width:100%;
     min-height:100vh;
@@ -282,14 +314,17 @@ const updatePreview = () => {
 
   img { max-width:100%; height:auto; }
 
-  /* ✅ 자유배치 wrapper */
-  .wc-drag{
-    position:absolute;
+  /* 기본: 좌표 없는 애들은 흐름 유지 */
+  #wrapper > [data-draggable="true"][data-block-id]{
+    position: absolute ;
+    left: 0;             /* 👈 초기 위치 안전장치 */
+    top: 0;              /* 👈 초기 위치 안전장치 */
     transform:none;
-    left:0;
-    top:0;
+    touch-action:none;
+    user-select:none;
+    -webkit-user-select:none;
+    cursor: grab;
   }
-
   /* 하이라이트 */
   .wc-highlight{
     outline:2px solid #ff4081 !important;
@@ -318,10 +353,11 @@ const updatePreview = () => {
   .wc-guide-v{ width:0; border-left-width:1px; }
   .wc-guide-h{ height:0; border-top-width:1px; }
 
+  /* DESIGN 모드에서는 애니메이션 끔 */
   .is-design * { animation:none !important; transition:none !important; }
 </style>
-<script src="https://cdn.jsdelivr.net/npm/interactjs/dist/interact.min.js"><\/script>
 </head>
+
 <body class="${modeClass}">
 <div id="wrapper">
   ${codeToRender}
@@ -330,7 +366,7 @@ const updatePreview = () => {
 </div>
 
 <script>
-function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+const WC_POSITIONS = ${positionsJSON};
 
 function hideGuides(){
   const v = document.getElementById('wcGuideV');
@@ -338,7 +374,6 @@ function hideGuides(){
   v.style.display = 'none';
   h.style.display = 'none';
 }
-
 function showVSeg(x, y1, y2){
   const v = document.getElementById('wcGuideV');
   v.style.left = x + 'px';
@@ -346,7 +381,6 @@ function showVSeg(x, y1, y2){
   v.style.height = Math.abs(y2 - y1) + 'px';
   v.style.display = 'block';
 }
-
 function showHSeg(y, x1, x2){
   const h = document.getElementById('wcGuideH');
   h.style.top = y + 'px';
@@ -355,13 +389,37 @@ function showHSeg(y, x1, x2){
   h.style.display = 'block';
 }
 
+// ✅ 좌표 적용: iframe 내부에서만 absolute/left/top 주입
+function applyPositions(){
+  const els = Array.from(document.querySelectorAll('#wrapper > [data-draggable="true"][data-block-id]'));
+
+  for(const el of els){
+    const id = el.getAttribute('data-block-id');
+    const p = WC_POSITIONS[id];
+
+    // 기본은 흐름 유지
+    el.removeAttribute('data-has-pos');
+    el.style.left = '';
+    el.style.top  = '';
+    el.style.transform = 'none';
+
+    // ✅ 좌표가 존재하는 경우만 absolute 적용
+    if (p && Number.isFinite(p.x) && Number.isFinite(p.y)){
+      el.setAttribute('data-has-pos', '1');
+      el.style.position = 'absolute';
+      el.style.left = p.x + 'px';
+      el.style.top  = p.y + 'px';
+    }
+  }
+}
+
 /**
  * ✅ 다른 요소들의 기준선(좌/중/우, 상/중/하) + rect 수집
  */
 function collectGuides(exceptEl){
   const wrap = document.getElementById('wrapper');
   const wrapRect = wrap.getBoundingClientRect();
-  const els = Array.from(document.querySelectorAll('#wrapper > [data-block-id]'))
+  const els = Array.from(document.querySelectorAll('#wrapper > [data-draggable="true"][data-block-id]'))
     .filter(el => el !== exceptEl);
 
   const items = [];
@@ -382,15 +440,9 @@ function collectGuides(exceptEl){
   return { wrapRect, items };
 }
 
-// ✅ “가이드 있을 때만” 스냅이 걸리도록 임계값
+// ✅ “가이드 있을 때만” 스냅 임계값
 const SNAP_THRESHOLD = 1; // px
 
-/**
- * ✅ 파워포인트식 정렬 스냅
- * - self의 좌/중/우 ↔ 다른 요소의 좌/중/우
- * - self의 상/중/하 ↔ 다른 요소의 상/중/하
- * - 가이드라인은 "요소-요소 사이" 구간만 표시(segment)
- */
 function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){
   const curLeft = nextLeft;
   const curTop  = nextTop;
@@ -399,16 +451,8 @@ function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){
   const curCX = (curLeft + curRight) / 2;
   const curCY = (curTop + curBottom) / 2;
 
-  const selfV = [
-    { key:'L', x:curLeft },
-    { key:'C', x:curCX },
-    { key:'R', x:curRight }
-  ];
-  const selfH = [
-    { key:'T', y:curTop },
-    { key:'C', y:curCY },
-    { key:'B', y:curBottom }
-  ];
+  const selfV = [{x:curLeft},{x:curCX},{x:curRight}];
+  const selfH = [{y:curTop},{y:curCY},{y:curBottom}];
 
   let best = {
     dx: 0, dy: 0,
@@ -418,7 +462,6 @@ function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){
     hDist: SNAP_THRESHOLD + 1,
   };
 
-  // ✅ V 정렬(세로선)
   for (const it of guides.items){
     for (const gx of it.v){
       for (const sv of selfV){
@@ -446,7 +489,6 @@ function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){
     }
   }
 
-  // ✅ H 정렬(가로선)
   for (const it of guides.items){
     for (const gy of it.h){
       for (const sh of selfH){
@@ -474,20 +516,23 @@ function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){
     }
   }
 
-  // ✅ 임계값 밖이면 스냅/가이드 끄기
   if (best.vDist > SNAP_THRESHOLD){ best.dx = 0; best.vLine = null; best.vSeg = null; }
   if (best.hDist > SNAP_THRESHOLD){ best.dy = 0; best.hLine = null; best.hSeg = null; }
 
   return best;
 }
 
+function clamp(n, min, max){ return Math.max(min, Math.min(max, n)); }
+
 function init(){
-  if(typeof interact === 'undefined'){ setTimeout(init, 50); return; }
   const isRunning = ${isRunning.value};
 
-  // highlight 수신
+  // ✅ 렌더 직후 좌표 적용
+  applyPositions();
+
+  // ✅ 하이라이트 수신 (interact 의존 X)
   window.addEventListener('message', function(e){
-    if(e.data.type === 'highlight_element'){
+    if(e.data && e.data.type === 'highlight_element'){
       document.querySelectorAll('.wc-highlight').forEach(el => el.classList.remove('wc-highlight'));
       if(e.data.blockId){
         const t = document.querySelector('[data-block-id="'+e.data.blockId+'"]');
@@ -496,7 +541,7 @@ function init(){
     }
   });
 
-  // DESIGN 모드 클릭 방지 + 선택 전송
+  // ✅ DESIGN 모드 클릭 방지 + 선택 전송
   document.addEventListener('mousedown', function(e){
     if(isRunning) return;
     const target = e.target.closest('[data-block-id]');
@@ -514,112 +559,142 @@ function init(){
 
   if(isRunning) return;
 
-  interact('#wrapper > [data-block-id]').draggable({
-    inertia: false,
-    modifiers: [
-      interact.modifiers.restrictRect({ restriction: 'parent', endOnly: true })
-    ],
-    listeners: {
-      start(event){
-        const t = event.target;
-        t.classList.add('wc-dragging');
+  // ✅ PointerEvent 기반 드래그
+  const wrap = document.getElementById('wrapper');
+  let dragging = null;
 
-        window.parent.postMessage({
-          type:'select_block',
-          blockId: t.getAttribute('data-block-id')
-        }, '*');
+  function onPointerMove(ev){
+    if(!dragging) return;
 
-        // ✅ 시작 기준점: 현재 left/top
-        const left = parseFloat(t.style.left || '0');
-        const top  = parseFloat(t.style.top  || '0');
-        t.__wcBaseLeft = left;
-        t.__wcBaseTop  = top;
+    const t = dragging.el;
 
-        // 누적 이동량
-        t.__wcX = 0;
-        t.__wcY = 0;
+    // 누적 이동량
+    dragging.dx += (ev.clientX - dragging.lastX);
+    dragging.dy += (ev.clientY - dragging.lastY);
+    dragging.lastX = ev.clientX;
+    dragging.lastY = ev.clientY;
 
-        // 가이드 수집
-        t.__wcGuides = collectGuides(t);
-        hideGuides();
-      },
+    const baseLeft = dragging.baseLeft;
+    const baseTop  = dragging.baseTop;
 
-      move(event){
-        const t = event.target;
+    // 보정 전
+    let nextLeft = baseLeft + dragging.dx;
+    let nextTop  = baseTop  + dragging.dy;
 
-        t.__wcX = (t.__wcX || 0) + event.dx;
-        t.__wcY = (t.__wcY || 0) + event.dy;
+    const rectNow = t.getBoundingClientRect();
+    const width = rectNow.width;
+    const height = rectNow.height;
 
-        const baseLeft = t.__wcBaseLeft || 0;
-        const baseTop  = t.__wcBaseTop  || 0;
+    // ✅ 스냅
+    const snap = computeSmartSnap({ nextLeft, nextTop, width, height, guides: dragging.guides });
 
-        const rectNow = t.getBoundingClientRect();
-        const width = rectNow.width;
-        const height = rectNow.height;
+    if (snap.vLine != null && snap.vSeg) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2);
+    else document.getElementById('wcGuideV').style.display = 'none';
 
-        // 보정 전
-        let nextLeft = baseLeft + t.__wcX;
-        let nextTop  = baseTop  + t.__wcY;
+    if (snap.hLine != null && snap.hSeg) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2);
+    else document.getElementById('wcGuideH').style.display = 'none';
 
-        // ✅ 기준선 있을 때만 스냅
-        const guides = t.__wcGuides || { items: [] };
-        const snap = computeSmartSnap({ nextLeft, nextTop, width, height, guides });
+    nextLeft += snap.dx;
+    nextTop  += snap.dy;
 
-        if (snap.vLine != null && snap.vSeg) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2);
-        else document.getElementById('wcGuideV').style.display = 'none';
+    // ✅ 부모 안으로 제한(대충)
+    const wrapRect = wrap.getBoundingClientRect();
+    nextLeft = clamp(nextLeft, 0, Math.max(0, wrapRect.width - width));
+    nextTop  = clamp(nextTop, 0, Math.max(0, wrapRect.height - height));
 
-        if (snap.hLine != null && snap.hSeg) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2);
-        else document.getElementById('wcGuideH').style.display = 'none';
+    // 적용
+    t.style.left = nextLeft + 'px';
+    t.style.top  = nextTop  + 'px';
+    t.style.transform = 'none';
 
-        nextLeft += snap.dx;
-        nextTop  += snap.dy;
+    // 튐 방지: 누적값 재정렬
+    dragging.dx = nextLeft - baseLeft;
+    dragging.dy = nextTop  - baseTop;
 
-        // ✅ left/top 직접 갱신 (자유배치)
-        t.style.left = nextLeft + 'px';
-        t.style.top  = nextTop  + 'px';
+    ev.preventDefault();
+  }
 
-        // 튐 방지: 누적값도 보정 포함 반영
-        t.__wcX = nextLeft - baseLeft;
-        t.__wcY = nextTop  - baseTop;
-      },
+  function onPointerUp(){
+    if(!dragging) return;
 
-      end(event){
-        const t = event.target;
-        t.classList.remove('wc-dragging');
-        hideGuides();
+    const t = dragging.el;
+    t.classList.remove('wc-dragging');
+    hideGuides();
 
-        const left = parseFloat(t.style.left || '0');
-        const top  = parseFloat(t.style.top  || '0');
+    const left = parseFloat(t.style.left || '0');
+    const top  = parseFloat(t.style.top  || '0');
 
-        const rectNow = t.getBoundingClientRect();
-        const w = rectNow.width;
-        const h = rectNow.height;
+    window.parent.postMessage({
+      type: 'update_free_position',
+      blockId: t.getAttribute('data-block-id'),
+      x: Math.round(left),
+      y: Math.round(top),
+    }, '*');
 
-        window.parent.postMessage({
-          type: 'update_free_position',
-          blockId: t.getAttribute('data-block-id'),
-          x: Math.round(left),
-          y: Math.round(top),
-          w: Math.round(w),
-          h: Math.round(h)
-        }, '*');
+    window.parent.postMessage({ type:'deselect_block' }, '*');
 
-        delete t.__wcGuides;
-        delete t.__wcBaseLeft;
-        delete t.__wcBaseTop;
-        delete t.__wcX;
-        delete t.__wcY;
+    dragging.el.releasePointerCapture(dragging.pointerId);
+    dragging = null;
 
-        window.parent.postMessage({ type:'deselect_block' }, '*');
-      }
-    }
-  });
+    window.removeEventListener('pointermove', onPointerMove, true);
+    window.removeEventListener('pointerup', onPointerUp, true);
+    window.removeEventListener('pointercancel', onPointerUp, true);
+  }
+
+    wrap.addEventListener('pointerdown', (ev) => {
+    const t = ev.target.closest('#wrapper > [data-draggable="true"][data-block-id]');
+    if(!t) return;
+
+    // ✅ wrapper 기준 현재 위치를 left/top로 고정 (static -> absolute 전환 시 튐 방지)
+    const wrapRect = wrap.getBoundingClientRect();
+    const r = t.getBoundingClientRect();
+    const curLeft = r.left - wrapRect.left + wrap.scrollLeft;
+    const curTop  = r.top  - wrapRect.top  + wrap.scrollTop;
+
+    // ✅ 이제부터 자유배치 대상으로 전환
+    t.setAttribute('data-has-pos', '1');
+    t.style.position = 'absolute';
+    t.style.left = curLeft + 'px';
+    t.style.top  = curTop + 'px';
+    t.style.transform = 'none';
+
+    t.classList.add('wc-dragging');
+
+    window.parent.postMessage({
+      type:'select_block',
+      blockId: t.getAttribute('data-block-id')
+    }, '*');
+
+    const baseLeft = parseFloat(t.style.left || '0');
+    const baseTop  = parseFloat(t.style.top  || '0');
+
+    dragging = {
+      el: t,
+      baseLeft,
+      baseTop,
+      dx: 0,
+      dy: 0,
+      lastX: ev.clientX,
+      lastY: ev.clientY,
+      guides: collectGuides(t),
+      pointerId: ev.pointerId,
+    };
+
+    t.setPointerCapture(ev.pointerId);
+
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    window.addEventListener('pointercancel', onPointerUp, true);
+
+    ev.preventDefault();
+  }, true);
 }
 
 init();
 <\/script>
 </body></html>`;
 };
+
 // ====================================================
 // 8) Blockly 초기화 & 이벤트 처리
 // ====================================================
@@ -650,16 +725,95 @@ const toolboxXMLs = {
   form: Form.toolbox,
   responsive: Responsive.toolbox,
   animation: Animation.toolbox,
-  empty: `<xml></xml>`,
+  data : `<xml><category name="변수" custom="VARIABLE" colour="#a55b80"></category></xml>`,
+  seo: `<xml><label text="SEO 설정 준비중"></label></xml>`,
+  advanced: `<xml><category name="함수" custom="PROCEDURE" colour="#995ba5"></category></xml>`,
+  empty: `<xml><category name="dummy" style="display:none"></category></xml>`,
 };
 
 const setToolbox = (xmlText) => {
+  let text = (xmlText || '<xml></xml>').trim();
+
+  // 1. 카테고리 감싸기
+  if (text.indexOf('<category') === -1) {
+    text = text.replace(/^<xml[^>]*>/, '').replace(/<\/xml>$/, '');
+    text = `<xml><category name="root_category">${text}</category></xml>`;
+  }
+
   try {
-    const text = (xmlText || '<xml></xml>').trim();
-    workspace.updateToolbox(Blockly.utils.xml.textToDom(text));
-    Blockly.svgResize(workspace);
+    // 2. 툴박스 업데이트
+    const dom = Blockly.utils.xml.textToDom(text);
+    workspace.updateToolbox(dom);
+
+    // 3. 회색 사이드바 숨기기
+    const workspaceDom = workspace.getParentSvg().parentNode;
+    const toolboxDiv = workspaceDom.querySelector('.blocklyToolboxDiv');
+    if (toolboxDiv) toolboxDiv.style.display = 'none';
+
+    // 4. 블록창 강제 오픈 & 자동 닫힘 방지
+    const toolbox = workspace.getToolbox();
+    if (toolbox && toolbox.getToolboxItems && toolbox.getToolboxItems().length > 0) {
+      toolbox.selectItemByPosition(0);
+
+      const flyout = workspace.getFlyout();
+      if (flyout) flyout.autoClose = false;
+
+      // 5. ✨ 애니메이션 수정 (setTimeout 제거 및 즉시 스타일 적용)
+      Blockly.svgResize(workspace);
+
+      const allFlyouts = document.querySelectorAll('.blocklyFlyout');
+
+      allFlyouts.forEach((flyoutSvg) => {
+        const blocks = flyoutSvg.querySelector('.blocklyBlockCanvas');
+        const bg = flyoutSvg.querySelector('.blocklyFlyoutBackground');
+
+        // [핵심] 1. 브라우저가 그리기 전에 강제로 먼저 숨깁니다 (Flicker 방지)
+        if (blocks) {
+          blocks.style.opacity = '0';
+          // transform은 Blockly 스크롤 좌표와 충돌할 수 있으므로 opacity로만 깜빡임 제어
+        }
+        if (bg) {
+          bg.style.opacity = '0';
+        }
+
+        // [핵심] 2. 다음 프레임에 애니메이션 즉시 실행 (딜레이 없음)
+        requestAnimationFrame(() => {
+          // [블록]: 왼쪽 -> 제자리
+          if (blocks) {
+            const animations = blocks.getAnimations();
+            animations.forEach(anim => anim.cancel());
+
+            blocks.animate([
+              { transform: 'translate(-300px, 0)', opacity: 0 }, // 시작
+              { transform: 'translate(0, 0)', opacity: 1 }       // 끝
+            ], {
+              duration: 300,
+              easing: 'ease',
+              fill: 'forwards',
+              composite: 'add'
+            });
+          }
+
+          // [배경]: Fade In
+          if (bg) {
+            const bgAnims = bg.getAnimations();
+            bgAnims.forEach(anim => anim.cancel());
+
+            bg.animate([
+              { opacity: 0 },
+              { opacity: 1 }
+            ], {
+              duration: 250,
+              easing: 'linear',
+              fill: 'forwards'
+            });
+          }
+        });
+      });
+    }
+
   } catch (e) {
-    workspace.updateToolbox(Blockly.utils.xml.textToDom('<xml></xml>'));
+    console.error("🚨 툴박스 오류:", e);
   }
 };
 
@@ -676,7 +830,7 @@ const categoryGroups = [
     label: '디자인',
     icon: '🎨',
     color: '#e91e63',
-    items: ['style', 'color', 'responsive', 'animation', 'flex'],
+    items: ['style', 'color', 'animation', 'responsive', 'flex'],
   },
   {
     id: 'logic',
@@ -710,11 +864,22 @@ const categories = {
 };
 
 const selectParent = (parentId) => {
+  // 1. 상위 카테고리 변경
   activeParent.value = parentId;
-  activeTab.value = null;
-  if (workspace) setToolbox(toolboxXMLs.empty);
-};
 
+  // 2. 해당 그룹의 정보 찾기
+  const group = categoryGroups.find((g) => g.id === parentId);
+
+  // 3. 하위 아이템이 있다면, 첫 번째 아이템을 자동으로 선택!
+  if (group && group.items && group.items.length > 0) {
+    const firstItem = group.items[0]; // 첫 번째 아이템 (예: layout)
+    selectCategory(firstItem);        // 강제로 선택 함수 실행
+  } else {
+    // 하위 아이템이 없는 경우만 빈 화면
+    activeTab.value = null;
+    if (workspace) setToolbox(toolboxXMLs.empty);
+  }
+};
 const selectCategory = (key) => {
   if (!workspace) return;
   if (activeTab.value === key) {
@@ -755,7 +920,6 @@ const loadPageById = (pageId) => {
     } catch (e) {}
   }
 
-  // ✅ 로드 후 grid 주입 + preview 갱신
   refreshCodeAndPreview();
   handleSelection(null);
 };
@@ -765,10 +929,11 @@ const selectPage = (pageId) => {
   loadPageById(pageId);
 };
 
-const deletePage = (pageId) => {
-  if (pages.value.length <= 1)
-    return alert('최소 하나의 페이지는 있어야 합니다.');
-  if (!confirm('삭제하시겠습니까?')) return;
+const deletePageNow = (pageId) => {
+  if (pages.value.length <= 1) {
+    openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
+    return;
+  }
 
   const idx = pages.value.findIndex((p) => p.id === pageId);
   if (idx !== -1) {
@@ -776,6 +941,15 @@ const deletePage = (pageId) => {
     savePagesToStorage();
     if (selectedPageId.value === pageId) loadPageById(pages.value[0].id);
   }
+};
+
+// 클릭 시에는 confirm 모달만 띄움
+const deletePage = (pageId) => {
+  if (pages.value.length <= 1) {
+    openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
+    return;
+  }
+  openDeleteConfirm(pageId);
 };
 
 const addPage = () => {
@@ -836,43 +1010,31 @@ onMounted(async () => {
     trashcan: true,
   });
 
-  /**
-   * ✅ Blockly 이벤트 흐름
-   * - SELECTED: 선택 동기화 (Blockly -> preview highlight)
-   * - 그 외(UI 제외): 코드 재생성 + grid 주입 + preview 갱신
-   */
+  let debounceTimer = null;
   workspace.addChangeListener((e) => {
     if (e.type === Blockly.Events.SELECTED) {
-      if (!isSelectingProgrammatically) {
+      if (!isSelectingProgrammatically)
         handleSelection(e.newElementId, 'blockly');
-      }
       return;
     }
-    if (e.type !== Blockly.Events.UI && e.type !== Blockly.Events.CLICK) {
+    if (e.type === Blockly.Events.UI || e.type === Blockly.Events.CLICK) return;
+
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
       refreshCodeAndPreview();
-      setTimeout(() => {
-        if (selectedBlockId.value)
-          handleSelection(selectedBlockId.value, 'blockly');
-      }, 100);
-    }
+      if (selectedBlockId.value)
+        handleSelection(selectedBlockId.value, 'blockly');
+    }, 500);
   });
 
-  /**
-   * ✅ iframe → parent 메시지 수신 흐름
-   * - update_free_position: 드랍 결과 (x,y,w,h) 저장
-   * - select_block/deselect_block: 선택 동기화
-   */
   window.addEventListener('message', (event) => {
     if (event.data.type === 'update_free_position') {
       const { blockId, x, y, w, h } = event.data;
       const block = workspace.getBlockById(blockId);
       if (block) {
-        // ✅ block.data에 자유배치 좌표 저장 (영구 보존)
         block.data = JSON.stringify({
           x: Number(x || 0),
           y: Number(y || 0),
-          w: Number(w || 0),
-          h: Number(h || 0),
         });
         saveCurrentWorkspaceToPage();
         refreshCodeAndPreview();
@@ -884,7 +1046,6 @@ onMounted(async () => {
     if (event.data.type === 'deselect_block') handleSelection(null, 'iframe');
   });
 
-  // 페이지 로드
   const stored = loadPagesFromStorage();
   if (stored && stored.length > 0) pages.value = stored;
   if (pages.value.length > 0) loadPageById(selectedPageId.value);
@@ -950,7 +1111,7 @@ onMounted(async () => {
             id="previewFrame"
             :srcdoc="previewSrc"
             frameborder="0"
-            :sandbox="'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox'"
+            :sandbox="'allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox allow-scripts'"
           >
           </iframe>
         </div>
@@ -1114,6 +1275,23 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <!--삭제/취소 모달-->
+    <ConfirmModal 
+      :open="confirmModal.open"
+      type="warning"
+      :message="confirmModal.message"
+      confirm-text="삭제"
+      cancel-text="취소"
+      @confirm="confirmDeletePage"
+      @cancel="closeDeleteConfirm"
+    />
+    <!--단순 안내 모달-->
+    <GlobalModal
+      :open="modal.open"
+      :message="modal.message"
+      :type="modal.type"
+      @confirm="closeModal"
+    />
   </div>
 </template>
 
@@ -1502,16 +1680,13 @@ iframe {
 .phone-hide {
   display: none !important;
 }
-:deep(.blocklyToolboxDiv) {
-  background-color: #f9f9f9;
-  border-right: 1px solid #ddd;
-  display: block !important;
-  opacity: 1 !important;
-  transition:
-    transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
-    opacity 0.3s ease;
-  transform: translateX(0);
-  z-index: 50;
+
+:deep(.blocklyToolbox) {
+  display: none !important; /* ⭕ 회색 사이드바 영구 숨김 */
+}
+:deep(.blocklyFlyoutBackground){
+  fill: #c0c0c0 !important;
+  fill-opacity: 0.2 !important;
 }
 .workspace-wrapper:not(.drawer-open) :deep(.blocklyToolboxDiv) {
   transform: translateX(-100%);

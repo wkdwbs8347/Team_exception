@@ -47,14 +47,22 @@
         init() {
           this.appendDummyInput()
               .appendField("🍱 Flex 배치 시작하기 (display: flex)");
-          this.setPreviousStatement(true);
-          this.setNextStatement(true);
+          this.appendStatementInput("BODY")
+              .setCheck("FLEX_CHILD")
+          this.setPreviousStatement(true, "STYLE");
+          this.setNextStatement(true, "STYLE");
           this.setColour(BLOCK_COLOR);
           this.setTooltip('이 요소를 Flex 컨테이너로 만듭니다. 자식 요소들이 나란히 배치됩니다.');
         }
       };
     }
-    javascriptGenerator.forBlock['style_display_flex'] = () => `  display: flex !important;\n`;
+    javascriptGenerator.forBlock['style_display_flex'] = function(block) {
+      // 1. 'BODY' 영역 안에 연결된 블록들의 코드를 가져옵니다.
+      const statements_body = javascriptGenerator.statementToCode(block, 'BODY');
+      
+      // 2. display: flex 선언 후, 줄바꿈(\n)을 하고 내부 코드를 이어 붙입니다.
+      return `  display: flex !important;\n${statements_body}`;
+    };
 
 
     // 1. flex-direction (주축 방향)
@@ -69,7 +77,9 @@
                   ["세로 (column)", "column"],
                   ["세로 반대 (column-reverse)", "column-reverse"]
               ]), "DIR");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
         }
       };
     }
@@ -86,7 +96,9 @@
                   ["줄바꿈 (wrap)", "wrap"],
                   ["반대로 줄바꿈 (wrap-reverse)", "wrap-reverse"]
               ]), "WRAP");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
         }
       };
     }
@@ -106,7 +118,9 @@
                   ["균등 여백 (space-around)", "space-around"],
                   ["동일 간격 (space-evenly)", "space-evenly"]
               ]), "JUSTIFY");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
         }
       };
     }
@@ -125,7 +139,9 @@
                   ["가운데 (center)", "center"],
                   ["문자 기준선 (baseline)", "baseline"]
               ]), "ALIGN");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
         }
       };
     }
@@ -145,7 +161,9 @@
                   ["양끝 정렬 (space-between)", "space-between"],
                   ["균등 여백 (space-around)", "space-around"]
               ]), "CONTENT");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('줄바꿈(wrap) 상태에서 여러 줄의 간격을 조정합니다.');
         }
       };
@@ -164,7 +182,9 @@
           this.appendDummyInput()
               .appendField("📈 확대 비율 (Grow)")
               .appendField(new FieldNumber(0, 0), "GROW"); // 기본 0, 최소 0
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('남은 공간을 얼마나 가져갈지 비율로 설정합니다. (0은 안 커짐)');
         }
       };
@@ -178,7 +198,9 @@
           this.appendDummyInput()
               .appendField("📉 축소 비율 (Shrink)")
               .appendField(new FieldNumber(1, 0), "SHRINK"); // 기본 1, 최소 0
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('공간이 부족할 때 얼마나 줄어들지 비율로 설정합니다. (0은 안 줄어듦)');
         }
       };
@@ -192,8 +214,10 @@
           this.appendDummyInput()
               .appendField("📏 기본 크기 (Basis)")
               // px, %, auto 등 다양한 단위를 위해 TextInput 사용
-              .appendField(new FieldTextInput('auto'), "BASIS"); 
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+              .appendField(new FieldTextInput('auto'), "BASIS");
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('예: 200px, 50%, auto');
         }
       };
@@ -214,7 +238,9 @@
                   ["늘리기 (stretch)", "stretch"],
                   ["문자 기준선 (baseline)", "baseline"]
               ]), "SELF");
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('부모의 align-items 설정을 무시하고 이 아이템만 따로 정렬합니다.');
         }
       };
@@ -228,7 +254,9 @@
           this.appendDummyInput()
               .appendField("🔢 배치 순서 (Order)")
               .appendField(new FieldNumber(0), "ORDER"); // 음수도 가능
-          this.setPreviousStatement(true); this.setNextStatement(true); this.setColour(BLOCK_COLOR);
+          this.setPreviousStatement(true, "FLEX_CHILD");
+          this.setNextStatement(true, "FLEX_CHILD");
+          this.setColour(BLOCK_COLOR);
           this.setTooltip('낮은 숫자가 먼저 배치됩니다. (기본 0)');
         }
       };

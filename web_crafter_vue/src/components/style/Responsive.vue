@@ -57,8 +57,8 @@ export const defineBlocks = () => {
           .appendField(new Blockly.FieldTextInput("1200"), "MAX_WIDTH")
           .appendField("px");
       this.appendStatementInput('CONTENT').setCheck(null); // 내부에 다른 블록을 끼울 수 있는 공간
-      this.setPreviousStatement(true);
-      this.setNextStatement(true);
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
       this.setColour('#0091ea');
       this.setTooltip("브라우저가 좁아지면 자동으로 너비가 줄어드는 상자입니다.");
     }
@@ -106,8 +106,8 @@ export const defineBlocks = () => {
       init() {
         this.appendDummyInput().appendField(d.label);
         this.appendStatementInput('DO'); // 조건 충족 시 실행할 블록 입구
-        this.setPreviousStatement(true);
-        this.setNextStatement(true);
+        this.setPreviousStatement(true, "STYLE");
+        this.setNextStatement(true, "STYLE");
         this.setColour(20);
       }
     };
