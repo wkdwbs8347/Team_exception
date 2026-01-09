@@ -35,7 +35,6 @@ export const toolbox = `
   <block type="value_concat"></block>
 </xml>
 `
-
 /* =====================
    블록 정의 및 생성기
 ===================== */

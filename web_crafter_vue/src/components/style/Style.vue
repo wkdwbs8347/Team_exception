@@ -22,6 +22,7 @@ export const category = {
 export const toolbox = `
 <xml>
   <block type="style_tag"></block>
+  <block type="style_tag_all"></block>
   <label text="──────────────────────"></label>
   <block type="style_font_size"></block>
   <block type="style_font_weight"></block>
@@ -64,6 +65,17 @@ export const defineBlocks = () => {
     },
   };
 
+  Blockly.Blocks['style_tag_all'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField('🎨 전체 스타일');
+      this.appendStatementInput('BODY').setCheck('STYLE').appendField('속성들');
+      this.setPreviousStatement(false, null);
+      this.setNextStatement(false, null);
+      this.setColour('#ab47bc');
+      this.hat = 'cap';
+    },
+  };
   Blockly.Blocks['style_font_size'] = {
     init() {
       this.appendDummyInput().appendField('🔠 글자 크기').appendField(new Blockly.FieldTextInput('20'), 'SIZE').appendField('px');
@@ -228,7 +240,11 @@ export const defineBlocks = () => {
 
   Blockly.Blocks['style_list_style'] = {
     init() {
-      this.appendDummyInput().appendField("📋 리스트 스타일").appendField("종류").appendField(new Blockly.FieldDropdown([["● 기본(disc)", "disc"], ["○ 원(circle)", "circle"], ["■ 사각(square)", "square"], ["1. 숫자(decimal)", "decimal"], ["a. 알파벳(lower-alpha)", "lower-alpha"], ["없음(none)", "none"]]), "TYPE").appendField("마커 위치").appendField(new Blockly.FieldDropdown([["바깥(outside)", "outside"], ["안쪽(inside)", "inside"]]), "POSITION");
+      this.appendDummyInput().appendField("📋 리스트 스타일")
+        .appendField("종류")
+        .appendField(new Blockly.FieldDropdown([["● 기본(disc)", "disc"], ["○ 원(circle)", "circle"], ["■ 사각(square)", "square"], 
+          ["1. 숫자(decimal)", "decimal"], ["a. 알파벳(lower-alpha)", "lower-alpha"], ["없음(none)", "none"]]), "TYPE")
+        .appendField("마커 위치").appendField(new Blockly.FieldDropdown([["바깥(outside)", "outside"], ["안쪽(inside)", "inside"]]), "POSITION");
       this.setPreviousStatement(true, "STYLE");
       this.setNextStatement(true, "STYLE");
       this.setColour('#ab47bc');
@@ -242,7 +258,12 @@ export const defineBlocks = () => {
     const cls = safeClass(raw.replace(/^[.#]/, ''), 'container');
     const state = block.getFieldValue('STATE') || '';
     const bodyCode = generator.statementToCode(block, 'BODY') || '';
-    return `<style>\n.${cls}${state} {\n${bodyCode.trim()}\n}\n</style>\n`;
+    return `<style>\n.${cls}${state} {\n${bodyCode.trim()}}\n <\/style>\n`;
+  };
+
+  javascriptGenerator.forBlock['style_tag_all'] = function (block, generator) {
+    const bodyCode = generator.statementToCode(block, 'BODY') || '';
+    return `<style> \n#wrapper {\n ${bodyCode.trim()} }<\/style>\n`;
   };
 
   javascriptGenerator.forBlock['style_font_size'] = (block) => `font-size: ${block.getFieldValue('SIZE')}px;\n`;
@@ -263,7 +284,7 @@ export const defineBlocks = () => {
     const type = block.getFieldValue('TYPE');
     const position = block.getFieldValue('POSITION');
     if (type === 'none') return `list-style: none;\npadding-left: 0;\n`;
-    return `list-style-type: ${type};\nlist-style-position: ${position};\npadding-left: 1.5rem;\n`;
+    return `list-style-type: ${type};\nlist-style-position: ${position};\n`;
   };
 
   javascriptGenerator.forBlock['style_opacity'] = (block) => `opacity: ${block.getFieldValue('OPACITY') / 100};\n`;
