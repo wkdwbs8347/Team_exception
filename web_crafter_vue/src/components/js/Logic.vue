@@ -52,25 +52,44 @@ export const defineBlocks = () => {
     return ['isLogin', javascriptGenerator.ORDER_ATOMIC];
   }
 
-  /* 📄 현재 페이지가 ○○이다 */
-  Blockly.Blocks['cond_page'] = {
-    init() {
-      this.appendDummyInput()
-        .appendField('📄 현재 페이지가')
-        .appendField(new Blockly.FieldDropdown([
-          ['홈', 'home'],
-          ['로그인', 'login'],
-          ['회원가입', 'join']
-        ]), 'PAGE')
-        .appendField('이다');
-      this.setOutput(true, 'Boolean');
-      this.setColour('#4ca454');
-    }
+// 1. (참고용) 확장 기능 등록 코드는 이미 있으시겠지만, 혹시 모르니 확인하세요.
+if (!Blockly.Extensions.isRegistered('dynamic_page_dropdown')) {
+  Blockly.Extensions.register('dynamic_page_dropdown', function() {
+    this.getInput('DUMMY')
+      .appendField(new Blockly.FieldDropdown(function() {
+        return window.WC_GET_PAGES ? window.WC_GET_PAGES() : [['로딩중...', '']];
+      }), 'PAGE_ID');
+  });
+}
+
+// [수정됨] 조건 블록 (자바스크립트 방식 init - 확실한 한 줄 보장)
+Blockly.Blocks['cond_page'] = {
+  init: function() {
+    // 1. 드롭다운 생성 (동적 데이터 연결)
+    const dropdown = new Blockly.FieldDropdown(function() {
+      return window.WC_GET_PAGES ? window.WC_GET_PAGES() : [['로딩중...', '']];
+    });
+
+    // 2. 한 줄에 모든 요소 추가 (.appendField로 이어 붙이기)
+    this.appendDummyInput()
+        .appendField("📄 현재 페이지가")  // 앞 문구
+        .appendField(dropdown, "PAGE_ID") // 드롭다운
+        .appendField("이라면");           // 뒷 문구
+
+    // 3. 설정
+    this.setInputsInline(true); // ✨ 핵심: 가로 정렬 강제 (날씬하게)
+    this.setOutput(true, "Boolean"); // 결과값: 참/거짓
+    this.setColour("#4ca454");
+    this.setTooltip("현재 페이지인지 확인합니다.");
   }
-  javascriptGenerator.forBlock['cond_page'] = (block) => {
-    const page = block.getFieldValue('PAGE');
-    return [`currentPage === '${page}'`, javascriptGenerator.ORDER_RELATIONAL];
-  }
+};
+
+// (코드 생성기는 기존과 동일하므로 그대로 두셔도 됩니다)
+javascriptGenerator.forBlock['cond_page'] = function(block, generator) {
+  const targetPageId = block.getFieldValue('PAGE_ID');
+  const code = `PAGE_ID === '${targetPageId}'`;
+  return [code, generator.ORDER_EQUALITY];
+};
 
   /* ⚖️ 비교 연산자 */
   Blockly.Blocks['cond_compare'] = {

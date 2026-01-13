@@ -194,24 +194,39 @@ if (!Blockly.Blocks['style_border_combined']) {
   // --- 제너레이터 완성본 ---
 
 javascriptGenerator.forBlock['style_tag'] = (block) => {
-  let selector = (block.getFieldValue('SELECTOR') || '제목').trim();
+  let selector = (block.getFieldValue('SELECTOR') || 'container').trim();
   if (selector && !selector.startsWith('.') && !selector.startsWith('#')) selector = '.' + selector;
-  let rawBody = javascriptGenerator.statementToCode(block, 'BODY').trim();
+
+  const rawBody = javascriptGenerator.statementToCode(block, 'BODY');
   let fontFaceDeclarations = '';
-  let styleProperties = '';
-  const lines = rawBody.split('\n');
-  const fontFaceRegex = /\/\*\s*@FONT-FACE:\s*([^|]+)\|([^|]+)\|([^|]+)\|([^\*]+)\s*\*\//;
-  lines.forEach(line => {
-    const match = line.match(fontFaceRegex);
-    if (match) {
-      const name = match[1].trim(); const url = match[2].trim(); const display = match[4].trim();
-      fontFaceDeclarations += `@font-face {\n  font-family: '${name}';\n  src: url('${url}') format('woff2');\n  font-weight: 100 900; /* 가짜 굵기 활성화 */\n  font-display: ${display};\n}\n\n`;
+  
+  const fontFaceRegex = /@FONT-FACE:\s*([^|]+)\|([^|]+)\|([^|]+)\|([^|\s\*]+)/g;
+  let match;
+
+  while ((match = fontFaceRegex.exec(rawBody)) !== null) {
+    const name = match[1].trim();
+    let urlInput = match[2].trim(); // 사용자가 입력한 값 전체
+    const weight = match[3].trim();
+    const display = match[4].trim();
+
+    // 🌟 [초보자 배려 로직] 
+    // 사용자가 url('...') format('...') 통째로 넣었을 경우 주소만 쏙 뽑아냅니다.
+    let pureUrl = urlInput;
+    if (urlInput.includes('url(')) {
+      // url(' 와 ') 사이의 내용만 추출
+      const matchUrl = urlInput.match(/url\(['"]?([^'"]+)['"]?\)/);
+      if (matchUrl) pureUrl = matchUrl[1];
     } else {
-      const trimmedLine = line.trim();
-      if (trimmedLine) styleProperties += `  ${trimmedLine}\n`;
+      // url()이 없더라도 format() 등이 붙어있다면 공백이나 따옴표 기준으로 앞부분 주소만 취함
+      pureUrl = urlInput.split("'")[0].split('"')[0].split(' ')[0].trim();
     }
-  });
-  return `<style>\n${fontFaceDeclarations}${selector} {\n${styleProperties}}\n</style>\n`;
+
+    fontFaceDeclarations += `@font-face {\n  font-family: '${name}';\n  src: url('${pureUrl}') format('woff');\n  font-weight: ${weight};\n  font-display: ${display};\n}\n\n`;
+  }
+
+  const styleProperties = rawBody.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+
+  return `<style>\n${fontFaceDeclarations}${selector} {\n  ${styleProperties}\n}\n</style>\n`;
 };
 
 javascriptGenerator.forBlock['style_custom_font'] = (block) => {

@@ -325,9 +325,7 @@ ${content}</form>\n`
 
     const content = javascriptGenerator.statementToCode(block, 'CONTENT')
 
-    // ✅ 드래그 X: data-draggable 안 붙임
-    // ✅ 기본 스타일은 data-wc-style로만 넣음
-    return `<div class="${cls}${extraAttr}" ${builderStyleAttr()} data-block-id="${block.id}">
+    return `<div class="${cls}${extraAttr}" data-block-id="${block.id}">
 ${content}</div>\n`
   }
 }

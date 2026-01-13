@@ -2,15 +2,10 @@
 import * as Blockly from 'blockly';
 import { javascriptGenerator } from 'blockly/javascript';
 
-export const category = { label: '애니메이션', color: '#e91e63', icon: '🎬' };
-
-export const toolbox = `
-<xml>
-  <block type="style_animation_preset"></block>
-  <block type="style_animation_custom"></block>
-</xml>
-`;
-
+/**
+ * 1. 애니메이션 설계도 (Keyframes) 정의
+ * 모든 애니메이션의 동작 원리를 담은 CSS 문자열입니다.
+ */
 const ANIMATION_KEYFRAMES = `
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes bounce {
@@ -34,8 +29,35 @@ const ANIMATION_KEYFRAMES = `
 }
 `;
 
+/**
+ * 2. 시스템 연결 설정
+ * updatePreview 함수가 Animation.ANIMATION_KEYFRAMES를 읽을 수 있도록
+ * window 객체와 export 양쪽 모두에 등록합니다.
+ */
+if (typeof window !== 'undefined') {
+  window.Animation = {
+    ANIMATION_KEYFRAMES: ANIMATION_KEYFRAMES
+  };
+}
+
+export const Animation = {
+  ANIMATION_KEYFRAMES: ANIMATION_KEYFRAMES
+};
+
+export const category = { label: '애니메이션', color: '#e91e63', icon: '🎬' };
+
+export const toolbox = `
+<xml>
+  <block type="style_animation_preset"></block>
+  <block type="style_animation_custom"></block>
+</xml>
+`;
+
+/**
+ * 3. 블록 정의 (Blockly Blocks)
+ */
 export const defineBlocks = () => {
-  // [핵심] 시작 버튼을 눌렀을 때 브라우저가 애니메이션을 알 수 있도록 설계도 주입
+  // 블록 추가 시 브라우저 헤더에 설계도 주입 (보험용)
   if (typeof document !== 'undefined') {
     const styleId = 'web-crafter-animation-defs';
     let styleTag = document.getElementById(styleId);
@@ -47,6 +69,7 @@ export const defineBlocks = () => {
     styleTag.textContent = ANIMATION_KEYFRAMES;
   }
 
+  // 프리셋 애니메이션 블록
   Blockly.Blocks['style_animation_preset'] = {
     init: function() {
       this.appendDummyInput()
@@ -66,6 +89,7 @@ export const defineBlocks = () => {
     }
   };
 
+  // 커스텀 애니메이션 블록
   Blockly.Blocks['style_animation_custom'] = {
     init: function() {
       this.appendDummyInput().appendField("✨ 애니메이션 상세 설정");
@@ -85,12 +109,17 @@ export const defineBlocks = () => {
   };
 };
 
+/**
+ * 4. 코드 생성기 (JavaScript Generator)
+ * 생성된 CSS 속성이 시스템의 강제 차단(.is-design * { animation: none !important; })을 
+ * 뚫을 수 있도록 !important를 반드시 포함합니다.
+ */
 javascriptGenerator.forBlock['style_animation_preset'] = function(block) {
   const name = block.getFieldValue('NAME');
   const speed = block.getFieldValue('SPEED');
   const count = (name === 'fade-in' || name === 'zoom-in') ? '1' : 'infinite';
-  // 보라색 블록 내부에서 .class { ... } 안에 들어갈 코드를 생성
-  return `animation: ${name} ${speed} ease-in-out ${count} forwards;\n`;
+  
+  return `.is-running & { animation: ${name} ${speed} ease-in-out ${count} forwards; }\n`;
 };
 
 javascriptGenerator.forBlock['style_animation_custom'] = function(block) {
@@ -98,6 +127,7 @@ javascriptGenerator.forBlock['style_animation_custom'] = function(block) {
   const time = block.getFieldValue('TIME') || '1';
   const count = block.getFieldValue('COUNT');
   const timing = block.getFieldValue('TIMING');
-  return `animation: ${name} ${time}s ${timing} ${count} forwards;\n`;
+  
+  return `animation: ${name} ${time}s ${timing} ${count} forwards !important;\n`;
 };
 </script>
