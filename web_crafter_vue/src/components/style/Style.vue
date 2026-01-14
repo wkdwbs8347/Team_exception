@@ -63,21 +63,14 @@ export const toolbox = `
   <block type="style_tag"></block>
   <block type="style_tag_all"></block>
   <label text="──────────────────────"></label>
-  <block type="style_font_size"></block>
-  <block type="style_font_weight"></block>
-  <block type="style_line_height"></block>
-  <block type="style_letter_spacing"></block>
-  <block type="style_white_space"></block>
-  <label text="──────────────────────"></label>
   <block type="style_size"></block>
   <block type="style_size_limits"></block>
   <block type="style_overflow"></block>
   <block type="style_display"></block>
   <block type="style_transition_move"></block>
-  <block type="style_opacity"></block>
+  <block type="style_filter"></block>
   <block type="style_background_gradient"></block>
   <block type="style_shadow"></block>
-  <block type="style_text_align"></block>
   <block type="style_transition"></block>
   <block type="style_border_radius"></block>
   <label text="──────────────────────"></label>
@@ -122,63 +115,9 @@ export const defineBlocks = () => {
       this.hat = 'cap';
     },
   };
-  Blockly.Blocks['style_font_size'] = {
-    init() {
-      this.appendDummyInput().appendField('🔠 글자 크기').appendField(new Blockly.FieldTextInput('20'), 'SIZE').appendField('px');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
-  Blockly.Blocks['style_font_weight'] = {
-    init() {
-      this.appendDummyInput().appendField('🔠 글자 두께').appendField(new Blockly.FieldDropdown([['100 Thin', '100'], ['300 Light', '300'], ['400 Regular', '400'], ['500 Medium', '500'], ['700 Bold', '700'], ['900 Black', '900']]), 'WEIGHT');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
-  Blockly.Blocks['style_line_height'] = {
-    init() {
-      this.appendDummyInput().appendField('📏 줄 간격').appendField(new Blockly.FieldTextInput('1.6'), 'HEIGHT');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
-  Blockly.Blocks['style_letter_spacing'] = {
-    init() {
-      this.appendDummyInput().appendField('↔️ 자간').appendField(new Blockly.FieldTextInput('0.05'), 'SPACE').appendField('em');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
   Blockly.Blocks['style_size'] = {
     init() {
       this.appendDummyInput().appendField('📐 크기 너비').appendField(new Blockly.FieldTextInput('100%'), 'WIDTH').appendField('높이').appendField(new Blockly.FieldTextInput('auto'), 'HEIGHT');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
-  Blockly.Blocks['style_opacity'] = {
-    init: function () {
-      this.appendDummyInput().appendField('🏁 투명도').appendField(new Blockly.FieldNumber(100, 0, 100), 'OPACITY').appendField('%');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-  };
-
-  Blockly.Blocks['style_text_align'] = {
-    init() {
-      this.appendDummyInput().appendField('📝 정렬').appendField(new Blockly.FieldDropdown([['왼쪽', 'left'], ['가운데', 'center'], ['오른쪽', 'right']]), 'ALIGN');
       this.setPreviousStatement(true, 'STYLE');
       this.setNextStatement(true, 'STYLE');
       this.setColour('#ab47bc');
@@ -315,24 +254,6 @@ export const defineBlocks = () => {
   },
 };
 
-  Blockly.Blocks['style_white_space'] = {
-    init() {
-      this.appendDummyInput()
-        .appendField('📖 줄 바꿈 설정')
-        .appendField(new Blockly.FieldDropdown([
-          ['자동 (normal)', 'normal'],
-          ['줄바꿈 안함 (nowrap)', 'nowrap'],
-          ['엔터 유지+옆으로 (pre)', 'pre'],
-          ['엔터 유지+자동 줄바꿈 (pre-wrap)', 'pre-wrap'], // 추천 옵션
-          ['엔터만 유지 (pre-line)', 'pre-line'],
-          ['부모 설정 따름 (inherit)', 'inherit']
-        ]), 'WS');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    }
-  };
-
   Blockly.Blocks['style_shadow'] = {
     init() {
       this.appendDummyInput()
@@ -436,6 +357,26 @@ Blockly.Blocks['style_background_gradient'] = {
     this.setColour('#ab47bc');
   }
 };
+
+Blockly.Blocks['style_filter'] = {
+  init() {
+    this.appendDummyInput()
+        .appendField('✨ 필터 효과')
+        .appendField(new Blockly.FieldDropdown([
+          ['흐림(blur)', 'blur'],
+          ['밝기(brightness)', 'brightness'],
+          ['대비(contrast)', 'contrast'],
+          ['회색조(grayscale)', 'grayscale'],
+          ['색상 회전(hue-rotate)', 'hue-rotate'],
+          ['반전(invert)', 'invert']
+        ]), 'TYPE')
+        /* 이제 여기에 '10', '50%', '180deg' 등을 한 번에 쓰시면 됩니다 */
+        .appendField(new Blockly.FieldTextInput('5'), 'VAL'); 
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ab47bc');
+  }
+};
   // --- 제너레이터 정의 시작 (defineBlocks 함수 안에 포함) ---
 
 javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
@@ -453,17 +394,10 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
         // ✨ [핵심 해결책]
         // 초기 배치 시 transition: none !important를 주어 
         // 브라우저가 위치 이동을 애니메이션으로 처리하는 것을 원천 차단합니다.
-        posCSS = `
-  position: absolute !important;
-  left: ${pos.x}px !important;
-  top: ${pos.y}px !important;
-  margin: 0 !important;
-  transition: none !important; 
-`;
+        posCSS = `position: absolute !important;left: ${pos.x}px !important;top: ${pos.y}px !important;margin: 0 !important;transition: none !important; `;
       }
     } catch (e) {}
   }
-
   // 이제 사용자님이 원한 '부드러운 효과'는 bodyCode 내부에 있는 
   // transition 설정에 의해 다시 살아나지만, 초기 배치는 이미 끝난 후이므로 튀지 않습니다.
   return `<style>\n.${cls}${state} {\n${posCSS}${bodyCode.trim()}\n}\n<\/style>\n`;
@@ -473,11 +407,6 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
     const bodyCode = generator.statementToCode(block, 'BODY') || '';
     return `<style> \n#wrapper {\n ${bodyCode.trim()} }<\/style>\n`;
   };
-
-  javascriptGenerator.forBlock['style_font_size'] = (block) => `font-size: ${block.getFieldValue('SIZE')}px;\n`;
-  javascriptGenerator.forBlock['style_font_weight'] = (block) => `font-weight: ${block.getFieldValue('WEIGHT')};\n`;
-  javascriptGenerator.forBlock['style_line_height'] = (block) => `line-height: ${block.getFieldValue('HEIGHT')};\n`;
-  javascriptGenerator.forBlock['style_letter_spacing'] = (block) => `letter-spacing: ${block.getFieldValue('SPACE')}em;\n`;
 
   javascriptGenerator.forBlock['style_size'] = (block) => {
     const w = block.getFieldValue('WIDTH');
@@ -494,9 +423,6 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
     if (type === 'none') return `list-style: none;\npadding-left: 0;\n`;
     return `list-style-type: ${type};\nlist-style-position: ${position};\n`;
   };
-
-  javascriptGenerator.forBlock['style_opacity'] = (block) => `opacity: ${block.getFieldValue('OPACITY') / 100};\n`;
-  javascriptGenerator.forBlock['style_text_align'] = (block) => `text-align: ${block.getFieldValue('ALIGN')};\n`;
   javascriptGenerator.forBlock['style_border_radius'] = (block) => `border-radius: ${block.getFieldValue('RADIUS')}px;\n`;
 
   javascriptGenerator.forBlock['style_padding'] = (block) => {
@@ -531,10 +457,6 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
   }
   return `overflow: ${value};\n`;
 };
-
-  javascriptGenerator.forBlock['style_white_space'] = (block) => {
-    return `white-space: ${block.getFieldValue('WS')};\n`;
-  }
 
   javascriptGenerator.forBlock['style_shadow'] = function(block) {
     // getFieldValue 뒤의 인자가 위 init()의 대문자 이름들과 '완벽히' 같아야 합니다.
@@ -592,17 +514,34 @@ javascriptGenerator.forBlock['style_background_gradient'] = (block) => {
   const dir = block.getFieldValue('DIR');
   const color1 = block.getFieldValue('COLOR1');
   const color2 = block.getFieldValue('COLOR2');
-  
+
   const gradient = `linear-gradient(${dir}, ${color1}, ${color2})`;
-  
+
   if (target === 'text') {
     return `background: ${gradient};\n` +
            `-webkit-background-clip: text;\n` +
            `-webkit-text-fill-color: transparent;\n` +
-           `display: inline-block;\n` + 
-           `width: max-content;\n` +   /* ✨ 핵심: 도화지를 글자 끝까지 늘림 */
-           `vertical-align: top;\n`;
+           `display: block;\n`;
   }
+
   return `background: ${gradient};\n`;
+};
+
+javascriptGenerator.forBlock['style_filter'] = (block) => {
+  const type = block.getFieldValue('TYPE');
+  const val = block.getFieldValue('VAL') || '0';
+  
+  // withUnit 함수를 써서 숫자만 입력하면 px, 단위를 쓰면 그대로 유지
+  // 단, brightness나 contrast처럼 %가 기본인 것들을 위해 필터별 기본 단위 설정
+  let defaultUnit = 'px';
+  if (['brightness', 'contrast', 'grayscale', 'invert'].includes(type)) {
+    defaultUnit = '%';
+  } else if (type === 'hue-rotate') {
+    defaultUnit = 'deg';
+  }
+
+  const finalValue = withUnit(val, defaultUnit);
+  
+  return `filter: ${type}(${finalValue}) !important;\n`;
 };
 </script>

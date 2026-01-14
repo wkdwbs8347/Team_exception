@@ -13,15 +13,28 @@ export const category = {
 
 export const toolbox = `
 <xml>
-  <block type="style_text_color"></block>
-  <block type="style_bg_color"></block>
-  <block type="style_border_combined"></block>
+<block type="style_font_size"></block>
+    <block type="style_font_weight"></block>
+    <block type="style_font_family"></block>
+    <block type="style_text_transform"></block>
 
-  <label text="──────────────────────"></label>
-  <block type="style_custom_font"></block>
-  <block type="font_url"></block>
-  <block type="font_weight"></block>
-  <block type="font_display"></block>
+        <block type="style_text_stroke"></block>
+
+    <block type="style_line_height"></block>
+    <block type="style_letter_spacing"></block>
+    <block type="style_white_space"></block>
+    <block type="style_text_align"></block>
+    <block type="style_opacity"></block>
+    <block type="style_text_decoration"></block>
+    <label text="──────────────────────"></label>
+    <block type="style_text_color"></block>
+    <block type="style_bg_color"></block>
+    <block type="style_border_combined"></block>
+    <label text="──────────────────────"></label>
+    <block type="style_custom_font"></block>
+    <block type="font_url"></block>
+    <block type="font_weight"></block>
+    <block type="font_display"></block>
 </xml>
 `;
 
@@ -146,6 +159,24 @@ if (!Blockly.Blocks['style_border_combined']) {
     }
   };
 }
+
+Blockly.Blocks['style_text_stroke'] = {
+  init() {
+    this.appendDummyInput()
+        .appendField('🖋️ 글자 외곽선')
+        .appendField(new Blockly.FieldTextInput('1'), 'WIDTH')
+        .appendField('px')
+        // 클래스 스코프 에러 방지를 위해 안전하게 참조
+        .appendField(new (typeof FieldModalColor !== 'undefined' ? FieldModalColor : Blockly.FieldColour)('#000000'), 'COLOR');
+
+    // ✨ [핵심 수정] 조립이 가능하도록 위아래 홈을 만듭니다.
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    
+    this.setColour('#ff3366'); // 폰트 카테고리 색상
+  }
+};
+
 }
 
   // 2. 조립형 폰트 설정 블록들
@@ -190,6 +221,147 @@ if (!Blockly.Blocks['style_border_combined']) {
       }
     };
   }
+
+    Blockly.Blocks['style_font_size'] = {
+    init() {
+      this.appendDummyInput().appendField('🔠 글자 크기').appendField(new Blockly.FieldTextInput('20'), 'SIZE').appendField('px');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+  Blockly.Blocks['style_font_weight'] = {
+    init() {
+      this.appendDummyInput().appendField('🔠 글자 두께').appendField(new Blockly.FieldDropdown([['100 Thin', '100'], ['300 Light', '300'], ['400 Regular', '400'], ['500 Medium', '500'], ['700 Bold', '700'], ['900 Black', '900']]), 'WEIGHT');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+  Blockly.Blocks['style_line_height'] = {
+    init() {
+      this.appendDummyInput().appendField('📏 줄 간격').appendField(new Blockly.FieldTextInput('1.6'), 'HEIGHT');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+  Blockly.Blocks['style_letter_spacing'] = {
+    init() {
+      this.appendDummyInput().appendField('↔️ 자간').appendField(new Blockly.FieldTextInput('0.05'), 'SPACE').appendField('em');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+    Blockly.Blocks['style_opacity'] = {
+    init: function () {
+      this.appendDummyInput().appendField('🏁 투명도').appendField(new Blockly.FieldNumber(100, 0, 100), 'OPACITY').appendField('%');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+  Blockly.Blocks['style_text_align'] = {
+    init() {
+      this.appendDummyInput().appendField('📝 정렬').appendField(new Blockly.FieldDropdown([['왼쪽', 'left'], ['가운데', 'center'], ['오른쪽', 'right']]), 'ALIGN');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    },
+  };
+
+    Blockly.Blocks['style_white_space'] = {
+    init() {
+      this.appendDummyInput().appendField('📖 줄 바꿈 설정').appendField(new Blockly.FieldDropdown([['자동 (normal)', 'normal'],['줄바꿈 안함 (nowrap)', 'nowrap'],['엔터 유지+옆으로 (pre)', 'pre'],['엔터 유지+자동 줄바꿈 (pre-wrap)', 'pre-wrap'], ['엔터만 유지 (pre-line)', 'pre-line'],['부모 설정 따름 (inherit)', 'inherit']]), 'WS');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#e91e63');
+    }
+  };
+
+  Blockly.Blocks['style_text_decoration'] = {
+  init() {
+    this.appendDummyInput().appendField('📝 글자 장식').appendField(new Blockly.FieldDropdown([['안함', 'none'],['밑줄', 'underline'],['취소선', 'line-through'],['윗줄', 'overline']]), 'DECO');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ff3366');
+  }
+};
+
+Blockly.Blocks['style_font_family'] = {
+  init() {
+    const dropdown = new Blockly.FieldDropdown([
+      ['맑은 고딕', '"Malgun Gothic", sans-serif'],
+      ['굴림', 'Gulim, sans-serif'],
+      ['굴림체', 'GulimChe, monospace'],
+      ['돋움', 'Dotum, sans-serif'],
+      ['돋움체', 'DotumChe, monospace'],
+      ['바탕', 'Batang, serif'],
+      ['바탕체', 'BatangChe, monospace'],
+      ['궁서', 'Gungsuh, serif'],
+      ['궁서체', 'GungsuhChe, monospace'],
+      ['코딩체(기본)', 'monospace'],
+      ['직접 입력', 'custom']
+    ], (newValue) => {
+      // 드롭다운 값이 바뀔 때마다 실행됨
+      this.updateShape_(newValue === 'custom');
+      return newValue;
+    });
+    this.appendDummyInput('MAIN')
+        .appendField('🔠 글꼴')
+        .appendField(dropdown, 'PRESET');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ff3366');
+  },
+  // 블록 로드 시 상태 복원
+  domToMutation(xmlElement) {
+    const isCustom = (xmlElement.getAttribute('is_custom') === 'true');
+    this.updateShape_(isCustom);
+  },
+  // 블록 상태 저장
+  mutationToDom() {
+    const container = Blockly.utils.xml.createElement('mutation');
+    const isCustom = !!this.getField('CUSTOM');
+    container.setAttribute('is_custom', isCustom);
+    return container;
+  },
+  // 입력창을 보이기/숨기기 하는 핵심 함수
+  updateShape_(isCustom) {
+    const input = this.getInput('MAIN');
+    if (isCustom) {
+      if (!this.getField('CUSTOM')) {
+        input.appendField(new Blockly.FieldTextInput('폰트이름 입력'), 'CUSTOM');
+      }
+    } else {
+      if (this.getField('CUSTOM')) {
+        input.removeField('CUSTOM');
+      }
+    }
+  }
+};
+
+  Blockly.Blocks['style_text_transform'] = {
+  init() {
+    this.appendDummyInput()
+        .appendField('🔠 대소문자 변환')
+        .appendField(new Blockly.FieldDropdown([
+          ['원본 유지', 'none'],
+          ['모두 대문자 (ABC)', 'uppercase'],
+          ['모두 소문자 (abc)', 'lowercase'],
+          ['첫글자만 대문자 (Abc)', 'capitalize']
+        ]), 'TRANS');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ff3366');
+  }
+};
 
   // --- 제너레이터 완성본 ---
 
@@ -249,6 +421,43 @@ javascriptGenerator.forBlock['style_text_color'] = (block) => `color: ${block.ge
 javascriptGenerator.forBlock['style_border_combined'] = (block) => {
   return `border: ${block.getFieldValue('WIDTH')}px ${block.getFieldValue('STYLE')} ${block.getFieldValue('COLOR')} !important;\n`;
 };
+
+  javascriptGenerator.forBlock['style_font_size'] = (block) => `font-size: ${block.getFieldValue('SIZE')}px !important;\n`;
+  javascriptGenerator.forBlock['style_font_weight'] = (block) => `font-weight: ${block.getFieldValue('WEIGHT')} !important;\n`;
+  javascriptGenerator.forBlock['style_line_height'] = (block) => `line-height: ${block.getFieldValue('HEIGHT')};\n`;
+  javascriptGenerator.forBlock['style_letter_spacing'] = (block) => `letter-spacing: ${block.getFieldValue('SPACE')}em;\n`;
+  javascriptGenerator.forBlock['style_opacity'] = (block) => `opacity: ${block.getFieldValue('OPACITY') / 100};\n`;
+  javascriptGenerator.forBlock['style_text_align'] = (block) => `text-align: ${block.getFieldValue('ALIGN')};\n`;
+
+  javascriptGenerator.forBlock['style_white_space'] = (block) => {
+    return `white-space: ${block.getFieldValue('WS')};\n`;
+  }
+
+  javascriptGenerator.forBlock['style_text_decoration'] = (block) => {
+  const deco = block.getFieldValue('DECO');
+  return `text-decoration: ${deco};\n`;
+};
+
+javascriptGenerator.forBlock['style_font_family'] = (block) => {
+  const preset = block.getFieldValue('PRESET');
+  const customField = block.getField('CUSTOM');
+  
+  // CUSTOM 필드가 존재하면 그 안의 값을 쓰고, 없으면 드롭다운 값을 씀
+  const font = (customField) ? customField.getValue().trim() : preset;
+  
+  return `font-family: ${font};\n`;
+};
+
+javascriptGenerator.forBlock['style_text_transform'] = (block) => {
+  return `text-transform: ${block.getFieldValue('TRANS')};\n`;
+};
+
+javascriptGenerator.forBlock['style_text_stroke'] = (block) => {
+  const width = block.getFieldValue('WIDTH') || '0';
+  const color = block.getFieldValue('COLOR') || '#000000';
+  return `-webkit-text-stroke: ${width}px ${color};\n`;
+};
+
 </script>
 
 <style>
@@ -256,4 +465,6 @@ javascriptGenerator.forBlock['style_border_combined'] = (block) => {
 .picker_wrapper {
   z-index: 10000 !important;
 }
+
+
 </style>

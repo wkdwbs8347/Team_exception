@@ -3,61 +3,45 @@ import * as Blockly from 'blockly';
 import { javascriptGenerator } from 'blockly/javascript';
 
 /**
- * 1. 애니메이션 설계도 (Keyframes) 정의
- * 모든 애니메이션의 동작 원리를 담은 CSS 문자열입니다.
+ * 1. 애니메이션 설계도 (Keyframes)
  */
 const ANIMATION_KEYFRAMES = `
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes bounce {
-  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-20px); }
-  60% { transform: translateY(-10px); }
-}
-@keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zoomIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
   20%, 40%, 60%, 80% { transform: translateX(5px); }
 }
-@keyframes zoom-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes rainbow {
-  0% { color: #ff0000; } 50% { color: #00ff00; } 100% { color: #ff0000; }
-}
-@keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-15px); }
+@keyframes bounce {
+  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-20px); }
+  60% { transform: translateY(-10px); }
 }
 `;
 
-/**
- * 2. 시스템 연결 설정
- * updatePreview 함수가 Animation.ANIMATION_KEYFRAMES를 읽을 수 있도록
- * window 객체와 export 양쪽 모두에 등록합니다.
- */
-if (typeof window !== 'undefined') {
-  window.Animation = {
-    ANIMATION_KEYFRAMES: ANIMATION_KEYFRAMES
-  };
-}
-
-export const Animation = {
-  ANIMATION_KEYFRAMES: ANIMATION_KEYFRAMES
-};
-
+export const Animation = { ANIMATION_KEYFRAMES };
 export const category = { label: '애니메이션', color: '#e91e63', icon: '🎬' };
 
 export const toolbox = `
 <xml>
-  <block type="style_animation_preset"></block>
-  <block type="style_animation_custom"></block>
+  <block type="style_animation_main"></block> 
+  <sep gap="32"></sep>
+  <block type="anim_duration"></block> 
+  <block type="anim_iteration"></block>
+  <block type="anim_timing"></block>
+  <block type="anim_direction"></block>
+  <block type="anim_delay"></block>
 </xml>
 `;
 
 /**
- * 3. 블록 정의 (Blockly Blocks)
+ * 3. 블록 정의
  */
 export const defineBlocks = () => {
-  // 블록 추가 시 브라우저 헤더에 설계도 주입 (보험용)
   if (typeof document !== 'undefined') {
     const styleId = 'web-crafter-animation-defs';
     let styleTag = document.getElementById(styleId);
@@ -69,65 +53,96 @@ export const defineBlocks = () => {
     styleTag.textContent = ANIMATION_KEYFRAMES;
   }
 
-  // 프리셋 애니메이션 블록
-  Blockly.Blocks['style_animation_preset'] = {
-    init: function() {
-      this.appendDummyInput()
-          .appendField("🎬 효과")
+  Blockly.Blocks['style_animation_main'] = {
+    init() {
+      this.appendDummyInput().appendField('🎬 애니메이션 효과')
           .appendField(new Blockly.FieldDropdown([
-              ["서서히 나타나기", "fade-in"], ["통통 튀기", "bounce"],
-              ["회전하기", "rotate"], ["흔들기", "shake"],
-              ["커지기", "zoom-in"], ["🌈 무지개 텍스트", "rainbow"], ["🎈 둥둥 떠있기", "float"]
-          ]), "NAME")
-          .appendField("속도")
-          .appendField(new Blockly.FieldDropdown([
-              ["매우 천천히", "3s"], ["천천히", "2s"], ["보통", "1s"], ["빠르게", "0.5s"]
-          ]), "SPEED");
-      this.setPreviousStatement(true, "STYLE");
-      this.setNextStatement(true, "STYLE");
-      this.setColour('#e91e63');
+            ['서서히 나타나기', 'fadeIn'], ['커지며 나타나기', 'zoomIn'], ['흔들기', 'shake'], ['통통 튀기', 'bounce'], ['두근두근', 'pulse']
+          ]), 'NAME');
+      this.appendStatementInput('DETAILS').setCheck('ANIM_DETAIL').appendField('➕ 세부 설정');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#ff0066');
     }
   };
 
-  // 커스텀 애니메이션 블록
-  Blockly.Blocks['style_animation_custom'] = {
-    init: function() {
-      this.appendDummyInput().appendField("✨ 애니메이션 상세 설정");
-      this.appendDummyInput()
-          .appendField("동작")
-          .appendField(new Blockly.FieldDropdown([
-              ["서서히 나타나기", "fade-in"], ["통통 튀기", "bounce"], ["회전하기", "rotate"]
-          ]), "NAME")
-          .appendField("시간").appendField(new Blockly.FieldTextInput("1"), "TIME").appendField("초");
-      this.appendDummyInput()
-          .appendField("반복").appendField(new Blockly.FieldDropdown([["무한히", "infinite"], ["1번", "1"]]), "COUNT")
-          .appendField("부드럽기").appendField(new Blockly.FieldDropdown([["보통", "ease-in-out"], ["일정하게", "linear"]]), "TIMING");
-      this.setPreviousStatement(true, "STYLE");
-      this.setNextStatement(true, "STYLE");
-      this.setColour('#e91e63');
+  Blockly.Blocks['anim_duration'] = {
+    init() {
+      this.appendDummyInput().appendField('⏱️ 재생 시간').appendField(new Blockly.FieldNumber(1, 0.1), 'SEC').appendField('초');
+      this.setPreviousStatement(true, 'ANIM_DETAIL');
+      this.setNextStatement(true, 'ANIM_DETAIL');
+      this.setColour('#ff4d94');
+    }
+  };
+
+  Blockly.Blocks['anim_iteration'] = {
+    init() {
+      this.appendDummyInput().appendField('🔄 반복').appendField(new Blockly.FieldDropdown([['무한히', 'infinite'], ['1번', '1'], ['2번', '2'], ['5번', '5']]), 'COUNT');
+      this.setPreviousStatement(true, 'ANIM_DETAIL');
+      this.setNextStatement(true, 'ANIM_DETAIL');
+      this.setColour('#ff4d94');
+    }
+  };
+
+  Blockly.Blocks['anim_direction'] = {
+    init() {
+      this.appendDummyInput().appendField('↔️ 방향').appendField(new Blockly.FieldDropdown([['정방향', 'normal'], ['역방향', 'reverse'], ['왕복(자연스러움)', 'alternate']]), 'DIR');
+      this.setPreviousStatement(true, 'ANIM_DETAIL');
+      this.setNextStatement(true, 'ANIM_DETAIL');
+      this.setColour('#ff4d94');
+    }
+  };
+
+  Blockly.Blocks['anim_timing'] = {
+    init() {
+      this.appendDummyInput().appendField('📈 속도감').appendField(new Blockly.FieldDropdown([['부드럽게', 'ease'], ['일정하게', 'linear'], ['점점 빠르게', 'ease-in'], ['점점 느리게', 'ease-out']]), 'TYPE');
+      this.setPreviousStatement(true, 'ANIM_DETAIL');
+      this.setNextStatement(true, 'ANIM_DETAIL');
+      this.setColour('#ff4d94');
+    }
+  };
+
+  Blockly.Blocks['anim_delay'] = {
+    init() {
+      this.appendDummyInput().appendField('⏳ 대기').appendField(new Blockly.FieldNumber(0, 0), 'SEC').appendField('초 뒤 시작');
+      this.setPreviousStatement(true, 'ANIM_DETAIL');
+      this.setNextStatement(true, 'ANIM_DETAIL');
+      this.setColour('#ff4d94');
     }
   };
 };
 
 /**
- * 4. 코드 생성기 (JavaScript Generator)
- * 생성된 CSS 속성이 시스템의 강제 차단(.is-design * { animation: none !important; })을 
- * 뚫을 수 있도록 !important를 반드시 포함합니다.
+ * 4. 코드 생성기 (Generator)
  */
-javascriptGenerator.forBlock['style_animation_preset'] = function(block) {
-  const name = block.getFieldValue('NAME');
-  const speed = block.getFieldValue('SPEED');
-  const count = (name === 'fade-in' || name === 'zoom-in') ? '1' : 'infinite';
+javascriptGenerator.forBlock['style_animation_main'] = (block) => {
+  const name = block.getFieldValue('NAME'); 
+  const details = javascriptGenerator.statementToCode(block, 'DETAILS');
   
-  return `.is-running & { animation: ${name} ${speed} ease-in-out ${count} forwards; }\n`;
+  let duration = '1s', iteration = '1', direction = 'normal', timing = 'ease', delay = '0s';
+
+  const lines = details.split('\n');
+  lines.forEach(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('dur:')) duration = trimmed.split(':')[1];
+    else if (trimmed.startsWith('iter:')) iteration = trimmed.split(':')[1];
+    else if (trimmed.startsWith('dir:')) direction = trimmed.split(':')[1];
+    else if (trimmed.startsWith('tim:')) timing = trimmed.split(':')[1];
+    else if (trimmed.startsWith('del:')) delay = trimmed.split(':')[1];
+  });
+
+  const css = `${name} ${duration} ${timing} ${delay} ${iteration} ${direction} forwards !important;`;
+  
+  // image_c5fb2a 처럼 중괄호가 꼬이는 걸 방지하기 위해 깔끔하게 속성만 반환
+  return `animation: ${css}\n`;
 };
 
-javascriptGenerator.forBlock['style_animation_custom'] = function(block) {
-  const name = block.getFieldValue('NAME');
-  const time = block.getFieldValue('TIME') || '1';
-  const count = block.getFieldValue('COUNT');
-  const timing = block.getFieldValue('TIMING');
-  
-  return `animation: ${name} ${time}s ${timing} ${count} forwards !important;\n`;
-};
+javascriptGenerator.forBlock['anim_duration'] = (block) => `dur:${block.getFieldValue('SEC')}s\n`;
+javascriptGenerator.forBlock['anim_iteration'] = (block) => `iter:${block.getFieldValue('COUNT')}\n`;
+javascriptGenerator.forBlock['anim_direction'] = (block) => `dir:${block.getFieldValue('DIR')}\n`;
+javascriptGenerator.forBlock['anim_timing'] = (block) => `tim:${block.getFieldValue('TYPE')}\n`;
+javascriptGenerator.forBlock['anim_delay'] = (block) => `del:${block.getFieldValue('SEC')}s\n`;
+
+// 필수 실행
+defineBlocks();
 </script>
