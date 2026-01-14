@@ -70,10 +70,12 @@ export const toolbox = `
   <block type="style_white_space"></block>
   <label text="──────────────────────"></label>
   <block type="style_size"></block>
+  <block type="style_size_limits"></block>
   <block type="style_overflow"></block>
   <block type="style_display"></block>
   <block type="style_transition_move"></block>
   <block type="style_opacity"></block>
+  <block type="style_background_gradient"></block>
   <block type="style_shadow"></block>
   <block type="style_text_align"></block>
   <block type="style_transition"></block>
@@ -378,9 +380,9 @@ export const defineBlocks = () => {
         .appendField('🚀 상대 이동')
         .appendField(new Blockly.FieldDropdown([
           ['오른쪽으로', 'translateX'],
-          ['왼쪽으로', 'translateX(-'], // 직접 마이너스 기호 시작
+          ['왼쪽으로', 'translateX_minus'],
           ['아래로', 'translateY'],
-          ['위로', 'translateY(-']     // 직접 마이너스 기호 시작
+          ['위로', 'translateY_minus']
         ]), 'DIR')
         .appendField(new Blockly.FieldTextInput('20'), 'DISTANCE')
         .appendField('px 만큼');
@@ -390,6 +392,50 @@ export const defineBlocks = () => {
     }
   };
 
+Blockly.Blocks['style_size_limits'] = {
+  init() {
+    this.appendDummyInput()
+        .appendField('📏 크기 제한')
+        .appendField(new Blockly.FieldDropdown([
+          ['너비(Width)', 'width'],
+          ['높이(Height)', 'height']
+        ]), 'TYPE')
+        .appendField(new Blockly.FieldDropdown([
+          ['최소(min)', 'min'],
+          ['최대(max)', 'max']
+        ]), 'LIMIT')
+        // FieldTextInput을 사용해야 %, rem 등을 직접 타이핑할 수 있습니다.
+        .appendField(new Blockly.FieldTextInput('100'), 'VALUE');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ab47bc');
+  }
+};
+
+Blockly.Blocks['style_background_gradient'] = {
+  init() {
+    this.appendDummyInput()
+        .appendField('🌈')
+        .appendField(new Blockly.FieldDropdown([['배경', 'background'], ['글자', 'text']]), 'TARGET')
+        .appendField(new Blockly.FieldDropdown([
+          ['→', 'to right'], 
+          ['←', 'to left'], 
+          ['↓', 'to bottom'], 
+          ['↑', 'to top'], 
+          ['↘', 'to bottom right'], 
+          ['○', 'circle']
+        ]), 'DIR')
+        .appendField(new FieldModalColor('#ff0000'), 'COLOR1')
+        .appendField(new Blockly.FieldTextInput('0'), 'POS1')
+        .appendField('%')
+        .appendField(new FieldModalColor('#0000ff'), 'COLOR2')
+        .appendField(new Blockly.FieldTextInput('100'), 'POS2')
+        .appendField('%');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ab47bc');
+  }
+};
   // --- 제너레이터 정의 시작 (defineBlocks 함수 안에 포함) ---
 
 javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
@@ -399,16 +445,27 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
   const bodyCode = generator.statementToCode(block, 'BODY') || '';
 
   let posCSS = '';
-  // ✨ 마우스로 옮긴 데이터가 있다면 CSS 문구로 직접 생성
+  // 마우스로 옮긴 좌표 데이터가 있을 때
   if (block.data && state === '') {
     try {
       const pos = JSON.parse(block.data);
       if (typeof pos.x === 'number' && typeof pos.y === 'number') {
-        posCSS = `  position: absolute !important;\n  left: ${pos.x}px !important;\n  top: ${pos.y}px !important;\n  margin: 0 !important;\n`;
+        // ✨ [핵심 해결책]
+        // 초기 배치 시 transition: none !important를 주어 
+        // 브라우저가 위치 이동을 애니메이션으로 처리하는 것을 원천 차단합니다.
+        posCSS = `
+  position: absolute !important;
+  left: ${pos.x}px !important;
+  top: ${pos.y}px !important;
+  margin: 0 !important;
+  transition: none !important; 
+`;
       }
     } catch (e) {}
   }
 
+  // 이제 사용자님이 원한 '부드러운 효과'는 bodyCode 내부에 있는 
+  // transition 설정에 의해 다시 살아나지만, 초기 배치는 이미 끝난 후이므로 튀지 않습니다.
   return `<style>\n.${cls}${state} {\n${posCSS}${bodyCode.trim()}\n}\n<\/style>\n`;
 };
 
@@ -516,6 +573,36 @@ javascriptGenerator.forBlock['style_transition_move'] = (block) => {
     case 'scale': transformValue = `scale(${dist})`; break; 
   }
 
-  return `transform: ${transformValue} translateZ(0) !important;\n`;
+  return `--wc-transform: ${transformValue};\ntransform: var(--wc-transform) translateZ(0);\n`;
+};
+
+javascriptGenerator.forBlock['style_size_limits'] = (block) => {
+  const type = block.getFieldValue('TYPE');   // width / height
+  const limit = block.getFieldValue('LIMIT'); // min / max
+  const value = block.getFieldValue('VALUE');
+  
+  const property = `${limit}-${type}`;
+  
+  // withUnit 함수가 입력값에 따라 px을 붙이거나 단위를 유지해줍니다.
+  return `${property}: ${withUnit(value)};\n`;
+};
+
+javascriptGenerator.forBlock['style_background_gradient'] = (block) => {
+  const target = block.getFieldValue('TARGET');
+  const dir = block.getFieldValue('DIR');
+  const color1 = block.getFieldValue('COLOR1');
+  const color2 = block.getFieldValue('COLOR2');
+  
+  const gradient = `linear-gradient(${dir}, ${color1}, ${color2})`;
+  
+  if (target === 'text') {
+    return `background: ${gradient};\n` +
+           `-webkit-background-clip: text;\n` +
+           `-webkit-text-fill-color: transparent;\n` +
+           `display: inline-block;\n` + 
+           `width: max-content;\n` +   /* ✨ 핵심: 도화지를 글자 끝까지 늘림 */
+           `vertical-align: top;\n`;
+  }
+  return `background: ${gradient};\n`;
 };
 </script>

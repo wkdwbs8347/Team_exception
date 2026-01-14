@@ -380,10 +380,22 @@ const updatePreview = () => {
     'function hideGuides(){ const v = document.getElementById("wcGuideV"); const h = document.getElementById("wcGuideH"); if(v) v.style.display = "none"; if(h) h.style.display = "none"; }',
     'function showVSeg(x, y1, y2){ const v = document.getElementById("wcGuideV"); if(!v) return; v.style.left = x + "px"; v.style.top = Math.min(y1,y2) + "px"; v.style.height = Math.abs(y2 - y1) + "px"; v.style.display = "block"; }',
     'function showHSeg(y, x1, x2){ const h = document.getElementById("wcGuideH"); if(!h) return; h.style.top = y + "px"; h.style.left = Math.min(x1,x2) + "px"; h.style.width = Math.abs(x2 - x1) + "px"; h.style.display = "block"; }',
-    'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", p.x + "px", "important"); el.style.setProperty("top", p.y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
+    'function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }',
+
+    // ✅ [수정 1] applyPositions에서도 음수 좌표를 0으로 보정해서 "기존 저장값(-3px)"도 즉시 복구
+    'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const wrapRect = wrap.getBoundingClientRect(); const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ const elRect = el.getBoundingClientRect(); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); const x = clamp(Number(p.x) || 0, 0, maxX); const y = clamp(Number(p.y) || 0, 0, maxY); el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", x + "px", "important"); el.style.setProperty("top", y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
+
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
-    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); }); wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); dragging.el.style.left = (nextL + snap.dx) + "px"; dragging.el.style.top = (nextT + snap.dy) + "px"; }); wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x: parseInt(t.style.left), y: parseInt(t.style.top) }, "*"); dragging = null; }); }',
+
+    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); });',
+
+    // ✅ [수정 2] pointermove: 스냅 적용 후 clamp로 wrapper 밖 음수/초과 방지
+    'wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); const wrapRect = wrap.getBoundingClientRect(); const elRect = dragging.el.getBoundingClientRect(); let finalL = nextL + (snap.dx || 0); let finalT = nextT + (snap.dy || 0); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); finalL = clamp(finalL, 0, maxX); finalT = clamp(finalT, 0, maxY); dragging.el.style.left = finalL + "px"; dragging.el.style.top = finalT + "px"; });',
+
+    // ✅ [수정 3] pointerup: 저장 전에 clamp로 음수 저장 방지 (+ 화면값도 정리)
+    'wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); const wrapRect = wrap.getBoundingClientRect(); const elRect = t.getBoundingClientRect(); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); let x = parseFloat(t.style.left) || 0; let y = parseFloat(t.style.top) || 0; x = clamp(x, 0, maxX); y = clamp(y, 0, maxY); t.style.left = x + "px"; t.style.top = y + "px"; window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x, y }, "*"); dragging = null; }); }',
+
     'window.onload = init;',
     '<\/script>',
     '</body></html>'
@@ -454,19 +466,30 @@ const saveCurrentWorkspaceToPage = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
-  // ✨ [추가] 현재 워크스페이스의 모든 블록을 돌며 좌표 데이터를 최신화합니다.
+  // 1. 모든 블록을 순회하며 좌표 데이터 동기화
   workspace.getAllBlocks(false).forEach(block => {
-    if (block.type === 'style_tag' && block.data) {
-       // 이미 block.data에 좌표가 있으므로, 이 데이터가 XML에 포함되도록 강제합니다.
-       block.setMutationValue && block.setMutationValue('data', block.data);
+    if (block.data) {
+      // ✅ [중요] block.setData 메서드가 존재하는 블록인 경우만 호출하여 에러 방지
+      if (typeof block.setData === 'function') {
+        block.setData(block.data);
+      } else {
+        // 메서드가 없는 버전이거나 일반 블록인 경우 속성에 직접 할당
+        block.data = block.data;
+      }
     }
   });
 
-  const dom = Blockly.Xml.workspaceToDom(workspace);
-  const xmlText = Blockly.Xml.domToText(dom);
-  
-  page.workspaces[activeMode.value] = xmlText;
-  savePagesToStorage();
+  try {
+    // 2. 워크스페이스를 XML로 변환
+    const dom = Blockly.Xml.workspaceToDom(workspace);
+    const xmlText = Blockly.Xml.domToText(dom);
+    
+    // 3. 페이지 데이터 업데이트 및 로컬 스토리지 저장
+    page.workspaces[activeMode.value] = xmlText;
+    savePagesToStorage();
+  } catch (e) {
+    console.error("XML 저장 중 오류 발생:", e);
+  }
 };
 
 const loadPageById = (pageId) => {
@@ -546,14 +569,22 @@ onMounted(async () => {
     debounceTimer = setTimeout(() => { refreshCodeAndPreview(); if (selectedBlockId.value) handleSelection(selectedBlockId.value, 'blockly'); }, 500);
   });
 
-  window.addEventListener('message', (event) => {
-    const data = event.data;
-    if (!data) return;
-    if (data.type === 'update_free_position') {
-      const { blockId, x, y } = data;
-      const block = workspace.getBlockById(blockId);
-      if (block) { block.data = JSON.stringify({ x: Number(x || 0), y: Number(y || 0) }); saveCurrentWorkspaceToPage(); refreshCodeAndPreview(); }
+window.addEventListener('message', (event) => {
+  const data = event.data;
+  if (!data) return;
+
+  if (data.type === 'update_free_position') {
+    const { blockId, x, y } = data;
+    const block = workspace.getBlockById(blockId);
+    if (block) {
+      // ✅ 좌표를 블록 데이터에 기록
+      block.data = JSON.stringify({ x: Number(x || 0), y: Number(y || 0) });
+      
+      // ✅ [핵심] 위치가 수정되자마자 즉시 XML로 변환하여 저장합니다.
+      saveCurrentWorkspaceToPage(); 
+      refreshCodeAndPreview();
     }
+  }
     if (data.type === 'NAVIGATE' || data.type === 'REDIRECT' || data.type === 'change_page_request') {
       const targetId = data.pageId;
       const targetPage = pages.value.find((p) => p.id === targetId || p.route === targetId || p.name === targetId);
@@ -944,6 +975,7 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
 }
+
 .url-bar {
   background: #f1f3f4;
   padding: 5px 10px;
@@ -951,11 +983,16 @@ onMounted(async () => {
   color: #555;
   border-bottom: 1px solid #ddd;
 }
-iframe {
-  width: 100%;
-  height: 100%;
+
+.browser-mockup iframe {
+  display: block;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  margin: -1px;
   border: none;
+  background: white;
 }
+
 .manager-section {
   height: 45%;
   display: flex;
