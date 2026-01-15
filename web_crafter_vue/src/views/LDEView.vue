@@ -51,6 +51,8 @@ import * as Flow from '@/components/js/Flow.vue';
 
 import * as Logic from '@/components/js/Logic.vue';
 
+import { Settings } from 'lucide-vue-next'
+
 /* ============================================================
 
  * 🚀 [Page Engine] 로직
@@ -129,29 +131,19 @@ function createPage(name) {
 }
 
 /* ============================================================
-
  * UI 상태 및 초기화
-
  * ============================================================ */
-
 const activeParent = ref('structure');
-
 const activeMode = ref('structure');
-
 const activeTab = ref(null);
-
 const activeRightTab = ref('objects');
-
 const previewSrc = ref('');
-
 const isRunning = ref(false);
-
 const isPhone = ref(false);
-
+const isLandscape = ref(false);
 const modeOpen = ref(false);
-
 let workspace = null;
-
+let isFlyoutOpened = false;
 const modeList = [
   { id: 'structure', label: '화면구성', icon: '🏗️' },
 
@@ -623,13 +615,14 @@ const refreshCodeAndPreview = () => {
 
 const updatePreview = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
-
   if (!page) return;
 
+  // 1. 현재 워크스페이스의 XML 가져오기
   const currentXml = workspace
     ? Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(workspace))
     : '';
 
+  // 2. 각 모드별 코드 생성
   const structureCode =
     activeMode.value === 'structure'
       ? generateCodeFromXML(currentXml)
@@ -645,6 +638,24 @@ const updatePreview = () => {
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.logic);
 
+  // 3. ✨ [핵심 수정 1] 코드 미리보기 순서 변경 (JS -> HTML -> CSS)
+  // cleanCodeForView를 사용하여 data-속성 등 불필요한 속성을 제거한 깔끔한 HTML을 보여줍니다.
+  const viewScript = logicCode.trim() 
+    ? `${logicCode}` 
+    : '';
+    
+  const viewHtml = cleanCodeForView(structureCode);
+  
+  const viewStyle = styleCode.trim() 
+    ? `${styleCode}` 
+    : '';
+
+  // 요청하신 순서대로 조합
+  generatedCode.value = [viewScript, viewHtml, viewStyle]
+    .filter(Boolean)
+    .join('\n\n');
+
+  // 4. Iframe용 HTML 조립 (실행용)
   const safeStyle =
     styleCode.trim() && !styleCode.includes('<style')
       ? `<style>${styleCode}</style>`
@@ -656,87 +667,55 @@ const updatePreview = () => {
       : logicCode;
 
   const finalLogicScript = isRunning.value ? safeScript : '';
-
   const positionsJSON = JSON.stringify(getPositionsMap());
-
   const PAGE_ID = page.id;
-
   const PAGE_ROUTE = page.route;
 
   const ANIMATION_DEFS = `
-
     @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-
     @keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); } 40% { transform: translateY(-20px); } 60% { transform: translateY(-10px); } }
-
     @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-
     @keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }
-
     @keyframes zoom-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-
     @keyframes rainbow { 0% { color: #ff0000; } 50% { color: #00ff00; } 100% { color: #ff0000; } }
-
     @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
+  `;
 
-`;
-
+  // 5. ✨ [핵심 수정 2] Iframe 내부 스크립트에 경계 체크 로직 주입
   const htmlParts = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
-
     '<style>html, body { margin:0; padding:0; width:100%; min-height:100vh; overflow:hidden; background:#fff; } * { box-sizing: border-box; } #wrapper { width:100%; min-height:100vh; position:relative; background:#fff; } #wrapper > [data-draggable="true"][data-block-id] { position: absolute; left: 0; top: 0; transform:none; touch-action:none; user-select:none; -webkit-user-select:none; cursor: grab; } #wrapper > [data-draggable="true"][data-block-id]:is(div, section, article, header, nav, main, aside, footer, form, ul) { max-width: 100%; } .wc-highlight { outline:2px solid #ff4081 !important; z-index: 9999; } .wc-dragging { opacity:0.9; box-shadow: 0 10px 20px rgba(0,0,0,0.2); outline: 2px dashed #2196f3 !important; cursor: grabbing; transition:none !important; z-index: 9999; } .wc-guide-line { position:absolute; z-index: 10000; pointer-events:none; display:none; border-color: rgba(255, 0, 0, 0.75); border-style: dashed; } .wc-guide-v { width:0; border-left-width:1px; } .wc-guide-h { height:0; border-top-width:1px; } [data-wc-block] { position: relative; min-width: 50px; min-height: 50px; } [data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; } .is-design * { animation:none !important; transition:none !important; }</style>',
-
     `<style>${ANIMATION_DEFS}</style>`,
-
     safeStyle,
-
     '</head>',
-
     `<body class="${isRunning.value ? 'is-running' : 'is-design'}">`,
-
     '<div id="wrapper">',
     structureCode,
     '<div id="wcGuideV" class="wc-guide-line wc-guide-v"></div><div id="wcGuideH" class="wc-guide-line wc-guide-h"></div></div>',
-
     finalLogicScript,
-
     '<script>',
-
     `const WC_POSITIONS = ${positionsJSON}; const isRunning = ${isRunning.value}; const PAGE_ID = "${PAGE_ID}"; const PAGE_ROUTE = "${PAGE_ROUTE}";`,
-
     'function navigateToPage(targetId) { window.parent.postMessage({ type: "NAVIGATE", pageId: targetId }, "*"); }',
-
     'function redirectToPage(targetId) { window.parent.postMessage({ type: "REDIRECT", pageId: targetId }, "*"); }',
-
     'function goToPage(targetId) { navigateToPage(targetId); }',
-
     'function applyBuilderStyles(){ const nodes = document.querySelectorAll("[data-wc-style]"); nodes.forEach(el => { el.style.cssText += ";" + el.getAttribute("data-wc-style"); }); }',
-
     'function syncClassStyles(){ const styleText = document.querySelector("style")?.textContent || ""; const classMatches = styleText.match(/\\.([a-zA-Z0-9_-]+)\\s*\\{/g) || []; classMatches.forEach(m => { const className = m.replace(".", "").replace("{", "").trim(); document.querySelectorAll("[data-block-id=\'"+className+"\']").forEach(el => el.classList.add(className)); }); }',
-
     'function hideGuides(){ const v = document.getElementById("wcGuideV"); const h = document.getElementById("wcGuideH"); if(v) v.style.display = "none"; if(h) h.style.display = "none"; }',
-
     'function showVSeg(x, y1, y2){ const v = document.getElementById("wcGuideV"); if(!v) return; v.style.left = x + "px"; v.style.top = Math.min(y1,y2) + "px"; v.style.height = Math.abs(y2 - y1) + "px"; v.style.display = "block"; }',
-
     'function showHSeg(y, x1, x2){ const h = document.getElementById("wcGuideH"); if(!h) return; h.style.top = y + "px"; h.style.left = Math.min(x1,x2) + "px"; h.style.width = Math.abs(x2 - x1) + "px"; h.style.display = "block"; }',
-
     'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", p.x + "px", "important"); el.style.setProperty("top", p.y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
-
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
-
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
-
-    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); }); wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); dragging.el.style.left = (nextL + snap.dx) + "px"; dragging.el.style.top = (nextT + snap.dy) + "px"; }); wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x: parseInt(t.style.left), y: parseInt(t.style.top) }, "*"); dragging = null; }); }',
-
+    
+    // ▼▼▼ 여기에 경계 체크(Clamping) 로직이 포함되었습니다 ▼▼▼
+    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); }); wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const wr = wrap.getBoundingClientRect(); if(nextL < 0) nextL = 0; if(nextT < 0) nextT = 0; if(nextL + r.width > wr.width) nextL = wr.width - r.width; if(nextT + r.height > wr.height) nextT = wr.height - r.height; const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); dragging.el.style.left = (nextL + snap.dx) + "px"; dragging.el.style.top = (nextT + snap.dy) + "px"; }); wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x: parseInt(t.style.left), y: parseInt(t.style.top) }, "*"); dragging = null; }); }',
+    
     'window.onload = init;',
-
     '<\/script>',
-
     '</body></html>',
   ];
 
   previewSrc.value = '';
-
   nextTick(() => {
     previewSrc.value = htmlParts.join('\n');
   });
@@ -783,89 +762,77 @@ const toolboxXMLs = {
 };
 
 const setToolbox = (xmlText) => {
-  let text = (xmlText || '<xml></xml>').trim();
+  // [핵심] 함수 시작하자마자 확실한 변수 하나를 만듭니다.
+  // 이제 이 함수 안에서는 'workspace' 대신 'currentWorkspace'만 믿고 씁니다.
+  const currentWorkspace = Blockly.getMainWorkspace();
 
+  // 만약 아직 워크스페이스가 안 만들어졌다면, 에러 내지 말고 조용히 종료 (안전장치)
+  if (!currentWorkspace) return; 
+
+  let text = (xmlText || '<xml></xml>').trim();
   if (!text.startsWith('<xml')) text = `<xml>${text}</xml>`;
 
   try {
     const dom = Blockly.utils.xml.textToDom(text);
 
+    // '요소' 카테고리가 없으면 추가하는 로직
     if (dom.getElementsByTagName('category').length === 0) {
       const category = Blockly.utils.xml.createElement('category');
-
       category.setAttribute('name', '요소');
-
       category.setAttribute('colour', '#5c6bc0');
-
       while (dom.firstChild) category.appendChild(dom.firstChild);
-
       dom.appendChild(category);
     }
 
-    workspace.updateToolbox(dom);
+    // 1. 툴박스 업데이트 (우리가 만든 변수 사용)
+    currentWorkspace.updateToolbox(dom);
 
-    const workspaceDom = workspace.getParentSvg().parentNode;
-
+    // 2. 기존 CSS 조정 (우리가 만든 변수 사용)
+    const workspaceDom = currentWorkspace.getParentSvg().parentNode;
     const toolboxDiv = workspaceDom.querySelector('.blocklyToolboxDiv');
-
     if (toolboxDiv) toolboxDiv.style.display = 'none';
 
-    const toolbox = workspace.getToolbox();
+    const toolbox = currentWorkspace.getToolbox();
 
-    if (
-      toolbox &&
-      toolbox.getToolboxItems &&
-      toolbox.getToolboxItems().length > 0
-    ) {
+    if (toolbox && toolbox.getToolboxItems && toolbox.getToolboxItems().length > 0) {
       toolbox.selectItemByPosition(0);
+      currentWorkspace.getFlyout().autoClose = false;
 
-      workspace.getFlyout().autoClose = false;
-
+      // 3. Flyout(메뉴) 일단 숨기기
       const immediateFlyouts = document.querySelectorAll('.blocklyFlyout');
-
       immediateFlyouts.forEach((flyout) => {
-        flyout.style.opacity = '0'; // 즉시 숨김
+        flyout.style.opacity = '0';
       });
 
+      // 4. 애니메이션 시작 (약간의 딜레이 후)
       setTimeout(() => {
-        Blockly.svgResize(workspace);
+        // 리사이즈도 우리 변수로 실행
+        Blockly.svgResize(currentWorkspace);
 
         const allFlyouts = document.querySelectorAll('.blocklyFlyout');
-
         allFlyouts.forEach((flyoutSvg) => {
           flyoutSvg.style.opacity = '1';
 
           const blocks = flyoutSvg.querySelector('.blocklyBlockCanvas');
 
-          const bg = flyoutSvg.querySelector('.blocklyFlyoutBackground');
-
-          if (blocks)
+          if (blocks) {
             blocks.animate(
               [
                 { transform: 'translate(-300px, 0)', opacity: 0 },
-                { transform: 'translate(0, 0)', opacity: 1 },
+                { transform: 'translate(0, 0)', opacity: 1 }
               ],
-              {
-                duration: 300,
-                easing: 'ease',
-                fill: 'forwards',
-                composite: 'add',
-              }
+              { duration: 300, easing: 'ease', fill: 'forwards', composite: 'add' }
             );
-
-          if (bg)
-            bg.animate(
-              [
-                { transform: 'translate(-300px, 0)', opacity: 0 },
-                { transform: 'translate(0, 0)', opacity: 1 },
-              ],
-              { duration: 300, easing: 'ease', fill: 'forwards' }
-            );
+          }
         });
       }, 100);
     }
   } catch (e) {
-    workspace.updateToolbox('<xml></xml>');
+    console.error("setToolbox 오류:", e);
+    // 에러가 나도 우리 변수가 살아있으면 초기화 시도
+    if (currentWorkspace) {
+      currentWorkspace.updateToolbox('<xml></xml>');
+    }
   }
 };
 
@@ -974,23 +941,56 @@ const selectParent = (modeId) => {
 
   refreshCodeAndPreview();
 };
+// [상수 추가] 스크립트 맨 위에 추가해두세요
+const FLYOUT_WIDTH = 300; 
 
 const selectCategory = (key) => {
   if (!workspace) return;
 
+  // 1. [닫기] 이미 열린 탭 클릭 시
   if (activeTab.value === key) {
-    activeTab.value = null;
-    setToolbox(toolboxXMLs.empty);
+    activeTab.value = null; // Vue 상태 해제 -> CSS가 워크스페이스 원상복구
+    workspace.getFlyout().hide();
+    
+    // 워크스페이스가 줄어들었으니 리사이즈 한 번 해줌
+    setTimeout(() => Blockly.svgResize(workspace), 300);
     return;
   }
 
-  activeTab.value = key;
+  // 2. [열기/교체]
+  activeTab.value = key; // Vue 상태 변경 -> CSS가 워크스페이스 밈(300px)
 
-  setToolbox(toolboxXMLs[key] || toolboxXMLs.empty);
+  // XML 파싱 및 블록 가져오기
+  const xmlText = toolboxXMLs[key] || '<xml></xml>';
+  const dom = Blockly.utils.xml.textToDom(xmlText);
+  let blockList = [];
 
-  setTimeout(() => Blockly.svgResize(workspace), 300);
+  if (dom.nodeName.toLowerCase() === 'xml') {
+     const category = dom.querySelector('category');
+     if (category) {
+        const customType = category.getAttribute('custom');
+        if (customType) {
+            blockList = workspace.getToolboxCategoryCallback(customType)(workspace);
+        } else {
+            blockList = Array.from(category.children);
+        }
+     } else {
+        blockList = Array.from(dom.children);
+     }
+  }
+
+  // 3. Flyout 내용 교체 (단순하게 show만 호출)
+  const flyout = workspace.getFlyout();
+  flyout.autoClose = false; // 이거 하나만 필수
+  flyout.show(blockList);
+  flyout.scrollToStart();
+
+  // 4. 리사이즈 (CSS 애니메이션과 싱크 맞추기 위해 약간의 딜레이만 줌)
+  // 애니메이션 로직은 없습니다. 단지 "화면이 밀렸으니 좌표 다시 잡아라" 명령입니다.
+  setTimeout(() => {
+    Blockly.svgResize(workspace);
+  }, 0);
 };
-
 const toggleRun = async () => {
   isRunning.value = !isRunning.value;
   await nextTick();
@@ -999,16 +999,21 @@ const toggleRun = async () => {
 
 const changeModel = () => {
   isPhone.value = !isPhone.value;
+  if (!isPhone.value) isLandscape.value = false;
   updatePreview();
+};
+
+const toggleOrientation = () => {
+  isLandscape.value = !isLandscape.value;
+  updatePreview(); // 화면 비율 변경 시 프리뷰 갱신
 };
 
 onMounted(async () => {
   if (Ko) Blockly.setLocale(Ko);
-
   defineCustomBlocks();
-
   await nextTick();
 
+  // 1. Blockly 주입
   workspace = Blockly.inject('blocklyDiv', {
     renderer: 'zelos',
     toolbox: toolboxXMLs.empty,
@@ -1018,17 +1023,52 @@ onMounted(async () => {
     trashcan: true,
   });
 
-  let debounceTimer = null;
+  // =================================================================
+  // 🔥 [핵심 수정] MetricsManager 강제 조작 (밀림 현상 원천 봉쇄)
+  // =================================================================
+  // 최신 Blockly는 MetricsManager를 통해 화면 구성을 계산합니다.
+  // 이 매니저가 "툴박스/플라이아웃 너비"를 0으로 보고하게 만들면
+  // Blockly는 공간 확보를 위해 블록을 밀지 않게 됩니다.
+  
+  const metricsManager = workspace.getMetricsManager();
 
+  // (1) 툴박스(회색 영역) 치수 0으로 고정
+  metricsManager.getToolboxMetrics = function() {
+    return {
+      width: 0,
+      height: 0,
+      position: Blockly.TOOLBOX_AT_LEFT,
+    };
+  };
+
+  // (2) 플라이아웃(메뉴) 치수 0으로 고정
+  metricsManager.getFlyoutMetrics = function() {
+    return {
+      width: 0,
+      height: 0,
+      position: Blockly.TOOLBOX_AT_LEFT,
+    };
+  };
+
+  // (3) 닫힘 방지 설정
+  const flyout = workspace.getFlyout();
+  if (flyout) {
+    flyout.autoClose = false;
+  }
+  
+  // 변경 사항 적용
+  workspace.resize();
+  // =================================================================
+
+  // 4. 이벤트 리스너 등록
+  let debounceTimer = null;
   workspace.addChangeListener((e) => {
     if (e.type === Blockly.Events.SELECTED) {
       if (!isSelectingProgrammatically)
         handleSelection(e.newElementId, 'blockly');
       return;
     }
-
     if (e.type === Blockly.Events.UI || e.type === Blockly.Events.CLICK) return;
-
     if (
       [
         Blockly.Events.BLOCK_CHANGE,
@@ -1039,9 +1079,7 @@ onMounted(async () => {
     ) {
       updateObjectListFromWorkspace();
     }
-
     if (debounceTimer) clearTimeout(debounceTimer);
-
     debounceTimer = setTimeout(() => {
       refreshCodeAndPreview();
       if (selectedBlockId.value)
@@ -1049,34 +1087,22 @@ onMounted(async () => {
     }, 500);
   });
 
+  // 5. iframe 통신
   window.addEventListener('message', (event) => {
     const data = event.data;
-
     if (!data) return;
-
     if (data.type === 'update_free_position') {
       const { blockId, x, y } = data;
-
       const block = workspace.getBlockById(blockId);
-
       if (block) {
         block.data = JSON.stringify({ x: Number(x || 0), y: Number(y || 0) });
         saveCurrentWorkspaceToPage();
         refreshCodeAndPreview();
       }
     }
-
-    if (
-      data.type === 'NAVIGATE' ||
-      data.type === 'REDIRECT' ||
-      data.type === 'change_page_request'
-    ) {
+    if (data.type === 'NAVIGATE' || data.type === 'REDIRECT' || data.type === 'change_page_request') {
       const targetId = data.pageId;
-
-      const targetPage = pages.value.find(
-        (p) => p.id === targetId || p.route === targetId || p.name === targetId
-      );
-
+      const targetPage = pages.value.find((p) => p.id === targetId || p.route === targetId || p.name === targetId);
       if (targetPage) {
         lockPage(targetPage.id);
         selectPage(targetPage.id);
@@ -1084,40 +1110,30 @@ onMounted(async () => {
         alert('이동할 페이지를 찾을 수 없습니다: ' + targetId);
       }
     }
-
     if (data.type === 'select_block') handleSelection(data.blockId, 'iframe');
-
     if (data.type === 'deselect_block') handleSelection(null, 'iframe');
   });
 
+  // 6. 전역 함수
   window.WC_GET_PAGES = () => {
     if (!pages.value || pages.value.length === 0) return [['페이지 없음', '']];
-
     return pages.value.map((p) => [p.name, p.id]);
   };
 
+  // 7. 데이터 로드
   const stored = loadPagesFromStorage();
-
   if (stored && stored.length > 0) {
     pages.value = stored;
-
     const isIdValid = pages.value.some((p) => p.id === selectedPageId.value);
-
     const targetId = isIdValid ? selectedPageId.value : pages.value[0].id;
-
     selectedPageId.value = targetId;
-
     loadPageById(targetId);
   } else {
-    // 이미 pages는 초기화되어 있으므로 별도 addPage 필요 없음
-
-    // 저장만 한 번 해줌
-
     savePagesToStorage();
-
     loadPageById(pages.value[0].id);
   }
 
+  // 8. 리사이즈 감지
   new ResizeObserver(() => {
     if (workspace) Blockly.svgResize(workspace);
   }).observe(document.getElementById('workspace-area'));
@@ -1126,10 +1142,13 @@ onMounted(async () => {
 
 <template>
   <div class="ide-container">
-    <aside
-      :class="isPhone ? 'phone-size' : 'pc-size'"
-      class="entry-panel transition-all duration-300 ease-in-out"
-    >
+      <aside
+        :class="[
+          isPhone ? 'phone-size' : 'pc-size', 
+          { 'is-landscape': isPhone && isLandscape }
+        ]"
+        class="entry-panel transition-all duration-300 ease-in-out"
+      >
       <div class="preview-section">
         <div class="panel-title">
           <span
@@ -1163,6 +1182,19 @@ onMounted(async () => {
               {{ isRunning ? '⏹ 정지' : '▶ 시작' }}
             </button>
 
+            <button 
+              v-if="isPhone" 
+              class="btn-rotate" 
+              @click="toggleOrientation"
+              title="화면 회전"
+            >
+              <span :style="{ 
+                display: 'inline-block', 
+                transition: '0.3s', 
+                transform: isLandscape ? 'rotate(90deg)' : 'rotate(0deg)' 
+              }">🔄</span>
+            </button>
+
             <button
               class="btn-deploy"
               :class="isPhone ? 'phone-hide' : ''"
@@ -1189,6 +1221,7 @@ onMounted(async () => {
             id="previewFrame"
             :srcdoc="previewSrc"
             frameborder="0"
+            style="border: none; width: 100%; height: 100%; display: block;"
             :sandbox="'allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox allow-scripts'"
           >
           </iframe>
@@ -1313,7 +1346,10 @@ onMounted(async () => {
           <span class="tab-icon">{{ group.icon }}</span>
 
           <span class="tab-label">{{ group.label }}</span>
+
         </div>
+        <div class="item"></div>
+        <button class="mr-[42px]" @click="{settingModal}"><Settings :size="23" /></button>
       </nav>
 
       <div class="workspace-row">
@@ -1336,11 +1372,13 @@ onMounted(async () => {
           </div>
         </nav>
 
-        <div
-          id="workspace-area"
-          class="workspace-wrapper"
-          :class="{ 'drawer-open': activeTab }"
+        <div 
+          id="workspace-area" 
+          class="workspace-wrapper" 
+          :class="{ 'drawer-open': activeTab }" 
         >
+          <div class="flyout-bg-panel" :class="{ open: activeTab }"></div>
+
           <div id="blocklyDiv"></div>
         </div>
       </div>
@@ -1479,22 +1517,27 @@ onMounted(async () => {
   align-items: center;
 }
 
+/* ✅ 기존 .btn-ai, .btn-toggle, .btn-deploy 정의를 이렇게 업데이트해줘 */
 .btn-ai,
 .btn-toggle,
+.btn-rotate, /* 🔄 회전 버튼도 같이 적용 */
 .btn-deploy {
   border: none;
-
-  padding: 5px 10px;
-
+  padding: 0 12px; /* 좌우 여백을 조금 더 줘서 안정감 있게 */
   border-radius: 4px;
-
   cursor: pointer;
-
   font-weight: bold;
-
   transition: 0.2s;
-
   color: white;
+
+  /* 🔥 세로 깨짐 방지 핵심 코드 */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important; /* 👈 글자가 아래로 떨어지는 걸 막아줌 */
+  flex-shrink: 0 !important;      /* 👈 부모가 좁아도 버튼이 안 찌그러짐 */
+  height: 32px !important;        /* 높이를 통일해서 예쁘게 정렬 */
+  line-height: 1 !important;      /* 글자 수직 중앙 정렬 보정 */
 }
 
 .btn-ai {
@@ -1858,20 +1901,16 @@ iframe {
 
 .top-nav-bar {
   height: 60px;
-
   background: #1a1a2e;
-
   display: flex;
-
   align-items: center;
-
   padding-left: 10px;
-
   border-bottom: 1px solid #000;
-
   flex-shrink: 0;
 }
-
+.item{
+  flex-grow: 1;
+}
 .top-tab-item {
   height: 100%;
 
@@ -2010,16 +2049,15 @@ iframe {
   display: block;
 }
 
-.workspace-wrapper {
-  flex: 1;
-
-  position: relative;
-
-  background: #fff;
-
-  transition: all 0.3s ease;
+/* 기존 코드 수정 */
+.workspace-wrapper { 
+  position: relative; 
+  width: 100%; 
+  height: 100%; 
+  overflow: hidden; 
+  /* transition 제거 또는 width만 적용 */
+  transition: width 0.3s ease; 
 }
-
 #blocklyDiv {
   position: absolute;
 
@@ -2048,18 +2086,13 @@ iframe {
 
 /* 배경 투명도 및 클릭 관통 방지 */
 
+/* 기존 코드 수정: Blockly의 SVG 배경을 투명하게 만듦 */
 :deep(.blocklyFlyoutBackground) {
-  fill: #ffffff !important;
-
-  fill-opacity: 0 !important; /* 약간 투명하게 하여 아래 작업공간이 보이게 설정 */
-
-  pointer-events: auto !important; /* 배경 클릭 시 작업공간이 클릭되지 않도록 */
+  fill: transparent !important;       /* 색상 투명 */
+  fill-opacity: 0 !important;         /* 불투명도 0 */
+  stroke: none !important;            /* 테두리 없음 */
 }
 
-
-:deep(.blockyMainBackground) {
-  margin-left: 300px;
-}
 
 /* 메인 작업공간(SVG)이 전체 너비를 차지하도록 강제 */
 :deep(.blocklySvg) {
@@ -2070,23 +2103,11 @@ iframe {
   display: none !important; /* ⭕ 회색 사이드바 영구 숨김 */
 }
 
-:deep(.blocklyFlyoutBackground) {
-  position: absolute !important;
-
-  fill: #c0c0c0 !important;
-
-  fill-opacity: 0.2 !important;
-}
-
 :deep(.blocklyToolboxFlyout) {
   min-width: 300px !important;
-
   width: fit-content !important;
-
   max-width: 300px;
-
   transition: max-width 0.4s ease-in-out;
-
   z-index: 100;
 }
 
@@ -2247,4 +2268,123 @@ iframe {
     opacity: 1;
   }
 }
+/* 1. 회색 툴박스 영역(Gap의 원인)을 아예 화면에서 지워버림 */
+:deep(.blocklyToolboxDiv) {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  border: none !important;
+}
+
+/* 2. Flyout(메뉴판)을 왼쪽 끝(0px)에 강제로 딱 붙임 */
+:deep(.blocklyFlyout) {
+  left: 0 !important; 
+  /* (참고) transform 속성은 스크립트의 애니메이션 로직이 제어하므로 여기선 건드리지 않음 */
+}
+
+/* 3. 혹시 모를 Flyout 내부 여백 제거 */
+:deep(.blocklyFlyoutBackground) {
+  x: 0 !important;
+  y: 0 !important;
+  /* stroke(테두리선) 때문에 1px 이격이 보일 수 있으므로 제거 */
+  stroke: none !important; 
+}
+/* 새로 만든 300px 배경 패널 */
+.flyout-bg-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 300px;
+  background-color: #dcdcdcba;/* 원하는 배경색 (예: 흰색) */
+  /* 🔥 중요: 레이어 순서 */
+  z-index: 90; /* 워크스페이스(0) 위, Blockly Flyout(100) 아래 */
+  /* 애니메이션: 왼쪽에서 스윽 나오게 */
+  transform: translateX(-100%);
+}
+
+/* 메뉴가 열렸을 때 (activeTab이 있을 때) */
+.flyout-bg-panel.open {
+  transform: translateX(0); /* 제자리로 이동 */
+}
+/* ============================================================
+   🔥 [필수 수정] 드래그 중인 블록을 최상단으로 올리기
+   ============================================================ */
+
+/* 1. 블록 드래그 레이어 (이게 낮으면 툴박스 뒤로 숨음) */
+:deep(.blocklyBlockDragSurface) {
+  z-index: 99999 !important; /* 툴박스(100)보다 무조건 높게 */
+  overflow: visible !important;
+}
+
+/* 2. 워크스페이스 드래그 레이어 (혹시 모를 상황 대비) */
+:deep(.blocklyWsDragSurface) {
+  z-index: 99999 !important;
+  overflow: visible !important;
+}
+
+/* 3. 입력창(드롭다운, 텍스트입력) 및 툴팁도 가려지지 않게 최상단 고정 */
+:deep(.blocklyWidgetDiv), 
+:deep(.blocklyTooltipDiv) {
+  z-index: 99999 !important; 
+}
+
+/* ✅ 가로 모드일 때 왼쪽 패널 너비 확장 */
+.entry-panel.is-landscape {
+  width: 650px !important; 
+}
+
+/* ✅ 핵심: 세로 비율(9:19.5)을 완벽히 뒤집은 진짜 가로 비율 */
+.entry-panel.is-landscape .browser-mockup {
+  width: 95% !important;        
+  max-width: 600px !important; 
+  aspect-ratio: 19.5 / 9 !important; /* 👈 형이 말한 완벽한 반전 비율 */
+  height: auto !important;      
+  margin: 50px auto !important;  
+  transition: all 0.3s ease-in-out;
+  
+  /* 기기 디테일 */
+  border: 10px solid #222;
+  border-radius: 24px;
+  box-shadow: 0 15px 45px rgba(0,0,0,0.4);
+}
+
+.entry-panel.is-landscape .browser-mockup iframe {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 회전 버튼 스타일 */
+.btn-rotate {
+  background: #4c97ff;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: white;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-rotate:hover {
+  background: #3676d1;
+}
+
+/* ✅ 가로 모드일 때 다른 요소들 최적화 */
+.entry-panel.is-landscape .control-buttons {
+  gap: 4px !important; /* 가로일 땐 버튼 간격 좁게 */
+}
+
+/* 가로 모드일 때 주소창 너비 조절 */
+.entry-panel.is-landscape .url-bar {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+
+
 </style>

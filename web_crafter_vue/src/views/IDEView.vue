@@ -1,74 +1,106 @@
 <script setup>
 /**
+
  * ============================================================
- * ✅ Web Crafter IDE (Entry-like Flyout UX 적용본 - 엔트리 hover/bbox 방식 완성본)
- *
- * ✅ 핵심 변경(엔트리와 동일한 방식)
- * 1) Flyout 폭은 항상 고정(300px)
- * 2) hover 판정은 "flyout div"가 아니라,
- *    ✅ flyout 내부의 실제 SVG(블록이 그려지는 영역 = bbox/hit 영역)에서만 잡는다.
- *    → 가장 긴 블록이 실제로 그려진 영역(bbox)을 벗어나면 hover 즉시 해제
- * 3) hover 중일 때만 clip(잘림)을 해제해서 "원래 크기"로 보이게
- *    → :hover CSS 대신 wc-entry-hover 클래스를 JS로 토글
- * 4) 워크스페이스(#blocklyDiv) 밀림 애니메이션 유지
- *
+
+ * ✅ Web Crafter IDE (Final Fixed Version)
+
+ * - 순환 참조 오류 해결 (pages 초기화 순서 변경)
+
+ * - URL 중복 방지 로직 적용
+
  * ============================================================
+
  */
 
 import { ref, onMounted, nextTick, watch, computed } from 'vue';
+
 import * as Blockly from 'blockly';
+
 import { javascriptGenerator } from 'blockly/javascript';
+
 import * as Ko from 'blockly/msg/ko';
+
 import 'blockly/blocks';
+
 import ConfirmModal from '@/modal/ConfirmModal.vue';
+
 import GlobalModal from '@/modal/GlobalModal.vue';
 
 // ===== 카테고리 블록 import =====
+
 import * as Layout from '@/components/block/Layout.vue';
+
 import * as Content from '@/components/block/Content.vue';
+
 import * as Form from '@/components/block/Form.vue';
+
 import * as Style from '@/components/style/Style.vue';
+
 import * as Responsive from '@/components/style/Responsive.vue';
+
 import * as Color from '@/components/style/Color.vue';
+
 import * as Flex from '@/components/style/Flex.vue';
+
 import * as Animation from '@/components/style/Animation.vue';
+
 import * as Interaction from '@/components/js/Interaction.vue';
+
 import * as Flow from '@/components/js/Flow.vue';
+
 import * as Logic from '@/components/js/Logic.vue';
 
+import { Settings } from 'lucide-vue-next'
+
+
 /* ============================================================
+
  * 🚀 [Page Engine] 로직
+
  * ============================================================ */
 
 function slugify(name) {
   return (
     '/' +
     name
+
       .trim()
+
       .replace(/\s+/g, '-')
+
       .replace(/[^a-zA-Z0-9\-\uAC00-\uD7A3]+/g, '')
+
       .toLowerCase()
   );
 }
 
-// 안전한 유니크 URL 생성기
+// 2. ✨ [Fix] 안전한 유니크 URL 생성기
+
 function getUniqueRoute(name, excludeId = null) {
   let baseSlug = slugify(name);
+
   if (baseSlug === '/') baseSlug = '/home';
 
   let candidate = baseSlug;
+
   let counter = 1;
+
+  // pages가 아직 초기화 전(undefined)이거나 비어있으면 검사 없이 바로 반환
 
   if (!pages.value || pages.value.length === 0) return candidate;
 
   while (pages.value.some((p) => p.route === candidate && p.id !== excludeId)) {
     candidate = `${baseSlug}-${counter}`;
+
     counter++;
   }
+
   return candidate;
 }
 
-// 페이지 생성
+// 3. 페이지 생성
+
 function createPage(name) {
   const generatedId =
     'page_' +
@@ -76,14 +108,21 @@ function createPage(name) {
       ? crypto.randomUUID().slice(0, 6)
       : Date.now().toString(36));
 
+  // pages에 안전하게 접근하여 라우트 생성
+
   const safeRoute = getUniqueRoute(name);
 
   return {
     id: generatedId,
+
     name: name,
+
     route: safeRoute,
+
     aliases: [],
+
     status: 'DRAFT',
+
     workspaces: {
       structure: '<xml></xml>',
       style: '<xml></xml>',
@@ -102,12 +141,15 @@ const activeRightTab = ref('objects');
 const previewSrc = ref('');
 const isRunning = ref(false);
 const isPhone = ref(false);
+const isLandscape = ref(false);
 const modeOpen = ref(false);
 let workspace = null;
-
+let isFlyoutOpened = false;
 const modeList = [
   { id: 'structure', label: '화면구성', icon: '🏗️' },
+
   { id: 'style', label: '스타일', icon: '🎨' },
+
   { id: 'logic', label: '로직/데이터', icon: '⚡' },
 ];
 
@@ -117,45 +159,72 @@ const currentMode = computed(
 
 const changeMode = (modeId) => {
   modeOpen.value = false;
+
   selectParent(modeId);
 };
 
-// pages 초기화
+// ✨ [핵심 수정] pages 선언과 초기값 주입 분리 (순환 참조 방지)
+
+// 1. 빈 배열로 먼저 선언 (이제 createPage 안에서 pages.value 접근 가능)
+
 const pages = ref([]);
+
+// 2. 초기 데이터 주입
+
 pages.value.push(createPage('Home'));
+
 pages.value.push(createPage('Login'));
+
+// 3. 선택된 페이지 설정
 
 const selectedPageId = ref(pages.value[0].id);
 
 const currentPageUrl = computed(() => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
+
   return page
     ? `https://web-crafter.app${page.route}`
     : 'https://web-crafter.app/';
 });
 
 // 기타 상태
+
 const objects = ref([]);
+
 const editingPageId = ref(null);
+
 const editingPageName = ref('');
+
 const generatedCode = ref('');
+
 const codeCache = ref({ structure: '', style: '', logic: '' });
+
 const selectedBlockId = ref(null);
+
 let isSelectingProgrammatically = false;
 
 // 모달 상태
+
 const showAiModal = ref(false);
+
 const aiPrompt = ref('');
+
 const isGenerating = ref(false);
+
 const aiPromptError = ref(false);
+
 const confirmModal = ref({ open: false, message: '', payload: null });
+
 const modal = ref({ open: false, message: '', type: 'info', onConfirm: null });
 
 const vFocus = { mounted: (el) => el.focus() };
 
 /* ============================================================
+
  * 카테고리 정의
+
  * ============================================================ */
+
 const categoryGroups = [
   {
     id: 'structure',
@@ -164,6 +233,7 @@ const categoryGroups = [
     color: '#4caf50',
     items: ['layout', 'content', 'form', 'component'],
   },
+
   {
     id: 'style',
     label: '디자인',
@@ -171,6 +241,7 @@ const categoryGroups = [
     color: '#e91e63',
     items: ['style', 'color', 'animation', 'responsive', 'flex'],
   },
+
   {
     id: 'logic',
     label: '로직/데이터',
@@ -185,11 +256,13 @@ const categories = {
   content: Content.category,
   form: Form.category,
   component: { label: '컴포넌트', color: '#5c6bc0', icon: '🧱' },
+
   style: Style.category,
   color: Color.category,
   flex: Flex.category,
   responsive: Responsive.category,
   animation: Animation.category,
+
   interaction: Interaction.category,
   flow: Flow.category,
   logic: Logic.category,
@@ -199,103 +272,16 @@ const categories = {
 
 const currentSubItems = computed(() => {
   const group = categoryGroups.find((g) => g.id === activeParent.value);
+
   return group ? group.items : [];
 });
 
 /* ============================================================
- * ✅ Entry-like Flyout 핵심
- * - flyout 폭 고정
- * - 워크스페이스 밀림 애니메이션
- * - ✅ 엔트리처럼 "bbox(hit 영역) 기반 hover" + hover 중만 clip 해제
- * ============================================================ */
-const FLYOUT_BASE_WIDTH = 300; // ✅ CSS의 --flyout-offset / flyout width와 반드시 동일!
 
-let resizeRaf1 = 0;
-let resizeRaf2 = 0;
-let resizeEndTimer = 0;
-
-const smoothBlocklyResize = () => {
-  if (!workspace) return;
-  if (resizeRaf1) cancelAnimationFrame(resizeRaf1);
-  if (resizeRaf2) cancelAnimationFrame(resizeRaf2);
-  if (resizeEndTimer) clearTimeout(resizeEndTimer);
-
-  resizeRaf1 = requestAnimationFrame(() => {
-    try {
-      Blockly.svgResize(workspace);
-    } catch (e) {}
-    resizeRaf2 = requestAnimationFrame(() => {
-      try {
-        Blockly.svgResize(workspace);
-      } catch (e) {}
-    });
-  });
-
-  resizeEndTimer = setTimeout(() => {
-    try {
-      Blockly.svgResize(workspace);
-    } catch (e) {}
-  }, 260); // CSS 240ms 기준
-};
-
-/* ============================================================
- * ✅ (NEW) 엔트리 방식 hover: "flyout의 실제 SVG hit 영역"에만 hover 걸기
- *
- * - flyout div 자체는 투명한 영역/여백 때문에 hover 판정이 달라질 수 있음
- * - 엔트리처럼 "가장 긴 블록이 그려지는 bbox"를 벗어나면 hover가 풀리려면,
- *   ✅ 실제로 블록이 그려지는 SVG 요소에 mouseenter/leave를 걸어야 함
- * - hover 상태일 때만 clip-path 해제를 CSS로 적용하기 위해
- *   ✅ flyoutDiv에 wc-entry-hover 클래스를 토글한다.
- * ============================================================ */
-let flyoutHoverCleanup = null;
-
-const bindEntryLikeFlyoutHover = () => {
-  if (!workspace) return;
-
-  const wsDom = workspace.getParentSvg?.()?.parentNode;
-  if (!wsDom) return;
-
-  const flyoutDiv = wsDom.querySelector('.blocklyToolboxFlyout');
-  if (!flyoutDiv) return;
-
-  // Blockly 버전에 따라 구조가 조금 다를 수 있어서 후보를 여러 개 둠
-  const candidates = [
-    '.blocklyFlyout .blocklyFlyoutWorkspace > svg',
-    '.blocklyFlyout .blocklyFlyoutWorkspace svg',
-    '.blocklyFlyout svg.blocklyFlyoutWorkspace',
-  ];
-
-  let flyoutSvg = null;
-  for (const sel of candidates) {
-    flyoutSvg = flyoutDiv.querySelector(sel);
-    if (flyoutSvg) break;
-  }
-  if (!flyoutSvg) return;
-
-  // 기존 바인딩 제거
-  flyoutHoverCleanup?.();
-
-  const onEnter = () => flyoutDiv.classList.add('wc-entry-hover');
-  const onLeave = () => flyoutDiv.classList.remove('wc-entry-hover');
-
-  flyoutSvg.addEventListener('mouseenter', onEnter);
-  flyoutSvg.addEventListener('mouseleave', onLeave);
-
-  // (선택) pointer 기반이 더 안정적이면 이 2줄도 켜도 됨
-  // flyoutSvg.addEventListener('pointerenter', onEnter);
-  // flyoutSvg.addEventListener('pointerleave', onLeave);
-
-  flyoutHoverCleanup = () => {
-    flyoutSvg.removeEventListener('mouseenter', onEnter);
-    flyoutSvg.removeEventListener('mouseleave', onLeave);
-    // flyoutSvg.removeEventListener('pointerenter', onEnter);
-    // flyoutSvg.removeEventListener('pointerleave', onLeave);
-  };
-};
-
-/* ============================================================
  * 페이지 관리 함수
+
  * ============================================================ */
+
 function loadPagesFromStorage() {
   try {
     return JSON.parse(localStorage.getItem('wc_pages'));
@@ -303,6 +289,7 @@ function loadPagesFromStorage() {
     return null;
   }
 }
+
 function savePagesToStorage() {
   try {
     localStorage.setItem('wc_pages', JSON.stringify(pages.value));
@@ -316,12 +303,17 @@ const startEditPageName = (page) => {
 
 const commitEditPageName = (pageId) => {
   const page = pages.value.find((p) => p.id === pageId);
+
   if (page) {
     page.name = editingPageName.value;
-    if (page.status === 'DRAFT')
-      page.route = getUniqueRoute(page.name, page.id);
+
+    if (page.status === 'DRAFT') {
+      page.route = getUniqueRoute(page.name, page.id); // 수정 시에도 중복 체크
+    }
+
     savePagesToStorage();
   }
+
   editingPageId.value = null;
 };
 
@@ -332,6 +324,7 @@ const cancelEditPageName = () => {
 
 const lockPage = (pageId) => {
   const page = pages.value.find((p) => p.id === pageId);
+
   if (page && page.status !== 'LOCKED') {
     page.status = 'LOCKED';
     savePagesToStorage();
@@ -340,8 +333,11 @@ const lockPage = (pageId) => {
 
 const addPage = () => {
   const page = createPage(`Page ${pages.value.length + 1}`);
+
   pages.value.push(page);
+
   savePagesToStorage();
+
   selectPage(page.id);
 };
 
@@ -350,10 +346,14 @@ const deletePageNow = (pageId) => {
     openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
     return;
   }
+
   const idx = pages.value.findIndex((p) => p.id === pageId);
+
   if (idx !== -1) {
     pages.value.splice(idx, 1);
+
     savePagesToStorage();
+
     if (selectedPageId.value === pageId) loadPageById(pages.value[0].id);
   }
 };
@@ -363,6 +363,7 @@ const deletePage = (pageId) => {
     openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
     return;
   }
+
   openDeleteConfirm(pageId);
 };
 
@@ -373,9 +374,11 @@ const openDeleteConfirm = (pageId) => {
     payload: { pageId },
   };
 };
+
 const closeDeleteConfirm = () => {
   confirmModal.value = { ...confirmModal.value, open: false };
 };
+
 const confirmDeletePage = () => {
   const pageId = confirmModal.value.payload?.pageId;
   closeDeleteConfirm();
@@ -385,6 +388,7 @@ const confirmDeletePage = () => {
 const openModal = (message, type = 'info', onConfirm = null) => {
   modal.value = { open: true, message, type, onConfirm };
 };
+
 const closeModal = () => {
   modal.value.open = false;
   modal.value.onConfirm?.();
@@ -392,13 +396,19 @@ const closeModal = () => {
 };
 
 /* ============================================================
+
  * 코드/프리뷰 로직
+
  * ============================================================ */
+
 const cleanCodeForView = (code) => {
   if (!code) return '';
+
   try {
     const container = document.createElement('div');
+
     container.innerHTML = code;
+
     container.querySelectorAll('*').forEach((el) => {
       el.removeAttribute('data-block-id');
       el.removeAttribute('data-draggable');
@@ -406,14 +416,17 @@ const cleanCodeForView = (code) => {
       el.removeAttribute('data-y');
       el.removeAttribute('data-wc-style');
       el.removeAttribute('data-wc-block');
+
       if (el.hasAttribute('style')) {
         el.style.removeProperty('position');
         el.style.removeProperty('left');
         el.style.removeProperty('top');
         el.style.removeProperty('transform');
+
         if (!el.getAttribute('style')?.trim()) el.removeAttribute('style');
       }
     });
+
     return container.innerHTML.trim();
   } catch (e) {
     return (code || '').replace(/\sdata-block-id="[^"]*"/g, '').trim();
@@ -425,14 +438,18 @@ const removeScripts = (html) =>
 
 const getPositionsMap = () => {
   const map = {};
+
   const page = pages.value.find((p) => p.id === selectedPageId.value);
+
   if (!page) return map;
 
   const extractFromBlocks = (blocks) => {
     blocks.forEach((b) => {
       if (!b.data) return;
+
       try {
         const p = JSON.parse(b.data);
+
         if (Number.isFinite(p.x) && Number.isFinite(p.y)) {
           map[b.id] = { x: Number(p.x), y: Number(p.y) };
         }
@@ -440,14 +457,26 @@ const getPositionsMap = () => {
     });
   };
 
-  if (workspace) extractFromBlocks(workspace.getAllBlocks(false));
+  // ✅ [핵심 수정] activeMode 조건문을 제거합니다.
+
+  // 현재 브라우저 메모리에 workspace가 살아있다면, 모드와 상관없이 최신 좌표를 가져옵니다.
+
+  if (workspace) {
+    extractFromBlocks(workspace.getAllBlocks(false));
+  }
+
+  // ✅ 워크스페이스에 데이터가 없거나, 다른 페이지 로딩 등의 경우에만 XML을 참조합니다.
 
   if (Object.keys(map).length === 0 && page.workspaces.structure) {
     try {
       const tempWs = new Blockly.Workspace();
+
       const dom = Blockly.utils.xml.textToDom(page.workspaces.structure);
+
       Blockly.Xml.domToWorkspace(dom, tempWs);
+
       extractFromBlocks(tempWs.getAllBlocks(false));
+
       tempWs.dispose();
     } catch (e) {}
   }
@@ -457,12 +486,18 @@ const getPositionsMap = () => {
 
 const generateCodeFromXML = (xmlText) => {
   if (!xmlText || xmlText === '<xml></xml>') return '';
+
   try {
     const dom = Blockly.utils.xml.textToDom(xmlText);
+
     const headlessWorkspace = new Blockly.Workspace();
+
     Blockly.Xml.domToWorkspace(dom, headlessWorkspace);
+
     const code = javascriptGenerator.workspaceToCode(headlessWorkspace);
+
     headlessWorkspace.dispose();
+
     return code;
   } catch (e) {
     return '';
@@ -471,14 +506,21 @@ const generateCodeFromXML = (xmlText) => {
 
 const handleSelection = (blockId, fromSource = 'unknown') => {
   if (blockId && selectedBlockId.value === blockId) return;
+
   selectedBlockId.value = blockId;
+
   if (workspace && fromSource !== 'blockly') {
     isSelectingProgrammatically = true;
+
     workspace.getAllBlocks(false).forEach((b) => b.unselect());
+
     if (blockId) workspace.getBlockById(blockId)?.select();
+
     isSelectingProgrammatically = false;
   }
+
   const iframe = document.getElementById('previewFrame');
+
   if (iframe?.contentWindow)
     iframe.contentWindow.postMessage(
       { type: 'highlight_element', blockId },
@@ -501,160 +543,143 @@ watch(
 
 const updateObjectListFromWorkspace = () => {
   if (!workspace) return;
+
   const current = [];
+
   const blocks = workspace.getAllBlocks(false);
+
   const ignoredTypes = new Set([
     'event_click',
     'event_page_load',
     'action_alert',
   ]);
+
   blocks.forEach((block) => {
     if (ignoredTypes.has(block.type)) return;
+
     if (
       activeMode.value === 'structure' &&
       (block.type.startsWith('style_') || block.type.startsWith('script'))
     )
       return;
+
     if (activeMode.value === 'style' && !block.type.startsWith('style_'))
       return;
+
     if (
       activeMode.value === 'logic' &&
       !block.type.startsWith('script') &&
       !block.type.startsWith('logic_')
     )
       return;
+
     current.push({
       id: block.id,
       name: block.getFieldValue('NAME') || block.type,
       type: block.type,
     });
   });
+
   objects.value = current;
 };
 
 const refreshCodeAndPreview = () => {
   if (!workspace) return;
+
   try {
     saveCurrentWorkspaceToPage();
+
     javascriptGenerator.init(workspace);
+
     const raw = javascriptGenerator.workspaceToCode(workspace);
+
     codeCache.value[activeMode.value] = raw;
 
     const page = pages.value.find((p) => p.id === selectedPageId.value);
+
     if (page) {
       const currentXml = page.workspaces[activeMode.value];
+
       const rawCode = generateCodeFromXML(currentXml);
+
       generatedCode.value =
         activeMode.value === 'structure' ? cleanCodeForView(rawCode) : rawCode;
     }
 
     updatePreview();
+
     updateObjectListFromWorkspace();
   } catch (e) {
     console.error(e);
   }
 };
 
-const ANIMATION_DEFS = `
-@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes bounce { 0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-20px); } 60% { transform: translateY(-10px); } }
-@keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes shake { 0%, 100% { transform: translateX(0); }
-  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-  20%, 40%, 60%, 80% { transform: translateX(5px); } }
-@keyframes zoom-in { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-@keyframes rainbow { 0% { color: #ff0000; } 50% { color: #00ff00; } 100% { color: #ff0000; } }
-@keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
-`;
-
-/* ============================================================
- * ✅ Flyout 폭 강제 고정 + background/내부 width 동기화
- * ============================================================ */
-const enforceFlyoutWidth = () => {
-  if (!workspace) return;
-
-  const flyout = workspace.getFlyout?.();
-  if (!flyout) return;
-
-  // 1) 내부 width_ 강제
-  try {
-    flyout.width_ = FLYOUT_BASE_WIDTH;
-  } catch (e) {}
-
-  // 2) flyout background(svg rect) width 강제
-  try {
-    if (flyout.svgBackground_) {
-      flyout.svgBackground_.setAttribute('width', String(FLYOUT_BASE_WIDTH));
-    }
-  } catch (e) {}
-
-  // 3) DOM(div) width 강제
-  try {
-    const wsDom = workspace.getParentSvg()?.parentNode;
-    if (wsDom) {
-      const flyoutDiv = wsDom.querySelector('.blocklyToolboxFlyout');
-      if (flyoutDiv) {
-        flyoutDiv.style.width = `${FLYOUT_BASE_WIDTH}px`;
-        flyoutDiv.style.minWidth = `${FLYOUT_BASE_WIDTH}px`;
-        flyoutDiv.style.maxWidth = `${FLYOUT_BASE_WIDTH}px`;
-      }
-    }
-  } catch (e) {}
-
-  // 4) reflow/position 이후에도 폭이 안 흔들리도록 한 번 더
-  try {
-    flyout.reflow?.();
-    flyout.position?.();
-  } catch (e) {}
-};
-
-const enforceFlyoutWidthRAF = () => {
-  requestAnimationFrame(() => {
-    enforceFlyoutWidth();
-    requestAnimationFrame(() => enforceFlyoutWidth());
-  });
-};
-
 const updatePreview = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
+  // ✅ 프리뷰에는 "style_tag/style_tag_all이 만든 <style>...</style>만" 적용되게
+  const extractStyleTagsOnly = (raw) => {
+    if (!raw) return '';
+    const matches = raw.match(/<style[^>]*>[\s\S]*?<\/style>/gi);
+    return matches ? matches.join('\n') : '';
+  };
+
+  // 1. 현재 워크스페이스의 XML 가져오기
   const currentXml = workspace
     ? Blockly.Xml.domToText(Blockly.Xml.workspaceToDom(workspace))
     : '';
+
+  // 2. 각 모드별 코드 생성
   const structureCode =
     activeMode.value === 'structure'
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.structure);
-  const styleCode =
+
+  const styleCodeRaw =
     activeMode.value === 'style'
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.style);
+
   const logicCode =
     activeMode.value === 'logic'
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.logic);
 
-  const safeStyle =
-    styleCode.trim() && !styleCode.includes('<style')
-      ? `<style>${styleCode}</style>`
-      : styleCode;
+  // 3. ✅ 코드보기(사용자 코드)는 그대로 보여줌 (단독 STYLE 속성도 여기엔 보임)
+  const viewScript = logicCode.trim() ? `${logicCode}` : '';
+  const viewHtml = cleanCodeForView(structureCode);
+  const viewStyle = styleCodeRaw.trim() ? `${styleCodeRaw}` : '';
+
+  generatedCode.value = [viewScript, viewHtml, viewStyle].filter(Boolean).join('\n\n');
+
+  // 4. ✅ 프리뷰용 스타일은 "style 태그만" 추출해서 적용
+  // - style_tag/style_tag_all이 만든 <style>...</style>만 남음
+  // - style_size 같은 단독 속성 블록은 프리뷰에 절대 영향 없음
+  const styleCodeForPreview = extractStyleTagsOnly(styleCodeRaw);
+
+  // 로직 스크립트는 기존대로
   const safeScript =
     logicCode.trim() && !logicCode.includes('<script')
       ? `<script>${logicCode}<\/script>`
       : logicCode;
+
   const finalLogicScript = isRunning.value ? safeScript : '';
 
   const positionsJSON = JSON.stringify(getPositionsMap());
   const PAGE_ID = page.id;
   const PAGE_ROUTE = page.route;
 
+  // 5. Iframe HTML 조립
   const htmlParts = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
-    '<style>html, body { margin:0; padding:0; width:100%; min-height:100vh; overflow:hidden; background:#fff; } * { box-sizing: border-box; } #wrapper { width:100%; min-height:100vh; position:relative; background:#fff; } #wrapper > [data-draggable="true"][data-block-id] { position: absolute; left: 0; top: 0; transform:none; touch-action:none; user-select:none; -webkit-user-select:none; cursor: grab; } #wrapper > [data-draggable="true"][data-block-id]:is(div, section, article, header, nav, main, aside, footer, form, ul) { max-width: 100%; } .wc-highlight { outline:2px solid #ff4081 !important; z-index: 9999; } .wc-dragging { opacity:0.9; box-shadow: 0 10px 20px rgba(0,0,0,0.2); outline: 2px dashed #2196f3 !important; cursor: grabbing; transition:none !important; z-index: 9999; } .wc-guide-line { position:absolute; z-index: 10000; pointer-events:none; display:none; border-color: rgba(255, 0, 0, 0.75); border-style: dashed; } .wc-guide-v { width:0; border-left-width:1px; } .wc-guide-h { height:0; border-top-width:1px; } [data-wc-block] { position: relative; min-width: 50px; min-height: 50px; } [data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; } .is-design * { animation:none !important; transition:none !important; }</style>',
-    `<style>${Animation.Animation.ANIMATION_KEYFRAMES || ''}</style>`,
-    safeStyle,
+    '<style>html, body { margin:0; padding:0; width:100%; min-height:100vh; overflow: hidden; background:#fff; } * { box-sizing: border-box; } #wrapper { width:100%; min-height:100vh; position:relative; background:#fff; } #wrapper > [data-draggable="true"][data-block-id] { position: absolute; left: 0; top: 0; transform:none; touch-action:none; user-select:none; -webkit-user-select:none; cursor: grab; } #wrapper > [data-draggable="true"][data-block-id]:is(div, section, article, header, nav, main, aside, footer, form, ul) { max-width: 100%; } .wc-highlight { outline:2px solid #ff4081 !important; z-index: 9999; } .wc-dragging { opacity:0.9; box-shadow: 0 10px 20px rgba(0,0,0,0.2); outline: 2px dashed #2196f3 !important; cursor: grabbing; transition:none !important; z-index: 9999; } .wc-guide-line { position:absolute; z-index: 10000; pointer-events:none; display:none; border-color: rgba(255, 0, 0, 0.75); border-style: dashed; } .wc-guide-v { width:0; border-left-width:1px; } .wc-guide-h { height:0; border-top-width:1px; } [data-wc-block] { position: relative; min-width: 50px; min-height: 50px; } [data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; } </style>',
+    `<style id="anim-defs">${Animation.Animation.ANIMATION_KEYFRAMES}</style>`,
+    '<style>body.is-design * { animation: none !important; transition: none !important; }</style>',
+
+    // ✅ 여기만 변경: 전체 styleCodeRaw가 아니라 "styleCodeForPreview"만 주입
+    styleCodeForPreview,
+
     '</head>',
     `<body class="${isRunning.value ? 'is-running' : 'is-design'}">`,
     '<div id="wrapper">',
@@ -671,13 +696,10 @@ const updatePreview = () => {
     'function hideGuides(){ const v = document.getElementById("wcGuideV"); const h = document.getElementById("wcGuideH"); if(v) v.style.display = "none"; if(h) h.style.display = "none"; }',
     'function showVSeg(x, y1, y2){ const v = document.getElementById("wcGuideV"); if(!v) return; v.style.left = x + "px"; v.style.top = Math.min(y1,y2) + "px"; v.style.height = Math.abs(y2 - y1) + "px"; v.style.display = "block"; }',
     'function showHSeg(y, x1, x2){ const h = document.getElementById("wcGuideH"); if(!h) return; h.style.top = y + "px"; h.style.left = Math.min(x1,x2) + "px"; h.style.width = Math.abs(x2 - x1) + "px"; h.style.display = "block"; }',
-    'function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }',
-    'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const wrapRect = wrap.getBoundingClientRect(); const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ const elRect = el.getBoundingClientRect(); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); const x = clamp(Number(p.x) || 0, 0, maxX); const y = clamp(Number(p.y) || 0, 0, maxY); el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", x + "px", "important"); el.style.setProperty("top", y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
+    'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", p.x + "px", "important"); el.style.setProperty("top", p.y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
-    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); });',
-    'wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); const wrapRect = wrap.getBoundingClientRect(); const elRect = dragging.el.getBoundingClientRect(); let finalL = nextL + (snap.dx || 0); let finalT = nextT + (snap.dy || 0); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); finalL = clamp(finalL, 0, maxX); finalT = clamp(finalT, 0, maxY); dragging.el.style.left = finalL + "px"; dragging.el.style.top = finalT + "px"; });',
-    'wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); const wrapRect = wrap.getBoundingClientRect(); const elRect = t.getBoundingClientRect(); const maxX = Math.max(0, wrapRect.width - elRect.width); const maxY = Math.max(0, wrapRect.height - elRect.height); let x = parseFloat(t.style.left) || 0; let y = parseFloat(t.style.top) || 0; x = clamp(x, 0, maxX); y = clamp(y, 0, maxY); t.style.left = x + "px"; t.style.top = y + "px"; window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x, y }, "*"); dragging = null; }); }',
+    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); }); wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const wr = wrap.getBoundingClientRect(); if(nextL < 0) nextL = 0; if(nextT < 0) nextT = 0; if(nextL + r.width > wr.width) nextL = wr.width - r.width; if(nextT + r.height > wr.height) nextT = wr.height - r.height; const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); dragging.el.style.left = (nextL + snap.dx) + "px"; dragging.el.style.top = (nextT + snap.dy) + "px"; }); wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x: parseInt(t.style.left), y: parseInt(t.style.top) }, "*"); dragging = null; }); }',
     'window.onload = init;',
     '<\/script>',
     '</body></html>',
@@ -690,8 +712,11 @@ const updatePreview = () => {
 };
 
 /* ============================================================
+
  * 커스텀 블록 등록 및 툴박스
+
  * ============================================================ */
+
 const defineCustomBlocks = () => {
   Layout.defineBlocks();
   Content.defineBlocks();
@@ -718,31 +743,29 @@ const toolboxXMLs = {
   form: Form.toolbox,
   responsive: Responsive.toolbox,
   animation: Animation.toolbox,
+
   data: `<xml><category name="변수" custom="VARIABLE" colour="#a55b80"></category></xml>`,
+
   advanced: `<xml><category name="함수" custom="PROCEDURE" colour="#995ba5"></category></xml>`,
-  empty: `<xml></xml>`,
+
+  empty: `<xml><category name="dummy" style="display:none"></category></xml>`,
 };
 
-/**
- * ✅ setToolbox
- * - updateToolbox 즉시
- * - 기본 toolbox div 숨김 (레이아웃 영향 제거)
- * - flyout autoClose=false 유지
- * - 리사이즈는 CSS 트랜지션 + svgResize 최소 호출
- *
- * ✅ (NEW) updateToolbox 이후 DOM이 교체될 수 있어서:
- *    requestAnimationFrame에서
- *    - enforceFlyoutWidthRAF()
- *    - bindEntryLikeFlyoutHover()
- *    를 다시 보장한다.
- */
 const setToolbox = (xmlText) => {
-  if (!workspace) return;
+  // [핵심] 함수 시작하자마자 확실한 변수 하나를 만듭니다.
+  // 이제 이 함수 안에서는 'workspace' 대신 'currentWorkspace'만 믿고 씁니다.
+  const currentWorkspace = Blockly.getMainWorkspace();
+
+  // 만약 아직 워크스페이스가 안 만들어졌다면, 에러 내지 말고 조용히 종료 (안전장치)
+  if (!currentWorkspace) return; 
+
   let text = (xmlText || '<xml></xml>').trim();
   if (!text.startsWith('<xml')) text = `<xml>${text}</xml>`;
 
   try {
     const dom = Blockly.utils.xml.textToDom(text);
+
+    // '요소' 카테고리가 없으면 추가하는 로직
     if (dom.getElementsByTagName('category').length === 0) {
       const category = Blockly.utils.xml.createElement('category');
       category.setAttribute('name', '요소');
@@ -751,66 +774,97 @@ const setToolbox = (xmlText) => {
       dom.appendChild(category);
     }
 
-    workspace.updateToolbox(dom);
+    // 1. 툴박스 업데이트 (우리가 만든 변수 사용)
+    currentWorkspace.updateToolbox(dom);
 
-    // ✅ 폭 고정 + 엔트리 hover 바인딩은 "DOM 반영된 다음 프레임"에서
-    requestAnimationFrame(() => {
-      enforceFlyoutWidthRAF();
-      bindEntryLikeFlyoutHover();
-    });
-
-    smoothBlocklyResize();
-
-    // 기본 toolbox div 숨김
-    const workspaceDom = workspace.getParentSvg().parentNode;
+    // 2. 기존 CSS 조정 (우리가 만든 변수 사용)
+    const workspaceDom = currentWorkspace.getParentSvg().parentNode;
     const toolboxDiv = workspaceDom.querySelector('.blocklyToolboxDiv');
     if (toolboxDiv) toolboxDiv.style.display = 'none';
 
-    const flyout = workspace.getFlyout?.();
-    if (flyout) flyout.autoClose = false;
+    const toolbox = currentWorkspace.getToolbox();
 
-    smoothBlocklyResize();
+    if (toolbox && toolbox.getToolboxItems && toolbox.getToolboxItems().length > 0) {
+      toolbox.selectItemByPosition(0);
+      currentWorkspace.getFlyout().autoClose = false;
+
+      // 3. Flyout(메뉴) 일단 숨기기
+      const immediateFlyouts = document.querySelectorAll('.blocklyFlyout');
+      immediateFlyouts.forEach((flyout) => {
+        flyout.style.opacity = '0';
+      });
+
+      // 4. 애니메이션 시작 (약간의 딜레이 후)
+      setTimeout(() => {
+        // 리사이즈도 우리 변수로 실행
+        Blockly.svgResize(currentWorkspace);
+
+        const allFlyouts = document.querySelectorAll('.blocklyFlyout');
+        allFlyouts.forEach((flyoutSvg) => {
+          flyoutSvg.style.opacity = '1';
+
+          const blocks = flyoutSvg.querySelector('.blocklyBlockCanvas');
+
+          if (blocks) {
+            blocks.animate(
+              [
+                { transform: 'translate(-300px, 0)', opacity: 0 },
+                { transform: 'translate(0, 0)', opacity: 1 }
+              ],
+              { duration: 300, easing: 'ease', fill: 'forwards', composite: 'add' }
+            );
+          }
+        });
+      }, 100);
+    }
   } catch (e) {
-    workspace.updateToolbox('<xml></xml>');
-    requestAnimationFrame(() => {
-      enforceFlyoutWidthRAF();
-      bindEntryLikeFlyoutHover();
-    });
-    smoothBlocklyResize();
+    console.error("setToolbox 오류:", e);
+    // 에러가 나도 우리 변수가 살아있으면 초기화 시도
+    if (currentWorkspace) {
+      currentWorkspace.updateToolbox('<xml></xml>');
+    }
   }
 };
 
 const saveCurrentWorkspaceToPage = () => {
   if (!workspace) return;
+
   const page = pages.value.find((p) => p.id === selectedPageId.value);
+
   if (!page) return;
 
+  // ✨ [추가] 현재 워크스페이스의 모든 블록을 돌며 좌표 데이터를 최신화합니다.
+
   workspace.getAllBlocks(false).forEach((block) => {
-    if (block.data) {
-      if (typeof block.setData === 'function') block.setData(block.data);
-      else block.data = block.data;
+    if (block.type === 'style_tag' && block.data) {
+      // 이미 block.data에 좌표가 있으므로, 이 데이터가 XML에 포함되도록 강제합니다.
+
+      block.setMutationValue && block.setMutationValue('data', block.data);
     }
   });
 
-  try {
-    const dom = Blockly.Xml.workspaceToDom(workspace);
-    const xmlText = Blockly.Xml.domToText(dom);
-    page.workspaces[activeMode.value] = xmlText;
-    savePagesToStorage();
-  } catch (e) {
-    console.error('XML 저장 중 오류 발생:', e);
-  }
+  const dom = Blockly.Xml.workspaceToDom(workspace);
+
+  const xmlText = Blockly.Xml.domToText(dom);
+
+  page.workspaces[activeMode.value] = xmlText;
+
+  savePagesToStorage();
 };
 
 const loadPageById = (pageId) => {
   if (!workspace) return;
+
   const page = pages.value.find((p) => p.id === pageId);
+
   if (!page) return;
 
   selectedPageId.value = page.id;
+
   workspace.clear();
 
   const xml = page.workspaces?.[activeMode.value];
+
   if (xml) {
     try {
       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(xml), workspace);
@@ -818,90 +872,130 @@ const loadPageById = (pageId) => {
   }
 
   refreshCodeAndPreview();
-  handleSelection(null);
-  smoothBlocklyResize();
 
-  // ✅ 페이지 로드 후에도 flyout DOM 재확인
-  requestAnimationFrame(() => {
-    enforceFlyoutWidthRAF();
-    bindEntryLikeFlyoutHover();
-  });
+  handleSelection(null);
 };
 
 const selectPage = (pageId) => {
   saveCurrentWorkspaceToPage();
+
   codeCache.value = { structure: '', style: '', logic: '' };
+
   activeMode.value = 'structure';
+
   activeParent.value = 'structure';
+
   activeTab.value = null;
+
   loadPageById(pageId);
 };
 
 const selectParent = (modeId) => {
   if (activeMode.value === modeId) return;
+
   saveCurrentWorkspaceToPage();
 
   activeMode.value = modeId;
+
   activeParent.value = modeId;
+
   activeTab.value = null;
 
   if (!workspace) return;
+
   workspace.clear();
 
   const page = pages.value.find((p) => p.id === selectedPageId.value);
+
   const xml = page?.workspaces?.[modeId];
+
   if (xml) {
     try {
       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(xml), workspace);
     } catch (e) {}
   }
 
-  // 우선 flyout 닫힌 상태로 시작
   setToolbox(toolboxXMLs.empty);
-  workspace.getFlyout?.()?.hide?.();
-  smoothBlocklyResize();
+
+  const group = categoryGroups.find((g) => g.id === modeId);
+
+  if (group && group.items && group.items.length > 0) {
+    // 첫 번째 아이템(예: layout)을 선택하도록 호출
+
+    selectCategory(group.items[0]);
+  } else {
+    // 하위 메뉴가 없으면 빈 툴박스
+
+    setToolbox(toolboxXMLs.empty);
+  }
 
   refreshCodeAndPreview();
 };
+// [상수 추가] 스크립트 맨 위에 추가해두세요
+const FLYOUT_WIDTH = 300; 
 
-/**
- * ✅ Entry UX 핵심: "카테고리 클릭"으로만 열기/닫기 토글
- */
 const selectCategory = (key) => {
   if (!workspace) return;
 
-  // ✅ 닫기(토글)
+  // 1. [닫기] 이미 열린 탭 클릭 시
   if (activeTab.value === key) {
-    activeTab.value = null;
-    setToolbox('<xml></xml>');
-    workspace.getFlyout?.()?.hide?.();
-    smoothBlocklyResize();
+    activeTab.value = null; // Vue 상태 해제 -> CSS가 워크스페이스 원상복구
+    workspace.getFlyout().hide();
+    
+    // 워크스페이스가 줄어들었으니 리사이즈 한 번 해줌
+    setTimeout(() => Blockly.svgResize(workspace), 300);
     return;
   }
 
-  // ✅ 열기
-  activeTab.value = key;
-  setToolbox(toolboxXMLs[key] || '<xml></xml>');
+  // 2. [열기/교체]
+  activeTab.value = key; // Vue 상태 변경 -> CSS가 워크스페이스 밈(300px)
 
-  // ✅ show() 직접 호출 금지. updateToolbox가 알아서 flyout 갱신함.
-  workspace.getFlyout?.()?.setVisible?.(true);
+  // XML 파싱 및 블록 가져오기
+  const xmlText = toolboxXMLs[key] || '<xml></xml>';
+  const dom = Blockly.utils.xml.textToDom(xmlText);
+  let blockList = [];
 
-  // ✅ 열기 이후에 hover 바인딩 재확인(툴박스 변경 시 DOM이 갈릴 수 있음)
-  requestAnimationFrame(() => {
-    bindEntryLikeFlyoutHover();
-  });
+  if (dom.nodeName.toLowerCase() === 'xml') {
+     const category = dom.querySelector('category');
+     if (category) {
+        const customType = category.getAttribute('custom');
+        if (customType) {
+            blockList = workspace.getToolboxCategoryCallback(customType)(workspace);
+        } else {
+            blockList = Array.from(category.children);
+        }
+     } else {
+        blockList = Array.from(dom.children);
+     }
+  }
 
-  smoothBlocklyResize();
+  // 3. Flyout 내용 교체 (단순하게 show만 호출)
+  const flyout = workspace.getFlyout();
+  flyout.autoClose = false; // 이거 하나만 필수
+  flyout.show(blockList);
+  flyout.scrollToStart();
+
+  // 4. 리사이즈 (CSS 애니메이션과 싱크 맞추기 위해 약간의 딜레이만 줌)
+  // 애니메이션 로직은 없습니다. 단지 "화면이 밀렸으니 좌표 다시 잡아라" 명령입니다.
+  setTimeout(() => {
+    Blockly.svgResize(workspace);
+  }, 0);
 };
-
 const toggleRun = async () => {
   isRunning.value = !isRunning.value;
   await nextTick();
   updatePreview();
 };
+
 const changeModel = () => {
   isPhone.value = !isPhone.value;
+  if (!isPhone.value) isLandscape.value = false;
   updatePreview();
+};
+
+const toggleOrientation = () => {
+  isLandscape.value = !isLandscape.value;
+  updatePreview(); // 화면 비율 변경 시 프리뷰 갱신
 };
 
 onMounted(async () => {
@@ -909,6 +1003,7 @@ onMounted(async () => {
   defineCustomBlocks();
   await nextTick();
 
+  // 1. Blockly 주입
   workspace = Blockly.inject('blocklyDiv', {
     renderer: 'zelos',
     toolbox: toolboxXMLs.empty,
@@ -918,6 +1013,44 @@ onMounted(async () => {
     trashcan: true,
   });
 
+  // =================================================================
+  // 🔥 [핵심 수정] MetricsManager 강제 조작 (밀림 현상 원천 봉쇄)
+  // =================================================================
+  // 최신 Blockly는 MetricsManager를 통해 화면 구성을 계산합니다.
+  // 이 매니저가 "툴박스/플라이아웃 너비"를 0으로 보고하게 만들면
+  // Blockly는 공간 확보를 위해 블록을 밀지 않게 됩니다.
+  
+  const metricsManager = workspace.getMetricsManager();
+
+  // (1) 툴박스(회색 영역) 치수 0으로 고정
+  metricsManager.getToolboxMetrics = function() {
+    return {
+      width: 0,
+      height: 0,
+      position: Blockly.TOOLBOX_AT_LEFT,
+    };
+  };
+
+  // (2) 플라이아웃(메뉴) 치수 0으로 고정
+  metricsManager.getFlyoutMetrics = function() {
+    return {
+      width: 0,
+      height: 0,
+      position: Blockly.TOOLBOX_AT_LEFT,
+    };
+  };
+
+  // (3) 닫힘 방지 설정
+  const flyout = workspace.getFlyout();
+  if (flyout) {
+    flyout.autoClose = false;
+  }
+  
+  // 변경 사항 적용
+  workspace.resize();
+  // =================================================================
+
+  // 4. 이벤트 리스너 등록
   let debounceTimer = null;
   workspace.addChangeListener((e) => {
     if (e.type === Blockly.Events.SELECTED) {
@@ -926,7 +1059,6 @@ onMounted(async () => {
       return;
     }
     if (e.type === Blockly.Events.UI || e.type === Blockly.Events.CLICK) return;
-
     if (
       [
         Blockly.Events.BLOCK_CHANGE,
@@ -937,7 +1069,6 @@ onMounted(async () => {
     ) {
       updateObjectListFromWorkspace();
     }
-
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       refreshCodeAndPreview();
@@ -946,10 +1077,10 @@ onMounted(async () => {
     }, 500);
   });
 
+  // 5. iframe 통신
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data) return;
-
     if (data.type === 'update_free_position') {
       const { blockId, x, y } = data;
       const block = workspace.getBlockById(blockId);
@@ -959,16 +1090,9 @@ onMounted(async () => {
         refreshCodeAndPreview();
       }
     }
-
-    if (
-      data.type === 'NAVIGATE' ||
-      data.type === 'REDIRECT' ||
-      data.type === 'change_page_request'
-    ) {
+    if (data.type === 'NAVIGATE' || data.type === 'REDIRECT' || data.type === 'change_page_request') {
       const targetId = data.pageId;
-      const targetPage = pages.value.find(
-        (p) => p.id === targetId || p.route === targetId || p.name === targetId
-      );
+      const targetPage = pages.value.find((p) => p.id === targetId || p.route === targetId || p.name === targetId);
       if (targetPage) {
         lockPage(targetPage.id);
         selectPage(targetPage.id);
@@ -976,16 +1100,17 @@ onMounted(async () => {
         alert('이동할 페이지를 찾을 수 없습니다: ' + targetId);
       }
     }
-
     if (data.type === 'select_block') handleSelection(data.blockId, 'iframe');
     if (data.type === 'deselect_block') handleSelection(null, 'iframe');
   });
 
+  // 6. 전역 함수
   window.WC_GET_PAGES = () => {
     if (!pages.value || pages.value.length === 0) return [['페이지 없음', '']];
     return pages.value.map((p) => [p.name, p.id]);
   };
 
+  // 7. 데이터 로드
   const stored = loadPagesFromStorage();
   if (stored && stored.length > 0) {
     pages.value = stored;
@@ -998,30 +1123,22 @@ onMounted(async () => {
     loadPageById(pages.value[0].id);
   }
 
-  // ✅ resize observer
+  // 8. 리사이즈 감지
   new ResizeObserver(() => {
     if (workspace) Blockly.svgResize(workspace);
   }).observe(document.getElementById('workspace-area'));
-
-  // ✅ 초기 flyout 닫힘 상태 보장 + 안정화
-  setToolbox(toolboxXMLs.empty);
-  workspace.getFlyout?.()?.hide?.();
-  smoothBlocklyResize();
-
-  // ✅ 초기에도 폭/hover 바인딩 보장
-  requestAnimationFrame(() => {
-    enforceFlyoutWidthRAF();
-    bindEntryLikeFlyoutHover();
-  });
 });
 </script>
 
 <template>
   <div class="ide-container">
-    <aside
-      :class="isPhone ? 'phone-size' : 'pc-size'"
-      class="entry-panel transition-all duration-300 ease-in-out"
-    >
+      <aside
+        :class="[
+          isPhone ? 'phone-size' : 'pc-size', 
+          { 'is-landscape': isPhone && isLandscape }
+        ]"
+        class="entry-panel transition-all duration-300 ease-in-out"
+      >
       <div class="preview-section">
         <div class="panel-title">
           <span
@@ -1029,6 +1146,7 @@ onMounted(async () => {
             class="cursor-pointer inline-flex items-center gap-[5px] text-white hover:text-gray-300"
           >
             <span v-if="isPhone" class="text-xl">📱</span>
+
             <img
               v-else
               src="https://img.icons8.com/?size=100&id=13352&format=png&color=FFFFFF"
@@ -1045,6 +1163,7 @@ onMounted(async () => {
             >
               ✨ AI
             </button>
+
             <button
               class="btn-toggle"
               :class="{ running: isRunning }"
@@ -1052,6 +1171,20 @@ onMounted(async () => {
             >
               {{ isRunning ? '⏹ 정지' : '▶ 시작' }}
             </button>
+
+            <button 
+              v-if="isPhone" 
+              class="btn-rotate" 
+              @click="toggleOrientation"
+              title="화면 회전"
+            >
+              <span :style="{ 
+                display: 'inline-block', 
+                transition: '0.3s', 
+                transform: isLandscape ? 'rotate(90deg)' : 'rotate(0deg)' 
+              }">🔄</span>
+            </button>
+
             <button
               class="btn-deploy"
               :class="isPhone ? 'phone-hide' : ''"
@@ -1060,8 +1193,10 @@ onMounted(async () => {
               🚀 배포
             </button>
           </div>
+
           <div class="status-slot">
             <span class="live-badge" v-if="isRunning">RUNNING</span>
+
             <span class="stop-badge" v-else>DESIGN</span>
           </div>
         </div>
@@ -1070,13 +1205,16 @@ onMounted(async () => {
           <div class="url-bar">
             {{ currentPageUrl }}
           </div>
+
           <iframe
             :key="`${isRunning}-${selectedPageId}-${isPhone}`"
             id="previewFrame"
             :srcdoc="previewSrc"
             frameborder="0"
+            style="border: none; width: 100%; height: 100%; display: block;"
             :sandbox="'allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox allow-scripts'"
-          />
+          >
+          </iframe>
         </div>
       </div>
 
@@ -1088,12 +1226,14 @@ onMounted(async () => {
           >
             📦 객체
           </button>
+
           <button
             :class="{ active: activeRightTab === 'pages' }"
             @click="activeRightTab = 'pages'"
           >
             🗂️ 페이지
           </button>
+
           <button
             :class="{ active: activeRightTab === 'code' }"
             @click="activeRightTab = 'code'"
@@ -1105,8 +1245,10 @@ onMounted(async () => {
         <div v-if="activeRightTab === 'pages'" class="tab-content">
           <div class="list-header">
             <span>총 {{ pages.length }}개</span>
+
             <button class="btn-add-mini" @click="addPage">➕ 추가</button>
           </div>
+
           <ul class="item-list">
             <li
               v-for="page in pages"
@@ -1116,6 +1258,7 @@ onMounted(async () => {
               @click="selectPage(page.id)"
             >
               <span class="item-icon">📄</span>
+
               <div class="name-container" style="flex: 1">
                 <input
                   v-if="editingPageId === page.id"
@@ -1127,6 +1270,7 @@ onMounted(async () => {
                   @keyup.esc="cancelEditPageName"
                   @blur="commitEditPageName(page.id)"
                 />
+
                 <span
                   v-else
                   class="item-name"
@@ -1136,6 +1280,7 @@ onMounted(async () => {
                   {{ page.name }}
                 </span>
               </div>
+
               <button class="btn-del" @click.stop="deletePage(page.id)">
                 ✕
               </button>
@@ -1146,10 +1291,12 @@ onMounted(async () => {
         <div v-if="activeRightTab === 'objects'" class="tab-content">
           <div class="empty-msg" v-if="objects.length === 0">
             <p>배치된 요소가 없습니다.</p>
+
             <p class="text-sm text-gray-500 mt-2">
               블록을 사용하여 요소를 추가해 보세요!
             </p>
           </div>
+
           <ul class="item-list" v-else>
             <li
               v-for="obj in objects"
@@ -1159,7 +1306,9 @@ onMounted(async () => {
               @click="selectObjectFromList(obj.id)"
             >
               <span class="item-icon">💠</span>
+
               <span class="item-name">{{ obj.name }}</span>
+
               <span class="item-type">{{ obj.type }}</span>
             </li>
           </ul>
@@ -1185,8 +1334,12 @@ onMounted(async () => {
           }"
         >
           <span class="tab-icon">{{ group.icon }}</span>
+
           <span class="tab-label">{{ group.label }}</span>
+
         </div>
+        <div class="item"></div>
+        <button class="mr-[42px]" @click="{settingModal}"><Settings :size="23" /></button>
       </nav>
 
       <div class="workspace-row">
@@ -1199,19 +1352,23 @@ onMounted(async () => {
             @click.stop="selectCategory(itemKey)"
           >
             <div class="icon">{{ categories[itemKey]?.icon || '?' }}</div>
+
             <div class="label">{{ categories[itemKey]?.label || itemKey }}</div>
+
             <div
               class="indicator"
               :style="{ backgroundColor: categories[itemKey]?.color || '#ccc' }"
-            />
+            ></div>
           </div>
         </nav>
 
-        <div
-          id="workspace-area"
-          class="workspace-wrapper"
-          :class="{ 'drawer-open': activeTab }"
+        <div 
+          id="workspace-area" 
+          class="workspace-wrapper" 
+          :class="{ 'drawer-open': activeTab }" 
         >
+          <div class="flyout-bg-panel" :class="{ open: activeTab }"></div>
+
           <div id="blocklyDiv"></div>
         </div>
       </div>
@@ -1220,15 +1377,19 @@ onMounted(async () => {
     <div v-if="showAiModal" class="modal-overlay">
       <div class="modal-content">
         <h3>✨ AI로 페이지 만들기</h3>
+
         <p class="desc">원하는 디자인을 설명하면 블록을 조립해줍니다.</p>
+
         <textarea
           v-model="aiPrompt"
           placeholder="요청사항 입력..."
           class="ai-textarea"
           :class="{ 'input-error': aiPromptError }"
-        />
+        ></textarea>
+
         <div class="modal-actions">
           <button @click="showAiModal = false" class="btn-cancel">취소</button>
+
           <button
             @click="callOpenAI"
             class="btn-generate"
@@ -1240,6 +1401,8 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!--삭제/취소 모달-->
+
     <ConfirmModal
       :open="confirmModal.open"
       type="warning"
@@ -1249,6 +1412,9 @@ onMounted(async () => {
       @confirm="confirmDeletePage"
       @cancel="closeDeleteConfirm"
     />
+
+    <!--단순 안내 모달-->
+
     <GlobalModal
       :open="modal.open"
       :message="modal.message"
@@ -1261,277 +1427,460 @@ onMounted(async () => {
 <style scoped>
 .ide-container {
   padding-top: 70px;
+
   height: 100vh;
+
   display: flex;
+
   flex-direction: row;
+
   background-color: #f0f0f0;
+
   overflow: visible;
 }
+
 .entry-panel {
   background: #f5f5f5;
+
   border-right: 1px solid #1a1a2e;
+
   display: flex;
+
   flex-direction: column;
+
   flex-shrink: 0;
+
   z-index: 30;
+
   height: 100%;
 }
+
 .phone-size {
   width: 213px;
 }
+
 .pc-size {
   width: 672px;
 }
+
 .preview-section {
   flex: 1;
+
   background: #1a1a2e;
+
   padding: 10px;
+
   display: flex;
+
   flex-direction: column;
+
   border-bottom: 1px solid #252535;
 }
+
 .panel-title {
   font-weight: bold;
+
   margin-bottom: 8px;
+
   font-size: 0.9rem;
+
   display: flex;
+
   justify-content: space-between;
+
   align-items: center;
+
   color: white;
+
   height: 32px;
+
   overflow: visible;
 }
+
 .control-buttons {
   display: flex;
+
   gap: 6px;
+
   font-size: 0.85rem;
+
   align-items: center;
 }
+
+/* ✅ 기존 .btn-ai, .btn-toggle, .btn-deploy 정의를 이렇게 업데이트해줘 */
 .btn-ai,
 .btn-toggle,
+.btn-rotate, /* 🔄 회전 버튼도 같이 적용 */
 .btn-deploy {
   border: none;
-  padding: 5px 10px;
+  padding: 0 12px; /* 좌우 여백을 조금 더 줘서 안정감 있게 */
   border-radius: 4px;
   cursor: pointer;
   font-weight: bold;
   transition: 0.2s;
   color: white;
+
+  /* 🔥 세로 깨짐 방지 핵심 코드 */
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important; /* 👈 글자가 아래로 떨어지는 걸 막아줌 */
+  flex-shrink: 0 !important;      /* 👈 부모가 좁아도 버튼이 안 찌그러짐 */
+  height: 32px !important;        /* 높이를 통일해서 예쁘게 정렬 */
+  line-height: 1 !important;      /* 글자 수직 중앙 정렬 보정 */
 }
+
 .btn-ai {
   background: #9c27b0;
 }
+
 .btn-ai:hover {
   background: #7b1fa2;
 }
+
 .btn-toggle {
   background: #4caf50;
+
   display: flex;
+
   align-items: center;
+
   gap: 5px;
 }
+
 .btn-toggle:hover {
   background: #43a047;
 }
+
 .btn-toggle.running {
   background: #f44336;
 }
+
 .btn-toggle.running:hover {
   background: #d32f2f;
 }
+
 .btn-deploy {
   background: #2196f3;
 }
+
 .status-slot {
   width: 78px;
+
   display: flex;
+
   justify-content: flex-end;
+
   align-items: center;
+
   flex-shrink: 0;
 }
+
 .live-badge {
   background: #ff5252;
+
   color: white;
+
   font-size: 0.6rem;
+
   padding: 2px 6px;
+
   border-radius: 4px;
+
   animation: pulse 1.5s infinite;
+
   font-weight: bold;
 }
+
 .stop-badge {
   background: #9e9e9e;
+
   color: white;
+
   font-size: 0.6rem;
+
   padding: 2px 6px;
+
   border-radius: 4px;
+
   font-weight: bold;
 }
+
 .browser-mockup {
   flex: 1;
+
   background: white;
+
   border-radius: 8px;
+
   overflow: hidden;
+
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+
   display: flex;
+
   flex-direction: column;
 }
+
 .url-bar {
   background: #f1f3f4;
+
   padding: 5px 10px;
+
   font-size: 0.7rem;
+
   color: #555;
+
   border-bottom: 1px solid #ddd;
 }
-.browser-mockup iframe {
-  display: block;
-  width: calc(100% + 2px);
-  height: calc(100% + 2px);
-  margin: -1px;
+
+iframe {
+  width: 100%;
+
+  height: 100%;
+
   border: none;
-  background: white;
 }
+
 .manager-section {
   height: 45%;
+
   display: flex;
+
   flex-direction: column;
+
   background: white;
+
   border-top: 1px solid #ddd;
 }
+
 .manager-tabs {
   display: flex;
+
   background: #1a1a2e;
+
   border-bottom: 1px solid #ddd;
 }
+
 .manager-tabs button {
   flex: 1;
+
   padding: 10px;
+
   border: none;
+
   background: transparent;
+
   cursor: pointer;
+
   color: #aaa;
+
   font-size: 0.85rem;
+
   border-bottom: 3px solid transparent;
+
   transition: 0.2s;
+
   white-space: nowrap;
 }
+
 .manager-tabs button.active {
   background: white;
+
   border-bottom-color: #4c97ff;
+
   font-weight: bold;
+
   color: #1a1a2e;
 }
+
 .phone-font button {
   font-size: 0.75rem;
+
   padding: 8px;
 }
+
 .tab-content {
   flex: 1;
+
   overflow-y: auto;
+
   padding: 10px;
+
   color: #252535;
 }
+
 .list-header {
   display: flex;
+
   justify-content: space-between;
+
   align-items: center;
+
   margin-bottom: 10px;
+
   font-size: 0.8rem;
+
   color: #666;
 }
+
 .btn-add-mini {
   background: #4c97ff;
+
   color: white;
+
   border: none;
+
   padding: 4px 8px;
+
   border-radius: 4px;
+
   cursor: pointer;
+
   font-size: 0.7rem;
 }
+
 .item-list {
   list-style: none;
+
   padding: 0;
+
   margin: 0;
 }
+
 .list-item {
   display: flex;
+
   align-items: center;
+
   padding: 8px;
+
   background: #f9f9f9;
+
   border: 1px solid #eee;
+
   margin-bottom: 5px;
+
   border-radius: 4px;
+
   cursor: pointer;
+
   transition: 0.1s;
 }
+
 .list-item:hover {
   background: #f0f7ff;
+
   border-color: #cce5ff;
 }
+
 .list-item.active {
   background: #eaf4ff;
+
   border-color: #4c97ff;
+
   box-shadow: inset 4px 0 0 #4c97ff;
 }
+
 .list-item.active .item-name {
   font-weight: 700;
+
   color: #0b3d91;
 }
+
 .item-icon {
   margin-right: 8px;
+
   font-size: 1.1rem;
 }
+
 .item-name {
   flex: 1;
+
   font-size: 0.85rem;
+
   font-weight: 500;
 }
+
 .item-type {
   font-size: 0.7rem;
+
   color: #999;
+
   margin-right: 5px;
 }
+
 .btn-del {
   background: none;
+
   border: none;
+
   color: #ccc;
+
   cursor: pointer;
 }
+
 .btn-del:hover {
   color: red;
 }
+
 .code-view pre {
   margin: 0;
+
   font-family: monospace;
+
   font-size: 0.8rem;
+
   white-space: pre-wrap;
+
   color: #333;
 }
+
 .empty-msg {
   text-align: center;
+
   color: #999;
+
   margin-top: 20px;
+
   font-size: 0.85rem;
 }
+
 .edit-input {
   width: 100%;
+
   padding: 2px 4px;
+
   font-size: 0.85rem;
+
   border: 1px solid #4c97ff;
+
   border-radius: 4px;
+
   outline: none;
+
   background: white;
+
   color: #333;
 }
+
 .name-container {
   display: flex;
+
   align-items: center;
+
   overflow: hidden;
 }
+
 .ide-main-area {
   flex: 1;
+
   display: flex;
+
   flex-direction: column;
+
   height: 100%;
+
   overflow: hidden;
 }
 
@@ -1549,253 +1898,301 @@ onMounted(async () => {
   border-bottom: 1px solid #000;
   flex-shrink: 0;
 }
+.item{
+  flex-grow: 1;
+}
 .top-tab-item {
   height: 100%;
+
   padding: 0 25px;
+
   display: flex;
+
   align-items: center;
+
   gap: 8px;
+
   color: #777;
+
   cursor: pointer;
+
   border-bottom: 4px solid transparent;
+
   transition: all 0.2s;
+
   font-weight: 500;
+
   position: relative;
 }
+
 .top-tab-item:hover {
   background: #252535;
+
   color: white;
 }
+
 .top-tab-item.active {
   background: #202030;
+
   color: white;
+
   font-weight: bold;
 }
+
 .tab-icon {
   font-size: 1.2rem;
 }
+
 .tab-label {
   font-size: 0.9rem;
 }
+
 .workspace-row {
   flex: 1;
+
   display: flex;
+
   overflow: hidden;
+
   position: relative;
 }
+
 .sub-sidebar {
   width: 70px;
+
   background: #1a1a2e;
+
   border-right: 1px solid #000;
+
   display: flex;
+
   flex-direction: column;
+
   overflow-y: auto;
+
   z-index: 20;
 }
+
 .sub-sidebar::-webkit-scrollbar {
   width: 0px;
 }
+
 .sub-item {
   height: 70px;
+
   display: flex;
+
   flex-direction: column;
+
   align-items: center;
+
   justify-content: center;
+
   color: #777;
+
   cursor: pointer;
+
   position: relative;
+
   border-bottom: 1px solid #252535;
+
   transition: 0.2s;
 }
+
 .sub-item:hover {
   background: #252535;
+
   color: white;
 }
+
 .sub-item.active {
   background: #202030;
+
   color: white;
 }
+
 .sub-item .icon {
   font-size: 1.6rem;
+
   margin-bottom: 4px;
 }
+
 .sub-item .label {
   font-size: 0.7rem;
 }
+
 .indicator {
   position: absolute;
+
   left: 0;
+
   top: 0;
+
   bottom: 0;
+
   width: 4px;
+
   display: none;
 }
+
 .sub-item.active .indicator {
   display: block;
 }
 
-/* ============================================================
- * ✅ 워크스페이스 부드럽게 밀림/복귀
- * ============================================================ */
-.workspace-wrapper {
-  position: relative !important;
-  flex: 1;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  --flyout-offset: 0px; /* 닫힘 */
+/* 기존 코드 수정 */
+.workspace-wrapper { 
+  position: relative; 
+  width: 100%; 
+  height: 100%; 
+  overflow: hidden; 
+  /* transition 제거 또는 width만 적용 */
+  transition: width 0.3s ease; 
 }
-.workspace-wrapper.drawer-open {
-  --flyout-offset: 300px; /* ✅ FLYOUT_BASE_WIDTH와 반드시 동일 */
-}
-
 #blocklyDiv {
-  position: absolute !important;
+  position: absolute;
+
   top: 0;
-  left: var(--flyout-offset) !important;
-  width: calc(100% - var(--flyout-offset)) !important;
-  height: 100% !important;
-  z-index: 1;
-  transition:
-    left 240ms ease,
-    width 240ms ease;
-  will-change: left, width;
+
+  left: 0;
+
+  right: 0;
+
+  bottom: 0;
 }
 
-:deep(.blocklySvg) {
-  position: absolute !important;
-  width: 100% !important;
-  height: 100% !important;
-  top: 0 !important;
-  left: 0 !important;
-  display: block !important;
-}
-
-/* 기본 toolbox 숨김 */
-:deep(.blocklyToolboxDiv) {
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 0px !important;
-  height: 100% !important;
-  z-index: 90;
-  pointer-events: none;
-}
-:deep(.blocklyToolbox) {
-  display: none !important;
-}
-
-/* ============================================================
- * ✅ flyout 폭 고정
- * ============================================================ */
-:deep(.blocklyFlyout) {
-  position: absolute !important;
-  left: 0 !important;
-  top: 0 !important;
-  z-index: 100 !important;
-  pointer-events: auto;
-
-  /* ✅ flyout 자체는 overflow visible OK
-     (하지만 clip-path는 "hover 중에만" 풀어줄 거라서 여기서 clip은 건드리지 않음) */
-  overflow: visible !important;
-}
-
-/* ✅ flyout 래퍼 폭도 고정 */
-:deep(.blocklyToolboxFlyout) {
-  width: 300px !important;
-  min-width: 300px !important;
-  max-width: 300px !important;
-  z-index: 100;
-
-  transform: translateX(-6px);
-  opacity: 0;
-  transition:
-    transform 240ms ease,
-    opacity 240ms ease;
-}
-
-/* drawer-open이면 보이게 */
-.workspace-wrapper.drawer-open :deep(.blocklyToolboxFlyout) {
-  transform: translateX(0);
-  opacity: 1;
-}
-
-/* ============================================================
- * ✅ (엔트리 방식) hover 중일 때만 clip(잘림) 해제
- *
- * ✅ 중요: :hover를 쓰지 않는다.
- * - hover 판정은 JS가 "실제 SVG hit 영역"에서만 잡아서
- *   flyoutDiv에 wc-entry-hover 클래스를 토글한다.
- * ============================================================ */
-
-/* 기본적으로는 Blockly 기본 clip 유지 (우리는 건드리지 않음) */
-
-/* hover(= wc-entry-hover)일 때만 clip-path 제거 */
-:deep(.blocklyToolboxFlyout.wc-entry-hover .blocklyFlyoutWorkspace),
-:deep(.blocklyToolboxFlyout.wc-entry-hover .blocklyFlyoutWorkspace > svg),
-:deep(.blocklyToolboxFlyout.wc-entry-hover .blocklyFlyoutWorkspace .blocklyBlockCanvas),
-:deep(.blocklyToolboxFlyout.wc-entry-hover .blocklyFlyoutWorkspace .blocklyFlyoutBlockCanvas) {
-  clip-path: none !important;
-  overflow: visible !important;
-}
-
-/* flyout 배경 */
-:deep(.blocklyFlyoutBackground) {
-  position: absolute !important;
-  fill: #c0c0c0 !important;
-  fill-opacity: 0.2 !important;
-}
-
-/* ============================================================ */
 .phone-hide {
   display: none !important;
 }
 
+/* Flyout(블록 목록)을 독립적인 레이어로 설정 */
+
+:deep(.blocklyFlyout) {
+  z-index: 100 !important;
+
+  /* 작업공간 위로 띄우기 위해 위치 고정 */
+
+  position: absolute !important;
+}
+
+/* 배경 투명도 및 클릭 관통 방지 */
+
+/* 기존 코드 수정: Blockly의 SVG 배경을 투명하게 만듦 */
+:deep(.blocklyFlyoutBackground) {
+  fill: transparent !important;       /* 색상 투명 */
+  fill-opacity: 0 !important;         /* 불투명도 0 */
+  stroke: none !important;            /* 테두리 없음 */
+}
+
+
+/* 메인 작업공간(SVG)이 전체 너비를 차지하도록 강제 */
+:deep(.blocklySvg) {
+  width: 100% !important;
+}
+
+:deep(.blocklyToolbox) {
+  display: none !important; /* ⭕ 회색 사이드바 영구 숨김 */
+}
+
+:deep(.blocklyToolboxFlyout) {
+  min-width: 300px !important;
+  width: fit-content !important;
+  max-width: 300px;
+  transition: max-width 0.4s ease-in-out;
+  z-index: 100;
+}
+
+/* 호버 시 폭을 'auto' 또는 충분히 넓은 값으로 변경 */
+
+:deep(.blocklyToolboxFlyout:hover) {
+  max-width: 800px !important;
+}
+
+.workspace-wrapper:not(.drawer-open) :deep(.blocklyToolboxDiv) {
+  transform: translateX(-100%);
+
+  opacity: 0;
+
+  pointer-events: none;
+}
+
 .modal-overlay {
   position: fixed;
+
   top: 0;
+
   left: 0;
+
   right: 0;
+
   bottom: 0;
+
   background: rgba(0, 0, 0, 0.6);
+
   display: flex;
+
   justify-content: center;
+
   align-items: center;
+
   z-index: 999;
 }
+
 .modal-content {
   background: white;
+
   padding: 20px;
+
   border-radius: 8px;
+
   width: 400px;
+
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
 }
+
 .desc {
   font-size: 0.85rem;
+
   color: #666;
+
   margin-bottom: 15px;
 }
+
 .ai-textarea {
   width: 100%;
+
   height: 100px;
+
   padding: 10px;
+
   border: 1px solid #ddd;
+
   border-radius: 4px;
+
   resize: none;
+
   margin-bottom: 15px;
 }
+
 .modal-actions {
   display: flex;
+
   justify-content: flex-end;
+
   gap: 10px;
 }
+
 .btn-cancel {
   background: #ddd;
+
   border: none;
+
   padding: 8px 16px;
+
   border-radius: 4px;
+
   cursor: pointer;
 }
+
 .btn-generate {
   background: #9c27b0;
   color: white;
@@ -1805,13 +2202,49 @@ onMounted(async () => {
   cursor: pointer;
   font-weight: bold;
 }
+
 .btn-generate:disabled {
   background: #ccc;
   cursor: not-allowed;
 }
+
 .input-error {
   border-color: #f44336;
   box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.2);
+}
+
+.mode-dropdown {
+  position: relative;
+  margin-left: 10px;
+}
+
+.mode-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 6px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  min-width: 140px;
+  z-index: 99999; /* 🔥 중요 */
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.mode-item {
+  padding: 8px 12px;
+
+  cursor: pointer;
+  color: #ccc;
+
+  font-size: 0.8rem;
+}
+
+.mode-item:hover,
+.mode-item.active {
+  background: #252535;
+
+  color: white;
 }
 
 @keyframes pulse {
@@ -1825,4 +2258,123 @@ onMounted(async () => {
     opacity: 1;
   }
 }
+/* 1. 회색 툴박스 영역(Gap의 원인)을 아예 화면에서 지워버림 */
+:deep(.blocklyToolboxDiv) {
+  display: none !important;
+  visibility: hidden !important;
+  width: 0 !important;
+  border: none !important;
+}
+
+/* 2. Flyout(메뉴판)을 왼쪽 끝(0px)에 강제로 딱 붙임 */
+:deep(.blocklyFlyout) {
+  left: 0 !important; 
+  /* (참고) transform 속성은 스크립트의 애니메이션 로직이 제어하므로 여기선 건드리지 않음 */
+}
+
+/* 3. 혹시 모를 Flyout 내부 여백 제거 */
+:deep(.blocklyFlyoutBackground) {
+  x: 0 !important;
+  y: 0 !important;
+  /* stroke(테두리선) 때문에 1px 이격이 보일 수 있으므로 제거 */
+  stroke: none !important; 
+}
+/* 새로 만든 300px 배경 패널 */
+.flyout-bg-panel {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 300px;
+  background-color: #dcdcdcba;/* 원하는 배경색 (예: 흰색) */
+  /* 🔥 중요: 레이어 순서 */
+  z-index: 90; /* 워크스페이스(0) 위, Blockly Flyout(100) 아래 */
+  /* 애니메이션: 왼쪽에서 스윽 나오게 */
+  transform: translateX(-100%);
+}
+
+/* 메뉴가 열렸을 때 (activeTab이 있을 때) */
+.flyout-bg-panel.open {
+  transform: translateX(0); /* 제자리로 이동 */
+}
+/* ============================================================
+   🔥 [필수 수정] 드래그 중인 블록을 최상단으로 올리기
+   ============================================================ */
+
+/* 1. 블록 드래그 레이어 (이게 낮으면 툴박스 뒤로 숨음) */
+:deep(.blocklyBlockDragSurface) {
+  z-index: 99999 !important; /* 툴박스(100)보다 무조건 높게 */
+  overflow: visible !important;
+}
+
+/* 2. 워크스페이스 드래그 레이어 (혹시 모를 상황 대비) */
+:deep(.blocklyWsDragSurface) {
+  z-index: 99999 !important;
+  overflow: visible !important;
+}
+
+/* 3. 입력창(드롭다운, 텍스트입력) 및 툴팁도 가려지지 않게 최상단 고정 */
+:deep(.blocklyWidgetDiv), 
+:deep(.blocklyTooltipDiv) {
+  z-index: 99999 !important; 
+}
+
+/* ✅ 가로 모드일 때 왼쪽 패널 너비 확장 */
+.entry-panel.is-landscape {
+  width: 650px !important; 
+}
+
+/* ✅ 핵심: 세로 비율(9:19.5)을 완벽히 뒤집은 진짜 가로 비율 */
+.entry-panel.is-landscape .browser-mockup {
+  width: 95% !important;        
+  max-width: 600px !important; 
+  aspect-ratio: 19.5 / 9 !important; /* 👈 형이 말한 완벽한 반전 비율 */
+  height: auto !important;      
+  margin: 50px auto !important;  
+  transition: all 0.3s ease-in-out;
+  
+  /* 기기 디테일 */
+  border: 10px solid #222;
+  border-radius: 24px;
+  box-shadow: 0 15px 45px rgba(0,0,0,0.4);
+}
+
+.entry-panel.is-landscape .browser-mockup iframe {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 회전 버튼 스타일 */
+.btn-rotate {
+  background: #4c97ff;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: white;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-rotate:hover {
+  background: #3676d1;
+}
+
+/* ✅ 가로 모드일 때 다른 요소들 최적화 */
+.entry-panel.is-landscape .control-buttons {
+  gap: 4px !important; /* 가로일 땐 버튼 간격 좁게 */
+}
+
+/* 가로 모드일 때 주소창 너비 조절 */
+.entry-panel.is-landscape .url-bar {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 100%;
+}
+
+
+
 </style>

@@ -5,6 +5,7 @@ import RegisterView from '../views/RegisterView.vue'
 import IDEView from '../views/IDEView.vue' // <--- 추가
 import LDEView from '../views/LDEView.vue' // <--- 추가
 
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -29,10 +30,10 @@ const router = createRouter({
       component: IDEView
     },
     {
-      pathL : '/lde', // <--- 추가된 경로
+      path : '/lde', // <--- 추가된 경로
       name: 'lde',
       component: LDEView
-    }
+    },
   ],
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
