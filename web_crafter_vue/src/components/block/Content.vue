@@ -7,6 +7,9 @@
 - ✅ 생성기 기본 inline style → data-wc-style 로만 저장 (코드보기에서 완전 숨김 가능)
 - ✅ OFF: 기존처럼 TEXT만 렌더
 - ✅ ON: TEXT 유지 + 자식 INLINE HTML이 바로 뒤에 붙어서 렌더 (간격 없음)
+- ✅ content_input: "서버필드(고급)" 옵션 추가 (name + data-wc-field 출력)
+- ✅ 중복확인 버튼(content_duplicate_check) 추가
+- ✅ 버튼(content_button): type(button/submit/reset) 선택 추가
 ========================= -->
 <script>
 import * as Blockly from 'blockly';
@@ -19,11 +22,30 @@ export const category = {
   icon: '🧩',
 };
 
+// ✅ 서버에 안전하게 매핑 가능한 필드 목록
+const SERVER_FIELDS = [
+  { label: '아이디', key: 'loginId', defaultType: 'text' },
+  { label: '이메일', key: 'email', defaultType: 'email' },
+  { label: '이름', key: 'name', defaultType: 'text' },
+  { label: '닉네임', key: 'nickname', defaultType: 'text' },
+  { label: '비밀번호', key: 'password', defaultType: 'password' },
+  { label: '비밀번호 확인', key: 'passwordConfirm', defaultType: 'password' },
+  { label: '생년월일', key: 'birth', defaultType: 'date' },
+];
+
+// ✅ 중복확인 가능한 필드 (id/email/nickname)
+const DUPLICATE_FIELDS = [
+  { label: '아이디', key: 'loginId' },
+  { label: '이메일', key: 'email' },
+  { label: '닉네임', key: 'nickname' },
+];
+
 // ===== Content 툴박스 XML =====
 export const toolbox = `
 <xml>
   <block type="content_heading"></block>
   <block type="content_button"></block>
+  <block type="content_duplicate_check"></block>
   <block type="content_text"></block>
   <block type="content_image"></block>
   <block type="content_link"></block>
@@ -88,8 +110,6 @@ export const defineBlocks = () => {
 
       if (typeof genFn === 'function') {
         const out = genFn(b, javascriptGenerator);
-
-        // 값 블록이면 [code, order], statement면 string
         chunk = Array.isArray(out) ? out[0] : out;
       }
 
@@ -102,22 +122,14 @@ export const defineBlocks = () => {
 
   // ✅ 체크 OFF면 TEXT만
   // ✅ 체크 ON면 TEXT + (INLINE 자식 HTML) 그대로 뒤에 붙임 (구분자/공백 추가 없음)
-  const renderTextPlusInlineChildren = (
-    block,
-    textFieldName,
-    fallback = ''
-  ) => {
+  const renderTextPlusInlineChildren = (block, textFieldName, fallback = '') => {
     const text = safeText(block.getFieldValue(textFieldName) || fallback);
     const on = block.getFieldValue('INLINE_WRAP') === 'TRUE';
     if (!on) return text;
 
-    // 토글 ON일 때만 input이 존재하도록 만들 거라서, 없으면 그냥 TEXT만
     if (!block.getInput('INLINE_CONTENT')) return text;
 
-    // 자식 HTML은 escape 하면 안됨 (그대로 inner로)
-    const childHtml = (
-      getInlineChildrenHtml(block, 'INLINE_CONTENT') || ''
-    ).trim();
+    const childHtml = (getInlineChildrenHtml(block, 'INLINE_CONTENT') || '').trim();
     return childHtml ? `${text}${childHtml}` : text;
   };
 
@@ -126,7 +138,6 @@ export const defineBlocks = () => {
   const updateInlineShape = (block) => {
     const on = block.getFieldValue('INLINE_WRAP') === 'TRUE';
 
-    // 1) INLINE_CONTENT 입력은 항상 만들어 둔다 (한 번만 생성)
     let input = block.getInput('INLINE_CONTENT');
     if (!input) {
       input = block
@@ -135,18 +146,14 @@ export const defineBlocks = () => {
         .appendField('자식');
     }
 
-    // 2) 토글에 따라 UI에서만 표시/숨김
     input.setVisible(on);
 
-    // 3) OFF로 바뀌면, 이미 붙어있는 자식은 자동으로 떼어낸다(정책상 자식 금지)
     if (!on) {
       const child = block.getInputTargetBlock('INLINE_CONTENT');
       if (child) child.unplug(true);
     }
 
     block.setInputsInline(true);
-
-    // 4) 렌더링 반영
     if (block.rendered) block.render();
   };
 
@@ -208,7 +215,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Button] (요구사항대로 유지 + ON일 때만 INLINE 자식 허용)
+  // [Button] (type 선택 추가)
   // =========================================================
   Blockly.Blocks['content_button'] = {
     init() {
@@ -217,8 +224,17 @@ export const defineBlocks = () => {
       this.appendDummyInput('MAIN_ROW')
         .appendField('이름:')
         .appendField(new Blockly.FieldTextInput('버튼'), 'NAME')
-        .appendField('내용:')
+        .appendField('텍스트:')
         .appendField(new Blockly.FieldTextInput('클릭'), 'LABEL')
+        .appendField('type:')
+        .appendField(
+          new Blockly.FieldDropdown([
+            ['button', 'button'],
+            ['submit', 'submit'],
+            ['reset', 'reset'],
+          ]),
+          'BTN_TYPE'
+        )
         .appendField('추가')
         .appendField(new Blockly.FieldCheckbox('FALSE'), 'INLINE_WRAP');
 
@@ -245,15 +261,67 @@ export const defineBlocks = () => {
   javascriptGenerator.forBlock['content_button'] = (block) => {
     const { safeName } = getBlockMeta(block, '버튼');
     const inner = renderTextPlusInlineChildren(block, 'LABEL', '');
+    const btnType = safeAttr(block.getFieldValue('BTN_TYPE') || 'button');
     const style = getStyle('color:inherit; cursor: pointer;');
     const builderStyleAttr = getBuilderStyleAttr(style);
 
-    return `<button class="${safeName}" data-block-id="${block.id}"${builderStyleAttr}>${inner}</button>\n`;
+    return `<button class="${safeName}" type="${btnType}" data-block-id="${block.id}"${builderStyleAttr}>${inner}</button>\n`;
+  };
+
+  // =========================================================
+  // ✅ [Duplicate Check Button]
+  // - data-wc-action="duplicate-check"
+  // - data-wc-target="loginId/email/nickname"
+  // =========================================================
+  Blockly.Blocks['content_duplicate_check'] = {
+    init() {
+      titleWithSep(this, '✅ 중복확인');
+
+      this.appendDummyInput('MAIN_ROW')
+        .appendField('이름:')
+        .appendField(new Blockly.FieldTextInput('dup_btn'), 'NAME')
+        .appendField('대상:')
+        .appendField(
+          new Blockly.FieldDropdown(DUPLICATE_FIELDS.map((f) => [f.label, f.key])),
+          'TARGET_KEY'
+        )
+        .appendField('텍스트:')
+        .appendField(new Blockly.FieldTextInput('중복확인'), 'LABEL')
+        .appendField('type:')
+        .appendField(
+          new Blockly.FieldDropdown([
+            ['button', 'button'],
+            ['submit', 'submit'],
+            ['reset', 'reset'],
+          ]),
+          'BTN_TYPE'
+        );
+
+      this.setPreviousStatement(true, 'ELEMENT');
+      this.setNextStatement(true, 'ELEMENT');
+      this.setColour('#00c853');
+      this.setInputsInline(true);
+    },
+  };
+
+  javascriptGenerator.forBlock['content_duplicate_check'] = (block) => {
+    const { safeName } = getBlockMeta(block, 'dup_btn');
+    const targetKey = (block.getFieldValue('TARGET_KEY') || '').trim();
+    const label = safeText(block.getFieldValue('LABEL') || '중복확인');
+    const btnType = safeAttr(block.getFieldValue('BTN_TYPE') || 'button');
+
+    const builderStyleAttr = getBuilderStyleAttr(
+      'padding:8px 12px; border:1px solid #00c853; border-radius:8px; cursor:pointer;'
+    );
+
+    return `<button class="${safeName}" type="${btnType}"
+  data-wc-action="duplicate-check"
+  data-wc-target="${safeAttr(targetKey)}"
+  data-block-id="${block.id}"${builderStyleAttr}>${label}</button>\n`;
   };
 
   // =========================================================
   // [Text] (span) - 인라인 요소 + 인라인 컨테이너 가능
-  // ✅ 타입: ELEMENT에도 꽂히고 INLINE에도 꽂히게 (호환 유지)
   // =========================================================
   Blockly.Blocks['content_text'] = {
     init() {
@@ -297,7 +365,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Image] (void 태그라 자식 없음)
+  // [Image]
   // =========================================================
   Blockly.Blocks['content_image'] = {
     init() {
@@ -307,10 +375,7 @@ export const defineBlocks = () => {
         .appendField('이름:')
         .appendField(new Blockly.FieldTextInput('이미지_요소'), 'NAME')
         .appendField('SRC:')
-        .appendField(
-          new Blockly.FieldTextInput('https://via.placeholder.com/150'),
-          'SRC'
-        );
+        .appendField(new Blockly.FieldTextInput('https://via.placeholder.com/150'), 'SRC');
 
       this.setPreviousStatement(true, 'ELEMENT');
       this.setNextStatement(true, 'ELEMENT');
@@ -321,9 +386,7 @@ export const defineBlocks = () => {
 
   javascriptGenerator.forBlock['content_image'] = (block) => {
     const { safeName } = getBlockMeta(block, '이미지');
-    const imgSrc = safeAttr(
-      block.getFieldValue('SRC') || 'https://via.placeholder.com/150'
-    );
+    const imgSrc = safeAttr(block.getFieldValue('SRC') || 'https://via.placeholder.com/150');
     const style = getStyle('max-width:100%; height:auto;');
     const builderStyleAttr = getBuilderStyleAttr(style);
 
@@ -331,7 +394,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Link] (a) - 인라인 요소 + 인라인 컨테이너 가능
+  // [Link]
   // =========================================================
   Blockly.Blocks['content_link'] = {
     init() {
@@ -373,26 +436,20 @@ export const defineBlocks = () => {
     let href = (block.getFieldValue('HREF') || '#').trim();
 
     const looksInternal =
-      href.startsWith('/') ||
-      /^wc:\/\//i.test(href) ||
-      /^page:/i.test(href) ||
-      href.startsWith('#');
+      href.startsWith('/') || /^wc:\/\//i.test(href) || /^page:/i.test(href) || href.startsWith('#');
     if (looksInternal) href = 'https://example.com';
 
-    if (href && href !== '#' && !/^https?:\/\//i.test(href))
-      href = 'https://' + href;
+    if (href && href !== '#' && !/^https?:\/\//i.test(href)) href = 'https://' + href;
 
     const targetAttr = ' target="_blank" rel="noopener noreferrer"';
-    const style = getStyle(
-      'color:#1a73e8; text-decoration:underline; cursor:pointer;'
-    );
+    const style = getStyle('color:#1a73e8; text-decoration:underline; cursor:pointer;');
     const builderStyleAttr = getBuilderStyleAttr(style);
 
     return `<a class="${safeName}" href="${safeAttr(href)}"${targetAttr} data-block-id="${block.id}"${builderStyleAttr}>${inner}</a>\n`;
   };
 
   // =========================================================
-  // [Paragraph] (p) - 블록요소, ON일 때만 INLINE 자식 허용
+  // [Paragraph]
   // =========================================================
   Blockly.Blocks['content_paragraph'] = {
     init() {
@@ -402,10 +459,7 @@ export const defineBlocks = () => {
         .appendField('이름:')
         .appendField(new Blockly.FieldTextInput('문단'), 'NAME')
         .appendField('내용:')
-        .appendField(
-          new Blockly.FieldTextInput('문단 내용을 입력하세요'),
-          'TEXT'
-        )
+        .appendField(new Blockly.FieldTextInput('문단 내용을 입력하세요'), 'TEXT')
         .appendField('추가')
         .appendField(new Blockly.FieldCheckbox('FALSE'), 'INLINE_WRAP');
 
@@ -439,7 +493,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Label] (label) - 인라인 요소 + 인라인 컨테이너 가능
+  // [Label]
   // =========================================================
   Blockly.Blocks['content_label'] = {
     init() {
@@ -511,7 +565,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Input] (기존 그대로)
+  // ✅ [Input] (서버필드(고급) 추가 + date 포함)
   // =========================================================
   Blockly.Blocks['content_input'] = {
     init() {
@@ -527,6 +581,7 @@ export const defineBlocks = () => {
             ['email', 'email'],
             ['password', 'password'],
             ['number', 'number'],
+            ['date', 'date'],
           ]),
           'TYPE'
         )
@@ -560,6 +615,14 @@ export const defineBlocks = () => {
 
       if (adv && !this.getInput('ADV_ROW')) {
         this.appendDummyInput('ADV_ROW')
+          .appendField('서버필드:')
+          .appendField(
+            new Blockly.FieldDropdown([
+              ['(없음)', ''],
+              ...SERVER_FIELDS.map((f) => [f.label, f.key]),
+            ]),
+            'SERVER_KEY'
+          )
           .appendField('value:')
           .appendField(new Blockly.FieldTextInput(''), 'VALUE')
           .appendField('required')
@@ -580,9 +643,14 @@ export const defineBlocks = () => {
     const placeholder = safeAttr(block.getFieldValue('PLACEHOLDER') || '');
 
     const adv = block.getFieldValue('ADV') === 'TRUE';
+    const serverKey = adv ? (block.getFieldValue('SERVER_KEY') || '').trim() : '';
+
     const value = adv ? safeAttr(block.getFieldValue('VALUE') || '') : '';
     const required = adv && block.getFieldValue('REQUIRED') === 'TRUE';
     const disabled = adv && block.getFieldValue('DISABLED') === 'TRUE';
+
+    const nameAttr = serverKey ? ` name="${safeAttr(serverKey)}"` : '';
+    const fieldAttr = serverKey ? ` data-wc-field="${safeAttr(serverKey)}"` : '';
 
     const phAttr = placeholder ? ` placeholder="${placeholder}"` : '';
     const valueAttr = value ? ` value="${value}"` : '';
@@ -592,11 +660,11 @@ export const defineBlocks = () => {
     const style = getStyle('');
     const builderStyleAttr = getBuilderStyleAttr(style);
 
-    return `<input class="${safeName}" type="${type}"${phAttr}${valueAttr}${reqAttr}${disAttr} data-block-id="${block.id}"${builderStyleAttr} />\n`;
+    return `<input class="${safeName}" type="${type}"${nameAttr}${phAttr}${valueAttr}${reqAttr}${disAttr}${fieldAttr} data-block-id="${block.id}"${builderStyleAttr} />\n`;
   };
 
   // =========================================================
-  // [Textarea] (기존 그대로)
+  // [Textarea]
   // =========================================================
   Blockly.Blocks['content_textarea'] = {
     init() {
@@ -676,7 +744,7 @@ export const defineBlocks = () => {
   };
 
   // =========================================================
-  // [Select] (기존 그대로)
+  // [Select]
   // =========================================================
   Blockly.Blocks['content_select'] = {
     init() {
@@ -693,13 +761,7 @@ export const defineBlocks = () => {
           if (!block.workspace) return;
           Blockly.Events.setGroup(true);
           Blockly.Events.fire(
-            new Blockly.Events.BlockChange(
-              block,
-              'mutation',
-              'optionCount',
-              oldCount,
-              newCount
-            )
+            new Blockly.Events.BlockChange(block, 'mutation', 'optionCount', oldCount, newCount)
           );
         } finally {
           Blockly.Events.setGroup(false);
@@ -803,14 +865,10 @@ export const defineBlocks = () => {
       }
 
       for (let idx = 1; idx <= count; idx++) {
-        const defaultText =
-          idx === 1 ? '옵션1' : idx === 2 ? '옵션2' : `옵션${idx}`;
+        const defaultText = idx === 1 ? '옵션1' : idx === 2 ? '옵션2' : `옵션${idx}`;
         this.appendDummyInput(`OPT_${idx}`)
           .appendField('-')
-          .appendField(
-            new Blockly.FieldTextInput(defaultText),
-            `OPT_TEXT_${idx}`
-          );
+          .appendField(new Blockly.FieldTextInput(defaultText), `OPT_TEXT_${idx}`);
       }
 
       this.setInputsInline(true);
@@ -827,8 +885,7 @@ export const defineBlocks = () => {
     const disAttr = disabled ? ' disabled' : '';
 
     let optionsHtml = '';
-    if (adv && ph)
-      optionsHtml += `<option value="" selected disabled>${ph}</option>\n`;
+    if (adv && ph) optionsHtml += `<option value="" selected disabled>${ph}</option>\n`;
 
     for (let i = 1; i <= count; i++) {
       const text = safeText(block.getFieldValue(`OPT_TEXT_${i}`) || `옵션${i}`);
@@ -844,7 +901,7 @@ ${optionsHtml}</select>\n`;
   };
 
   // =========================================================
-  // [Checkbox] (기존 그대로)
+  // [Checkbox]
   // =========================================================
   Blockly.Blocks['content_checkbox'] = {
     init() {
@@ -915,7 +972,7 @@ ${optionsHtml}</select>\n`;
   };
 
   // =========================================================
-  // [Radio] (기존 그대로)
+  // [Radio]
   // =========================================================
   Blockly.Blocks['content_radio'] = {
     init() {
@@ -976,9 +1033,7 @@ ${optionsHtml}</select>\n`;
     const group = safeAttr(block.getFieldValue('GROUP') || 'group1');
 
     const adv = block.getFieldValue('ADV') === 'TRUE';
-    const value = adv
-      ? safeAttr(block.getFieldValue('VALUE') || 'option1')
-      : '';
+    const value = adv ? safeAttr(block.getFieldValue('VALUE') || 'option1') : '';
     const checked = adv && block.getFieldValue('CHECKED') === 'TRUE';
     const disabled = adv && block.getFieldValue('DISABLED') === 'TRUE';
 
@@ -996,7 +1051,7 @@ ${optionsHtml}</select>\n`;
   };
 
   // =========================================================
-  // [BR] (인라인 요소, 자식 없음) - INLINE에도 꽂히게
+  // [BR]
   // =========================================================
   Blockly.Blocks['content_br'] = {
     init() {
@@ -1022,7 +1077,7 @@ ${optionsHtml}</select>\n`;
   };
 
   // =========================================================
-  // [Strong] (인라인 요소 + 인라인 컨테이너 가능)
+  // [Strong]
   // =========================================================
   Blockly.Blocks['content_strong'] = {
     init() {
@@ -1066,7 +1121,7 @@ ${optionsHtml}</select>\n`;
   };
 
   // =========================================================
-  // [Em] (인라인 요소 + 인라인 컨테이너 가능)
+  // [Em]
   // =========================================================
   Blockly.Blocks['content_em'] = {
     init() {

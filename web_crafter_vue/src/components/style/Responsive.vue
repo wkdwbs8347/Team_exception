@@ -1,144 +1,215 @@
 <script>
 import * as Blockly from 'blockly';
 import { javascriptGenerator } from 'blockly/javascript';
-import { pythonGenerator } from 'blockly/python'
 
-/* [PART 1] 카테고리 메타데이터 정의
-  - 블록 선택 메뉴(Toolbox)에서 보여질 이름, 색상, 아이콘을 설정합니다.
-*/
 export const category = {
   label: '반응형',
-  color: '#0091ea',
+  color: '#FF9800',
   icon: '📱'
 };
 
-/* [PART 2] Toolbox(도구함) 구성
-  - 사용자가 화면에서 실제로 보고 선택할 수 있는 블록들의 목록과 순서를 XML 형태로 정의합니다.
-*/
 export const toolbox = `
 <xml>
-    <block type="responsive_container"></block>
-    <sep gap="32"></sep>
-    
-    <block type="responsive_screen_type"></block>
-    <block type="responsive_screen_width"></block>
-    <block type="responsive_screen_height"></block>
-    <block type="responsive_orientation"></block>
-    <block type="responsive_is_touch"></block>
-    <sep gap="32"></sep>
-    
-    <block type="responsive_if_mobile"></block>
-    <block type="responsive_if_tablet"></block>
-    <block type="responsive_if_desktop"></block>
-    <sep gap="32"></sep>
-    
-    <block type="responsive_grid_columns"></block>
-    <block type="responsive_spacing"></block>
-    <block type="responsive_max_width"></block>
+    <block type="style_responsive_easy"></block>
+    <block type="style_responsive_mobile_font_size"></block>
+    <block type="style_responsive_stack"></block>
+    <block type="style_responsive_hide_mobile"></block>
+    <block type="style_responsive_mobile_spacing"></block>
+    <block type="style_responsive_mobile_align"></block>
 </xml>
 `;
 
-/* [PART 3] 블록 기능 정의 및 코드 생성 로직
-  - Blockly 엔진에 블록의 모양(UI)과 해당 블록이 생성할 코드(Python/HTML)를 등록합니다.
-*/
 export const defineBlocks = () => {
-  // 중복 등록 방지: 이미 블록이 정의되어 있다면 실행을 중단합니다.
-  if (Blockly.Blocks['responsive_container']) return;
+  if (Blockly.Blocks['style_responsive_easy']) return;
 
-  /* A. 반응형 컨테이너 블록 (핵심 기능)
-    - 특징: 브라우저 너비가 줄어들면 내부 콘텐츠가 화면 밖으로 나가지 않게 'width: 100%'를 적용합니다.
-    - 코드: <div style="width:100%; max-width:설정값px;"> 형태로 생성됩니다.
-  */
-  Blockly.Blocks['responsive_container'] = {
+  const applyOrangeStyle = (block) => {
+    block.setColour('#FF9800');
+    block.style = {
+      "colourPrimary": "#FF9800",
+      "colourSecondary": "#FF9800",
+      "colourTertiary": "#FF9800"
+    };
+  };
+
+  // ✅ [수정 핵심] null 방지 및 클래스 점(.) 자동 추가 헬퍼 함수
+const getTarget = (block) => {
+  const rootBlock = block.getSurroundParent();
+  let targetName = rootBlock ? rootBlock.getFieldValue('TARGET') : 'container';
+  if (!targetName || targetName === 'null') targetName = 'container';
+  return `.${targetName}`;
+};
+
+  /* 1. 자동 너비 설정 */
+  Blockly.Blocks['style_responsive_easy'] = {
     init() {
       this.appendDummyInput()
-          .appendField("📱 반응형 상자")
-          .appendField("최대 너비")
-          .appendField(new Blockly.FieldTextInput("1200"), "MAX_WIDTH")
-          .appendField("px");
-      this.appendStatementInput('CONTENT').setCheck(null); // 내부에 다른 블록을 끼울 수 있는 공간
+          .appendField("✨ 모바일 너비 보정") // 이름도 직관적으로 변경
+          .appendField("모바일:")
+          .appendField(new Blockly.FieldDropdown([
+            ["꽉 차게", "100"], 
+            ["여백 있게", "90"], 
+            ["절반만", "50"]
+          ]), "MOB_W");
       this.setPreviousStatement(true, "STYLE");
       this.setNextStatement(true, "STYLE");
-      this.setColour('#0091ea');
-      this.setTooltip("브라우저가 좁아지면 자동으로 너비가 줄어드는 상자입니다.");
+      applyOrangeStyle(this);
     }
   };
 
-  pythonGenerator.forBlock['responsive_container'] = (block, gen) => {
-    const maxWidth = block.getFieldValue('MAX_WIDTH');
-    const content = gen.statementToCode(block, 'CONTENT');
-    return `<div style="width:100%; max-width:${maxWidth}px; margin:0 auto; box-sizing:border-box;">\n${content}</div>\n`;
+  javascriptGenerator.forBlock['style_responsive_easy'] = (block) => {
+    const target = getTarget(block);
+    const mobW = block.getFieldValue('MOB_W');
+
+    // ✅ PC 수치는 뱉지 않습니다. 일반 블록의 설정을 그대로 따르다가(상속)
+    // 상단 아이콘이 '모바일'일 때만 이 값이 !important로 강제 적용됩니다.
+    return `
+      } 
+      .is-mobile-mode ${target} { 
+        width: ${mobW}% !important; 
+        max-width: none !important; 
+        margin-left: auto !important;
+        margin-right: auto !important;
+      }
+      ${target} {
+    `;
   };
 
-  /* B. 화면 데이터 조회 블록 (단순 값 반환)
-    - 화면의 너비, 높이, 현재 기기 타입 등을 'responsive' 객체에서 실시간으로 가져옵니다.
-  */
-  const data = [
-    { id: 'responsive_screen_type', label: '📱 화면 크기', type: 'String', color: 210, py: '("모바일" if responsive["width"] < 768 else "태블릿" if responsive["width"] < 1024 else "데스크톱")' },
-    { id: 'responsive_screen_width', label: '↔️ 화면 너비', type: 'Number', color: 210, py: 'responsive["width"]' },
-    { id: 'responsive_screen_height', label: '↕️ 화면 높이', type: 'Number', color: 210, py: 'responsive["height"]' },
-    { id: 'responsive_orientation', label: '🔄 화면 방향', type: 'String', color: 210, py: 'responsive["orientation"]' },
-    { id: 'responsive_is_touch', label: '👆 터치 지원?', type: 'Boolean', color: 210, py: 'responsive["is_touch"]' }
-  ];
+  /* 2. 모바일 전용 글자 크기 보정 */
+  Blockly.Blocks['style_responsive_mobile_font_size'] = {
+    init() {
+      this.appendDummyInput()
+          .appendField("📱 모바일 글자 크기만 보정")
+          .appendField(new Blockly.FieldTextInput("20"), "MOB_FS")
+          .appendField("px");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      applyOrangeStyle(this);
+    }
+  };
 
-  data.forEach(d => {
-    Blockly.Blocks[d.id] = {
-      init() {
-        this.appendDummyInput().appendField(d.label);
-        this.setOutput(true, d.type); // 데이터 값을 내보내는 둥근 모양의 블록
-        this.setColour(d.color);
-      }
-    };
-    pythonGenerator.forBlock[d.id] = () => [d.py, pythonGenerator.ORDER_ATOMIC];
-  });
+javascriptGenerator.forBlock['style_responsive_mobile_font_size'] = (block) => {
+  const target = getTarget(block);
+  const mobFS = block.getFieldValue('MOB_FS');
+  
+  return `
+    }
+    .is-mobile-mode ${target} { font-size: ${mobFS}px !important; }
+    ${target} {
+  `;
+};
 
-  /* C. 기기별 조건 실행 블록 (If 제어문)
-    - 특정 화면 크기 구간에서만 블록 내부의 코드가 실행되도록 감싸는 역할을 합니다.
-  */
-  const ifBlocks = [
-    { id: 'responsive_if_mobile', label: '📱 모바일일 때', cond: 'responsive["width"] < 768' },
-    { id: 'responsive_if_tablet', label: '📱 태블릿일 때', cond: '768 <= responsive["width"] < 1024' },
-    { id: 'responsive_if_desktop', label: '💻 데스크톱일 때', cond: 'responsive["width"] >= 1024' }
-  ];
+  /* 3. 모바일 세로 전환 */
+  Blockly.Blocks['style_responsive_stack'] = {
+    init() {
+      this.appendDummyInput().appendField("↕️ 모바일에서 세로로 쌓기");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      applyOrangeStyle(this);
+    }
+  };
 
-  ifBlocks.forEach(d => {
-    Blockly.Blocks[d.id] = {
-      init() {
-        this.appendDummyInput().appendField(d.label);
-        this.appendStatementInput('DO'); // 조건 충족 시 실행할 블록 입구
-        this.setPreviousStatement(true, "STYLE");
-        this.setNextStatement(true, "STYLE");
-        this.setColour(20);
-      }
-    };
-    pythonGenerator.forBlock[d.id] = (block, gen) => {
-      const body = gen.statementToCode(block, 'DO');
-      return `if ${d.cond}:\n${body || '    pass\n'}`;
-    };
-  });
+javascriptGenerator.forBlock['style_responsive_stack'] = (block) => {
+  const target = getTarget(block);
+  return `
+    }
+    .is-mobile-mode ${target} { display: flex !important; flex-direction: column !important; }
+    ${target} {
+  `;
+};
 
-  /* D. 가변 레이아웃 수치 블록 (자동 최적화)
-    - 별도의 조건문을 직접 짜지 않아도, 블록 하나가 현재 화면 크기에 맞는 최적의 수치(그리드 칸 수 등)를 반환합니다.
-  */
-  const layoutValues = [
-    { id: 'responsive_grid_columns', label: '📐 그리드 칼럼 수', v: [1, 2, 3] }, // 모바일 1칸, 태블릿 2칸, 데스크톱 3칸
-    { id: 'responsive_spacing', label: '📏 여백(px)', v: [8, 16, 24] },
-    { id: 'responsive_max_width', label: '📦 최대 너비(px)', v: [480, 768, 1200] }
-  ];
+  /* 4. 모바일에서 숨기기 */
+  Blockly.Blocks['style_responsive_hide_mobile'] = {
+    init() {
+      this.appendDummyInput().appendField("🚫 모바일에서 숨기기");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      applyOrangeStyle(this);
+    }
+  };
 
-  layoutValues.forEach(l => {
-    Blockly.Blocks[l.id] = {
-      init() {
-        this.appendDummyInput().appendField(l.label);
-        this.setOutput(true, 'Number');
-        this.setColour(120);
-      }
-    };
-    pythonGenerator.forBlock[l.id] = () => {
-      // 3항 연산자를 중첩하여 기기별 최적값을 자동으로 선택하게 함
-      const code = `(${l.v[0]} if responsive["width"] < 768 else ${l.v[1]} if responsive["width"] < 1024 else ${l.v[2]})`;
-      return [code, pythonGenerator.ORDER_CONDITIONAL];
-    };
-  });
+javascriptGenerator.forBlock['style_responsive_hide_mobile'] = (block) => {
+  const target = getTarget(block);
+  return `
+    }
+    .is-mobile-mode ${target} { display: none !important; }
+    ${target} {
+  `;
+};
+
+/* 5. 모바일 전용 통합 여백 보정 (Padding & Margin) */
+  Blockly.Blocks['style_responsive_mobile_spacing'] = {
+    init() {
+      this.appendDummyInput()
+          .appendField("📱 모바일")
+          .appendField(new Blockly.FieldDropdown([
+            ["안쪽 여백(Padding)", "padding"], 
+            ["바깥 여백(Margin)", "margin"]
+          ]), "TYPE")
+          .appendField(new Blockly.FieldDropdown([
+            ["전체", ""], 
+            ["위쪽", "-top"], 
+            ["아래쪽", "-bottom"], 
+            ["왼쪽", "-left"], 
+            ["오른쪽", "-right"]
+          ]), "DIR")
+          .appendField(new Blockly.FieldTextInput("10"), "VALUE")
+          .appendField("px");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      applyOrangeStyle(this);
+    }
+  };
+
+  /* 6. 모바일 전용 정렬 보정 */
+  Blockly.Blocks['style_responsive_mobile_align'] = {
+    init() {
+      this.appendDummyInput()
+          .appendField("📱 모바일 정렬")
+          .appendField(new Blockly.FieldDropdown([
+            ["왼쪽", "left"], 
+            ["가운데", "center"], 
+            ["오른쪽", "right"]
+          ]), "ALIGN");
+      this.setPreviousStatement(true, "STYLE");
+      this.setNextStatement(true, "STYLE");
+      applyOrangeStyle(this);
+    }
+  };
+
+  // 5. 모바일 전용 안쪽 여백 보정 생성기
+javascriptGenerator.forBlock['style_responsive_mobile_spacing'] = (block) => {
+  const target = getTarget(block);
+  const type = block.getFieldValue('TYPE'); // padding 또는 margin
+  const dir = block.getFieldValue('DIR');   // 빈값, -top, -bottom 등
+  const value = block.getFieldValue('VALUE');
+  
+  // 최종 CSS 속성명 조립 (예: padding-top, margin-left 등)
+  const property = `${type}${dir}`;
+
+  return `
+    }
+    .is-mobile-mode ${target} { 
+      ${property}: ${value}px !important; 
+    }
+    ${target} {
+  `;
+};
+
+// 6. 모바일 전용 정렬 보정 생성기
+javascriptGenerator.forBlock['style_responsive_mobile_align'] = (block) => {
+  const target = getTarget(block);
+  const align = block.getFieldValue('ALIGN');
+  
+  return `
+    }
+    .is-mobile-mode ${target} { 
+      text-align: ${align} !important; 
+      display: ${align === 'center' ? 'flex' : 'block'} !important;
+      justify-content: ${align === 'center' ? 'center' : (align === 'right' ? 'flex-end' : 'flex-start')} !important;
+    }
+    ${target} {
+  `;
+};
+
 };
 </script>

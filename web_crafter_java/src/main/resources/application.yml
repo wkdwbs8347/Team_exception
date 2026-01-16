@@ -21,7 +21,8 @@ spring:
           auth: true
           starttls:
             enable: true        
-        
+  config:
+    import: optional:classpath:ai.yml
 server:
   port: 8080
 #  servlet:

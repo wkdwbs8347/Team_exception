@@ -2,45 +2,109 @@ DROP DATABASE IF EXISTS web_crafter;
 CREATE DATABASE web_crafter;
 USE web_crafter;
 
+/* [회원 테이블] 
+   - 서비스 이용자의 기본 정보 저장
+*/
 CREATE TABLE `user` (
     id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
     , `name` VARCHAR(50) NOT NULL COMMENT '유저 이름'
     , email VARCHAR(100) NOT NULL UNIQUE COMMENT '로그인 이메일'
     , loginPw VARCHAR(200) NOT NULL COMMENT '비밀번호'
     , nickname VARCHAR(50) NOT NULL UNIQUE COMMENT '유저 닉네임'
-    , authPath VARCHAR(100) NOT NULL DEFAULT 'local' COMMENT '뭐로 로그인햇어? / 일반회원가입: local / 소셜로그인일 경우: ?'
+    , authPath VARCHAR(100) NOT NULL DEFAULT 'local' COMMENT '인증 경로 (local, 소셜 등)'
     , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '가입일'
     , `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1: 정상 0: 탈퇴유예'
 );
 
-CREATE TABLE userWeb (
-    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
-    , userId INT UNSIGNED NOT NULL COMMENT 'FK'                              
-    , title VARCHAR(100) NOT NULL COMMENT '제목'
-    , pycode LONGTEXT NOT NULL COMMENT '파이썬 코드'
-    , hit INT NOT NULL DEFAULT 0 COMMENT '조회수'
-    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '작성일'
-    , updateDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '수정일'
-    , INDEX (userId)
-    , CONSTRAINT fk_userWeb_userId 
-      FOREIGN KEY (userId) REFERENCES `user`(id)
-      ON DELETE CASCADE  -- 유저가 탈퇴하면 해당 유저의 웹 프로젝트도 같이 삭제
-      ON UPDATE CASCADE  -- 유저 ID가 바뀌면 같이 바뀜
+/* [자동로그인 토큰 관리] 
+   - 로직: 로그인 유지 체크 시 생성된 해시 토큰을 대조하여 세션 없이도 자동 로그인 처리
+*/
+CREATE TABLE remember_token (
+    id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
+    , user_id INT UNSIGNED NOT NULL COMMENT 'user.id FK'
+    , token_hash VARCHAR(255) NOT NULL COMMENT 'SHA-256 해시된 토큰'
+    , expires_at DATETIME NOT NULL COMMENT '토큰 만료 시각'
+    , revoked TINYINT NOT NULL DEFAULT 0 COMMENT '0: 유효, 1: 폐기'
+    , created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '발급 시각'
+    , INDEX idx_user_id (user_id)
+    , INDEX idx_token_hash (token_hash)
+    , CONSTRAINT fk_remember_user FOREIGN KEY (user_id) REFERENCES `user`(id) ON DELETE CASCADE
 );
 
-/* 자동로그인 토큰 관리 */
-CREATE TABLE remember_token (
-  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
-  , user_id INT UNSIGNED NOT NULL COMMENT 'user.id FK'
-  , token_hash VARCHAR(255) NOT NULL COMMENT 'SHA-256 해시된 토큰'
-  , expires_at DATETIME NOT NULL COMMENT '토큰 만료 시각'
-  , revoked TINYINT NOT NULL DEFAULT 0 COMMENT '0: 유효, 1: 폐기'
-  , created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '발급 시각'
-  , INDEX idx_user_id (user_id)
-  , INDEX idx_token_hash (token_hash)
-  , CONSTRAINT fk_remember_user
-    FOREIGN KEY (user_id)
-    REFERENCES `user`(id)
-    ON DELETE CASCADE
-    ON UPDATE CASCADE
+/* [워크스페이스 메인 테이블] 
+   - 로직: 공동 작업의 '방' 단위. 모든 협업의 뿌리가 되는 프로젝트 정보
+*/
+CREATE TABLE userWeb (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
+    , userId INT UNSIGNED NOT NULL COMMENT '방장(생성자) FK'
+    , title VARCHAR(100) NOT NULL COMMENT '프로젝트 제목'
+    , thumbnailUrl VARCHAR(255) COMMENT '마이페이지 목록용 미리보기 이미지'
+    , hit INT NOT NULL DEFAULT 0 COMMENT '조회수'
+    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '작성일'
+    , updateDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '수정일'
+    , INDEX (userId)
+    , CONSTRAINT fk_userWeb_userId FOREIGN KEY (userId) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
+/* [3단계 데이터 분리 저장 테이블] 
+   - 로직: 공동 작업 시 한 명이 디자인을 고칠 때 다른 사람의 로직이 날아가지 않도록 컬럼 단위로 저장
+*/
+CREATE TABLE userWeb_pages (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK'
+    , webId INT UNSIGNED NOT NULL COMMENT 'userWeb.id FK'
+    , pageName VARCHAR(100) DEFAULT 'index' COMMENT '페이지 이름'
+    
+    -- 저장 로직 1: 화면 구성 (Layout) -> Blockly XML/JSON 등의 구조 정보
+    , layoutData LONGTEXT COMMENT '1단계: 화면 구성 데이터'
+    
+    -- 저장 로직 2: 디자인 (Style) -> CSS 설정값 및 스타일 JSON
+    , styleData LONGTEXT COMMENT '2단계: 디자인/스타일 데이터'
+    
+    -- 저장 로직 3: 로직/데이터 (Logic) -> 실제 실행될 자바 기반 코드/이벤트
+    , logicData LONGTEXT COMMENT '3단계: 자바 기반 로직/스크립트 데이터'
+    
+    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , updateDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    , CONSTRAINT fk_pages_webId FOREIGN KEY (webId) REFERENCES userWeb(id) ON DELETE CASCADE
+);
+
+/* [친구 관계 테이블] 
+   - 로직: 서로 승인된(ACCEPTED) 유저끼리만 프로젝트 초대가 가능하도록 필터링
+*/
+CREATE TABLE friend (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT
+    , requesterId INT UNSIGNED NOT NULL COMMENT '요청자'
+    , receiverId INT UNSIGNED NOT NULL COMMENT '수신자'
+    , `status` ENUM('PENDING', 'ACCEPTED', 'BLOCKED') DEFAULT 'PENDING' COMMENT '상태'
+    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , CONSTRAINT fk_friend_req FOREIGN KEY (requesterId) REFERENCES `user`(id) ON DELETE CASCADE
+    , CONSTRAINT fk_friend_res FOREIGN KEY (receiverId) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
+/* [공동 작업 멤버 테이블] 
+   - 로직: 특정 워크스페이스에 참여 중인 인원과 편집/조회 권한 관리
+*/
+CREATE TABLE userWeb_member (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT
+    , webId INT UNSIGNED NOT NULL COMMENT 'userWeb.id FK'
+    , userId INT UNSIGNED NOT NULL COMMENT '참여 유저 FK'
+    , `role` ENUM('OWNER', 'EDITOR', 'VIEWER') DEFAULT 'EDITOR' COMMENT '권한(방장/편집/보기)'
+    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , UNIQUE KEY (webId, userId) -- 중복 참여 방지 로직
+    , CONSTRAINT fk_member_webId FOREIGN KEY (webId) REFERENCES userWeb(id) ON DELETE CASCADE
+    , CONSTRAINT fk_member_userId FOREIGN KEY (userId) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
+/* [알림 테이블] 
+   - 로직: 친구 신청, 프로젝트 초대 등을 저장해두었다가 접속 시 혹은 실시간으로 팝업 노출
+*/
+CREATE TABLE notification (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT
+    , receiverId INT UNSIGNED NOT NULL COMMENT '받는 사람'
+    , senderId INT UNSIGNED NOT NULL COMMENT '보낸 사람'
+    , `type` ENUM('FRIEND_REQ', 'PROJECT_INVITE') NOT NULL COMMENT '알림 종류'
+    , relId INT UNSIGNED COMMENT '수락 시 이동할 참조 ID (friend 혹은 userWeb)'
+    , isRead TINYINT(1) DEFAULT 0 COMMENT '읽음 여부 (1: 읽음)'
+    , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    , CONSTRAINT fk_noti_receiver FOREIGN KEY (receiverId) REFERENCES `user`(id) ON DELETE CASCADE
 );

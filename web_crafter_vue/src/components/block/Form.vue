@@ -16,7 +16,12 @@ export const category = {
 */
 export const toolbox = `
   <xml>
-    <block type="form_container"></block>  <block type="form_label"></block>      <block type="form_input"></block>      <block type="form_textarea"></block>   <block type="form_submit"></block>     </xml>
+    <block type="form_container"></block>  
+    <block type="form_label"></block>      
+    <block type="form_input"></block>      
+    <block type="form_textarea"></block>   
+    <block type="form_submit"></block>     
+    </xml>
 `
 
 /* [PART 3] 블록 정의 (UI 및 기능 설정)

@@ -13,7 +13,7 @@
 
  */
 
-import { ref, onMounted, nextTick, watch, computed } from 'vue';
+import { ref, onMounted, nextTick, watch, computed, reactive } from 'vue';
 
 import * as Blockly from 'blockly';
 
@@ -28,32 +28,123 @@ import ConfirmModal from '@/modal/ConfirmModal.vue';
 import GlobalModal from '@/modal/GlobalModal.vue';
 
 // ===== 카테고리 블록 import =====
-
+//blockly 블록 정의 및 툴박스 XML을 각각의 모듈에서 가져옵니다.
 import * as Layout from '@/components/block/Layout.vue';
-
 import * as Content from '@/components/block/Content.vue';
-
 import * as Form from '@/components/block/Form.vue';
-
+import * as ContentAttr from '@/components/block/ContentAttr.vue';
+//style 관련 블록
 import * as Style from '@/components/style/Style.vue';
-
 import * as Responsive from '@/components/style/Responsive.vue';
-
 import * as Color from '@/components/style/Color.vue';
-
 import * as Flex from '@/components/style/Flex.vue';
-
 import * as Animation from '@/components/style/Animation.vue';
-
+//js/logic 관련 블록
 import * as Interaction from '@/components/js/Interaction.vue';
-
 import * as Flow from '@/components/js/Flow.vue';
-
 import * as Logic from '@/components/js/Logic.vue';
-
+//modal
 import { Settings } from 'lucide-vue-next'
+// 1. 컴포넌트 임포트
+import AiGenerationModal from '@/modal/AiGenerationModal.vue';
 
+// 3. AI가 만든 XML을 받아서 카테고리별로 나눠 담는 핸들러 (수정됨)
+const handleAiBlockGeneration = (xmlText) => {
+  if (!workspace || !xmlText) return;
 
+  try {
+    // 1. AI가 준 텍스트를 DOM으로 변환
+    const parser = new DOMParser();
+    const xmlDom = Blockly.utils.xml.textToDom(xmlText);
+    
+    // 2. 각 모드별로 담을 임시 컨테이너 생성
+    const structureXml = document.createElement('xml');
+    const styleXml = document.createElement('xml');
+    const logicXml = document.createElement('xml');
+
+    // 3. 블록 하나하나 검사해서 방 배정 (Dispatcher)
+    const blocks = Array.from(xmlDom.children);
+    
+    blocks.forEach((blockNode) => {
+      // <block> 태그가 아니면 패스 (주석이나 텍스트 노드 등)
+      if (blockNode.nodeName.toLowerCase() !== 'block') return;
+
+      const type = blockNode.getAttribute('type') || '';
+
+      // 🔥 [핵심] 블록 이름(type)에 따라 갈 곳을 정합니다.
+      // 형이 정의한 블록 파일들의 prefix 규칙을 따릅니다.
+      if (
+        type.startsWith('layout_') || 
+        type.startsWith('content_') || 
+        type.startsWith('form_') ||
+        type.startsWith('component_')
+      ) {
+        structureXml.appendChild(blockNode);
+      } 
+      else if (
+        type.startsWith('style_') || 
+        type.startsWith('color_') || 
+        type.startsWith('flex_') ||
+        type.startsWith('responsive_') ||
+        type.startsWith('anim_')
+      ) {
+        styleXml.appendChild(blockNode);
+      } 
+      else {
+        // 나머지는 다 로직으로 보냄 (interaction, flow, logic, event 등)
+        logicXml.appendChild(blockNode);
+      }
+    });
+
+    // 4. 현재 선택된 페이지 찾기
+    const page = pages.value.find((p) => p.id === selectedPageId.value);
+    if (!page) return;
+
+    // 5. 페이지 데이터(workspaces)에 각각 저장 (덮어쓰기 or 추가하기)
+    // 기존 데이터 뒤에 붙이고 싶으면 기존 XML 파싱해서 합쳐야 하지만, 
+    // 보통 AI 생성은 "새로 만들기" 개념이 강하므로 덮어쓰거나 AI 결과만 넣는 게 깔끔합니다.
+    // 만약 "추가"를 원하시면 기존 XML을 decode해서 appendChild 해야 합니다.
+    
+    // (여기서는 AI 결과가 있으면 해당 영역을 AI 결과로 대체하는 방식으로 작성함)
+    if (structureXml.children.length > 0) {
+      page.workspaces.structure = Blockly.Xml.domToText(structureXml);
+    }
+    if (styleXml.children.length > 0) {
+      page.workspaces.style = Blockly.Xml.domToText(styleXml);
+    }
+    if (logicXml.children.length > 0) {
+      page.workspaces.logic = Blockly.Xml.domToText(logicXml);
+    }
+
+    // 6. 데이터 저장이 끝났으니, 화면(워크스페이스 + 프리뷰) 새로고침
+    savePagesToStorage(); // 로컬스토리지 저장
+    
+    // 현재 보고 있는 탭(activeMode)에 맞는 데이터로 워크스페이스 다시 그리기
+    const currentModeXml = page.workspaces[activeMode.value];
+    workspace.clear();
+    if (currentModeXml) {
+       Blockly.Xml.domToWorkspace(Blockly.utils.xml.textToDom(currentModeXml), workspace);
+    }
+    
+    // 프리뷰(Iframe) 및 코드창 업데이트
+    refreshCodeAndPreview();
+    
+    console.log("✅ AI 블록 분류 및 적용 완료!");
+    alert("AI가 코드를 생성하고 각 탭에 배치했습니다.");
+
+  } catch (e) {
+    console.error("블록 변환 중 오류:", e);
+    alert("AI 코드를 블록으로 변환하는데 실패했습니다.");
+  }
+};
+import ThemeSettingsModal from '@/modal/ThemeSettingsModal.vue';
+//기본 테마 설정
+const isThemeModalOpen = ref(false);
+const currentTheme = reactive({
+id: 'default',
+toolboxColor: '#dcdcdcba',
+workspaceColor: '#ffffff'
+})
 /* ============================================================
 
  * 🚀 [Page Engine] 로직
@@ -207,12 +298,6 @@ let isSelectingProgrammatically = false;
 
 const showAiModal = ref(false);
 
-const aiPrompt = ref('');
-
-const isGenerating = ref(false);
-
-const aiPromptError = ref(false);
-
 const confirmModal = ref({ open: false, message: '', payload: null });
 
 const modal = ref({ open: false, message: '', type: 'info', onConfirm: null });
@@ -231,7 +316,7 @@ const categoryGroups = [
     label: '화면 구성',
     icon: '🏗️',
     color: '#4caf50',
-    items: ['layout', 'content', 'form', 'component'],
+    items: ['layout', 'content', 'contentAttr', 'form', 'component'],
   },
 
   {
@@ -254,6 +339,7 @@ const categoryGroups = [
 const categories = {
   layout: Layout.category,
   content: Content.category,
+  contentAttr: ContentAttr.category,
   form: Form.category,
   component: { label: '컴포넌트', color: '#5c6bc0', icon: '🧱' },
 
@@ -650,6 +736,9 @@ const updatePreview = () => {
   const viewScript = logicCode.trim() ? `${logicCode}` : '';
   const viewHtml = cleanCodeForView(structureCode);
   const viewStyle = styleCodeRaw.trim() ? `${styleCodeRaw}` : '';
+  const deviceClass = isPhone.value ? 'is-mobile-mode' : 'is-pc-mode';
+  const orientationClass = (isPhone.value && isLandscape.value) ? 'is-landscape' : '';
+  const finalBodyClass = `${isRunning.value ? 'is-running' : 'is-design'} ${deviceClass} ${orientationClass}`;
 
   generatedCode.value = [viewScript, viewHtml, viewStyle].filter(Boolean).join('\n\n');
 
@@ -681,7 +770,7 @@ const updatePreview = () => {
     styleCodeForPreview,
 
     '</head>',
-    `<body class="${isRunning.value ? 'is-running' : 'is-design'}">`,
+    `<body class="${isRunning.value ? 'is-running' : 'is-design'} ${finalBodyClass}">`,
     '<div id="wrapper">',
     structureCode,
     '<div id="wcGuideV" class="wc-guide-line wc-guide-v"></div><div id="wcGuideH" class="wc-guide-line wc-guide-h"></div></div>',
@@ -692,6 +781,8 @@ const updatePreview = () => {
     'function redirectToPage(targetId) { window.parent.postMessage({ type: "REDIRECT", pageId: targetId }, "*"); }',
     'function goToPage(targetId) { navigateToPage(targetId); }',
     'function applyBuilderStyles(){ const nodes = document.querySelectorAll("[data-wc-style]"); nodes.forEach(el => { el.style.cssText += ";" + el.getAttribute("data-wc-style"); }); }',
+    'function parseTargetToSelector(raw){const s=(raw||"").trim();if(!s)return"";if((s.startsWith("[")&&s.endsWith("]"))||s.startsWith("#"))return s;const p=s.split(":"),m=(p.length>=2?p.slice(1).join(":"):p[0]).trim();if(!m)return"";if(m.startsWith(".")||m.startsWith("#")||(m.startsWith("[")&&m.endsWith("]")))return m;return"."+m;}',
+    'function applyContentAttrs(){const metas=[...document.querySelectorAll("[data-wc-block=\'wc_attrs\'][data-wc-attrs]")];metas.forEach(m=>{let p;try{p=JSON.parse(m.getAttribute("data-wc-attrs")||"{}")}catch(e){p=null}if(!p||!p.target||!Array.isArray(p.ops)){m.remove();return}const sel=parseTargetToSelector(p.target);if(!sel){m.remove();return}[...document.querySelectorAll(sel)].forEach(el=>{p.ops.forEach(o=>{if(!o||!o.t)return;switch(o.t){case"id":o.v&&(el.id=o.v);break;case"class_add":o.v&&el.classList.add(o.v);break;case"data":o.k&&el.setAttribute("data-"+o.k,o.v??"");break;case"aria":o.k&&el.setAttribute("aria-"+o.k,o.v??"");break;case"placeholder":el.setAttribute("placeholder",o.v??"");break;case"value":el.setAttribute("value",o.v??"");break;case"required":el.setAttribute("required","");break;case"disabled":el.setAttribute("disabled","");break;case"readonly":el.setAttribute("readonly","");break;case"target_blank":el.setAttribute("target","_blank");break;case"rel_noopener":{const r=(el.getAttribute("rel")||"").split(/\\s+/).filter(Boolean);r.includes("noopener")||r.push("noopener");r.includes("noreferrer")||r.push("noreferrer");el.setAttribute("rel",r.join(" "));break}case"for":o.v&&el.setAttribute("for",o.v);break;case"server_field":o.v&&(el.setAttribute("name",o.v),el.setAttribute("data-wc-field",o.v));break;case"style":if(o.v){const prev=el.getAttribute("data-wc-style")||"";el.setAttribute("data-wc-style",(prev&&(prev.trim().endsWith(";")?prev:prev+";"))+o.v)}break;case"dup_target":o.v&&(el.setAttribute("data-wc-action","duplicate-check"),el.setAttribute("data-wc-target",o.v));break}})});m.remove()})}',
     'function syncClassStyles(){ const styleText = document.querySelector("style")?.textContent || ""; const classMatches = styleText.match(/\\.([a-zA-Z0-9_-]+)\\s*\\{/g) || []; classMatches.forEach(m => { const className = m.replace(".", "").replace("{", "").trim(); document.querySelectorAll("[data-block-id=\'"+className+"\']").forEach(el => el.classList.add(className)); }); }',
     'function hideGuides(){ const v = document.getElementById("wcGuideV"); const h = document.getElementById("wcGuideH"); if(v) v.style.display = "none"; if(h) h.style.display = "none"; }',
     'function showVSeg(x, y1, y2){ const v = document.getElementById("wcGuideV"); if(!v) return; v.style.left = x + "px"; v.style.top = Math.min(y1,y2) + "px"; v.style.height = Math.abs(y2 - y1) + "px"; v.style.display = "block"; }',
@@ -699,7 +790,7 @@ const updatePreview = () => {
     'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", p.x + "px", "important"); el.style.setProperty("top", p.y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
-    'function init(){ applyBuilderStyles(); syncClassStyles(); applyPositions(); window.addEventListener("message", (e) => { if(e.data.type === "highlight_element"){ document.querySelectorAll(".wc-highlight").forEach(el => el.classList.remove("wc-highlight")); const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']"); if(t) t.classList.add("wc-highlight"); } }); if(isRunning) return; const wrap = document.getElementById("wrapper"); let dragging = null; wrap.addEventListener("pointerdown", (ev) => { const t = ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]"); if(!t) return; const r = t.getBoundingClientRect(), wr = wrap.getBoundingClientRect(); dragging = { el: t, baseLeft: r.left - wr.left, baseTop: r.top - wr.top, startX: ev.clientX, startY: ev.clientY, guides: collectGuides(t), pointerId: ev.pointerId }; t.classList.add("wc-dragging"); t.setPointerCapture(ev.pointerId); window.parent.postMessage({ type: "select_block", blockId: t.getAttribute("data-block-id") }, "*"); }); wrap.addEventListener("pointermove", (ev) => { if(!dragging) return; const dx = ev.clientX - dragging.startX, dy = ev.clientY - dragging.startY; let nextL = dragging.baseLeft + dx, nextT = dragging.baseTop + dy; const r = dragging.el.getBoundingClientRect(); const wr = wrap.getBoundingClientRect(); if(nextL < 0) nextL = 0; if(nextT < 0) nextT = 0; if(nextL + r.width > wr.width) nextL = wr.width - r.width; if(nextT + r.height > wr.height) nextT = wr.height - r.height; const snap = computeSmartSnap({ nextLeft: nextL, nextTop: nextT, width: r.width, height: r.height, guides: dragging.guides }); hideGuides(); if(snap.vLine) showVSeg(snap.vLine, snap.vSeg.y1, snap.vSeg.y2); if(snap.hLine) showHSeg(snap.hLine, snap.hSeg.x1, snap.hSeg.x2); dragging.el.style.left = (nextL + snap.dx) + "px"; dragging.el.style.top = (nextT + snap.dy) + "px"; }); wrap.addEventListener("pointerup", (ev) => { if(!dragging) return; const t = dragging.el; hideGuides(); t.classList.remove("wc-dragging"); window.parent.postMessage({ type: "update_free_position", blockId: t.getAttribute("data-block-id"), x: parseInt(t.style.left), y: parseInt(t.style.top) }, "*"); dragging = null; }); }',
+    'function init(){applyBuilderStyles();applyContentAttrs();syncClassStyles();applyPositions();window.addEventListener("message",(e)=>{if(e&&e.data&&e.data.type==="highlight_element"){document.querySelectorAll(".wc-highlight").forEach(el=>el.classList.remove("wc-highlight"));const t=document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");t&&t.classList.add("wc-highlight")}});if(isRunning)return;const wrap=document.getElementById("wrapper");if(!wrap)return;let dragging=null;wrap.addEventListener("pointerdown",(ev)=>{const t=ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]");if(!t)return;const r=t.getBoundingClientRect(),wr=wrap.getBoundingClientRect();dragging={el:t,baseLeft:r.left-wr.left,baseTop:r.top-wr.top,startX:ev.clientX,startY:ev.clientY,guides:collectGuides(t),pointerId:ev.pointerId};t.classList.add("wc-dragging");t.setPointerCapture(ev.pointerId);window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*")});wrap.addEventListener("pointermove",(ev)=>{if(!dragging)return;const dx=ev.clientX-dragging.startX,dy=ev.clientY-dragging.startY;let nextL=dragging.baseLeft+dx,nextT=dragging.baseTop+dy;const r=dragging.el.getBoundingClientRect(),wr=wrap.getBoundingClientRect();if(nextL<0)nextL=0;if(nextT<0)nextT=0;if(nextL+r.width>wr.width)nextL=wr.width-r.width;if(nextT+r.height>wr.height)nextT=wr.height-r.height;const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:r.width,height:r.height,guides:dragging.guides});hideGuides();snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);dragging.el.style.left=nextL+snap.dx+"px";dragging.el.style.top=nextT+snap.dy+"px"});wrap.addEventListener("pointerup",(ev)=>{if(!dragging)return;const t=dragging.el;hideGuides();t.classList.remove("wc-dragging");window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left),y:parseInt(t.style.top)},"*");dragging=null})}',
     'window.onload = init;',
     '<\/script>',
     '</body></html>',
@@ -720,6 +811,7 @@ const updatePreview = () => {
 const defineCustomBlocks = () => {
   Layout.defineBlocks();
   Content.defineBlocks();
+  ContentAttr.defineBlocks();
   Style.defineBlocks();
   Color.defineBlocks();
   Flex.defineBlocks();
@@ -734,6 +826,7 @@ const defineCustomBlocks = () => {
 const toolboxXMLs = {
   layout: Layout.toolbox,
   content: Content.toolbox,
+  contentAttr: ContentAttr.toolbox,
   style: Style.toolbox,
   color: Color.toolbox,
   flex: Flex.toolbox,
@@ -997,7 +1090,34 @@ const toggleOrientation = () => {
   isLandscape.value = !isLandscape.value;
   updatePreview(); // 화면 비율 변경 시 프리뷰 갱신
 };
+const handleThemeApply = (payload) => {
+  // payload 구조: { theme: {...}, settings: {...} }
+  
+  // 1. 테마 적용 (payload.theme 사용)
+  const selectedTheme = payload.theme;
+  currentTheme.id = selectedTheme.id;
+  currentTheme.toolboxColor = selectedTheme.toolboxColor;
+  currentTheme.workspaceColor = selectedTheme.workspaceColor;
+  
+  // DOM 색상 변경 로직 (기존과 동일)
+  const flyoutBg = document.querySelector('.flyout-bg-panel');
+  if (flyoutBg) flyoutBg.style.backgroundColor = selectedTheme.toolboxColor;
+  
+  const workspaceBg = document.querySelector('.blocklyMainBackground');
+  if (workspaceBg) workspaceBg.style.fill = selectedTheme.workspaceColor;
 
+  const blocklyDiv = document.getElementById('blocklyDiv');
+  if (blocklyDiv) blocklyDiv.style.backgroundColor = selectedTheme.workspaceColor;
+
+  // 2. 다른 설정 적용 (payload.settings 사용)
+  // 예: 그리드 설정, 프로젝트 이름 변경 등
+  console.log("다른 설정들:", payload.settings);
+  // 예: if (payload.settings.showGrid !== workspace.getGrid().isVisible()) ...
+  
+  // 3. 저장 및 닫기
+  localStorage.setItem('wc_theme_settings', JSON.stringify(currentTheme));
+  isThemeModalOpen.value = false;
+}
 onMounted(async () => {
   if (Ko) Blockly.setLocale(Ko);
   defineCustomBlocks();
@@ -1012,7 +1132,25 @@ onMounted(async () => {
     grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
     trashcan: true,
   });
+  let savedTheme = currentTheme;
+  try {
+    const loaded = localStorage.getItem('wc_theme_settings');
+    if (loaded) {
+      savedTheme = JSON.parse(loaded);
+      // 상태 변수도 동기화
+      Object.assign(currentTheme, savedTheme); 
+    }
+  } catch (e) {}
 
+  // 2. DOM에 색상 적용
+  const flyoutBg = document.querySelector('.flyout-bg-panel');
+  if (flyoutBg) flyoutBg.style.backgroundColor = savedTheme.toolboxColor; // div니까 backgroundColor
+
+  const wsBg = document.querySelector('.blocklyMainBackground');
+  if (wsBg) wsBg.style.fill = savedTheme.workspaceColor; // svg니까 fill
+
+  const blocklyDiv = document.getElementById('blocklyDiv');
+  if (blocklyDiv) blocklyDiv.style.backgroundColor = savedTheme.workspaceColor;
   // =================================================================
   // 🔥 [핵심 수정] MetricsManager 강제 조작 (밀림 현상 원천 봉쇄)
   // =================================================================
@@ -1339,7 +1477,15 @@ onMounted(async () => {
 
         </div>
         <div class="item"></div>
-        <button class="mr-[42px]" @click="{settingModal}"><Settings :size="23" /></button>
+        <button class="mr-[42px]" @click="isThemeModalOpen = true"><Settings :size="23" /></button>
+        <Teleport to="body">
+        <ThemeSettingsModal 
+          :open="isThemeModalOpen"
+          :current-theme-id="currentTheme.id"
+          @close="isThemeModalOpen = false"
+          @apply="handleThemeApply"
+        />
+        </Teleport>
       </nav>
 
       <div class="workspace-row">
@@ -1373,33 +1519,12 @@ onMounted(async () => {
         </div>
       </div>
     </div>
-
-    <div v-if="showAiModal" class="modal-overlay">
-      <div class="modal-content">
-        <h3>✨ AI로 페이지 만들기</h3>
-
-        <p class="desc">원하는 디자인을 설명하면 블록을 조립해줍니다.</p>
-
-        <textarea
-          v-model="aiPrompt"
-          placeholder="요청사항 입력..."
-          class="ai-textarea"
-          :class="{ 'input-error': aiPromptError }"
-        ></textarea>
-
-        <div class="modal-actions">
-          <button @click="showAiModal = false" class="btn-cancel">취소</button>
-
-          <button
-            @click="callOpenAI"
-            class="btn-generate"
-            :disabled="isGenerating"
-          >
-            {{ isGenerating ? '생성 중...' : '생성하기' }}
-          </button>
-        </div>
-      </div>
-    </div>
+    <!-- AI 생성 모달-->
+    <AiGenerationModal 
+      :open="showAiModal"
+      @close="showAiModal = false" 
+      @generate="handleAiBlockGeneration"
+    />
 
     <!--삭제/취소 모달-->
 
@@ -1519,7 +1644,7 @@ onMounted(async () => {
   font-weight: bold;
   transition: 0.2s;
   color: white;
-
+flex-grow: 1;
   /* 🔥 세로 깨짐 방지 핵심 코드 */
   display: inline-flex !important;
   align-items: center !important;
@@ -1529,6 +1654,7 @@ onMounted(async () => {
   height: 32px !important;        /* 높이를 통일해서 예쁘게 정렬 */
   line-height: 1 !important;      /* 글자 수직 중앙 정렬 보정 */
 }
+
 
 .btn-ai {
   background: #9c27b0;
