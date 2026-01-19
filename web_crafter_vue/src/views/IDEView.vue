@@ -12,7 +12,7 @@
  * ============================================================
 
  */
-
+import JSZip from 'jszip';
 import { ref, onMounted, nextTick, watch, computed, reactive } from 'vue';
 
 import * as Blockly from 'blockly';
@@ -46,8 +46,49 @@ import * as Logic from '@/components/js/Logic.vue';
 //modal
 import { Settings } from 'lucide-vue-next'
 // 1. 컴포넌트 임포트
-import AiGenerationModal from '@/modal/AiGenerationModal.vue';
+import AiChatBot from '@/modal/AiChatBot.vue';
 
+const props = defineProps({
+  nickname: {
+    type: String,
+    default: ''
+  },
+  webId: {
+    type: [String, Number],
+    default: ''
+  }
+});
+// ✨ [추가] 기존 XML 문자열에 새로운 DOM 노드들을 합쳐주는 함수
+const mergeBlockXml = (originalXmlText, newXmlDom) => {
+  // 1. 새로운 블록이 없으면 기존 것 그대로 반환
+  if (!newXmlDom || newXmlDom.children.length === 0) return originalXmlText;
+
+  // 2. 기존 XML이 비어있으면 새 것만 반환
+  if (!originalXmlText || originalXmlText === '<xml></xml>') {
+    return Blockly.Xml.domToText(newXmlDom);
+  }
+
+  // 3. 기존 XML을 DOM으로 변환
+  let originalDom = null;
+  try {
+    originalDom = Blockly.utils.xml.textToDom(originalXmlText);
+  } catch (e) {
+    // 혹시 파싱 에러나면 그냥 새거 덮어쓰기
+    return Blockly.Xml.domToText(newXmlDom);
+  }
+
+  // 4. 새 블록들을 기존 DOM 끝에 붙이기 (이사시키기)
+  const newBlocks = Array.from(newXmlDom.children);
+  newBlocks.forEach((blockNode) => {
+    // cloneNode(true)를 써서 복사본을 넣어야 안전함
+    originalDom.appendChild(blockNode.cloneNode(true));
+  });
+
+  // 5. 합쳐진 DOM을 다시 글자로 바꿔서 반환
+  return Blockly.Xml.domToText(originalDom);
+};
+const wrapperWidth = ref(600);
+const wrapperHeight = ref(800);
 // 3. AI가 만든 XML을 받아서 카테고리별로 나눠 담는 핸들러 (수정됨)
 const handleAiBlockGeneration = (xmlText) => {
   if (!workspace || !xmlText) return;
@@ -71,27 +112,40 @@ const handleAiBlockGeneration = (xmlText) => {
 
       const type = blockNode.getAttribute('type') || '';
 
-      // 🔥 [핵심] 블록 이름(type)에 따라 갈 곳을 정합니다.
-      // 형이 정의한 블록 파일들의 prefix 규칙을 따릅니다.
+      // 🔥 [핵심 수정] 제공해주신 블록 리스트 기반의 정밀 분류
+      // 1. 화면 구성 (Structure) & 속성 (Attributes) -> structureXml
       if (
-        type.startsWith('layout_') || 
-        type.startsWith('content_') || 
-        type.startsWith('form_') ||
-        type.startsWith('component_')
+        type.startsWith('layout_') ||    // layout_area, layout_box 등
+        type.startsWith('content_') ||   // content_heading, content_button 등
+        type.startsWith('form_') ||      // form_container, form_input 등 (layout_form과 중복 주의)
+        type.startsWith('wc_attr_') ||   // wc_attr_id, wc_attr_class 등 (속성도 요소와 함께 배치)
+        type.startsWith('component_')    // component_ (만약 있다면)
       ) {
         structureXml.appendChild(blockNode);
       } 
+      // 2. 스타일링 (Styling) -> styleXml
       else if (
-        type.startsWith('style_') || 
-        type.startsWith('color_') || 
-        type.startsWith('flex_') ||
-        type.startsWith('responsive_') ||
-        type.startsWith('anim_')
+        type.startsWith('style_') ||     // style_size, style_color 등
+        type.startsWith('effect_') ||    // effect_entrance, effect_emphasis 등
+        type.startsWith('anim_')         // anim_duration, anim_delay 등
       ) {
         styleXml.appendChild(blockNode);
       } 
+      // 3. 로직 및 이벤트 (Logic, Events, Flow, Ops) -> logicXml
+      else if (
+        type.startsWith('event_') ||     // event_click, event_page_load
+        type.startsWith('action_') ||    // action_alert, action_navigate
+        type.startsWith('dom_') ||       // dom_change_text
+        type.startsWith('script_') ||    // script_tag
+        type.startsWith('flow_') ||      // flow_if, flow_repeat
+        type.startsWith('logic_') ||     // logic_compare, logic_and
+        type.startsWith('value_')        // value_text, value_number
+      ) {
+        logicXml.appendChild(blockNode);
+      }
+      // 4. 분류되지 않은 블록은 기본적으로 로직으로 보내거나, 에러 로그 출력
       else {
-        // 나머지는 다 로직으로 보냄 (interaction, flow, logic, event 등)
+        console.warn(`분류되지 않은 블록 타입 발견: ${type}. 로직 탭으로 이동합니다.`);
         logicXml.appendChild(blockNode);
       }
     });
@@ -100,14 +154,15 @@ const handleAiBlockGeneration = (xmlText) => {
     const page = pages.value.find((p) => p.id === selectedPageId.value);
     if (!page) return;
 
-    // 5. 페이지 데이터(workspaces)에 각각 저장 (덮어쓰기 or 추가하기)
-    // 기존 데이터 뒤에 붙이고 싶으면 기존 XML 파싱해서 합쳐야 하지만, 
-    // 보통 AI 생성은 "새로 만들기" 개념이 강하므로 덮어쓰거나 AI 결과만 넣는 게 깔끔합니다.
-    // 만약 "추가"를 원하시면 기존 XML을 decode해서 appendChild 해야 합니다.
+    // 5. 페이지 데이터(workspaces)에 각각 저장 (덮어쓰기)
+    // 기존 데이터가 있다면 유지하면서 추가하고 싶다면, 기존 XML을 파싱해서 합치는 로직이 필요하지만
+    // 여기서는 AI 생성이 "새로운 제안"이라고 가정하고 덮어쓰거나, 비어있지 않은 경우만 업데이트합니다.
     
-    // (여기서는 AI 결과가 있으면 해당 영역을 AI 결과로 대체하는 방식으로 작성함)
+    // [중요] 각 XML 컨테이너에 자식 노드가 하나라도 있을 때만 해당 탭의 데이터를 갱신합니다.
+    // 이렇게 하면 AI가 스타일만 줬을 때, 기존의 화면 구성은 날아가지 않습니다.
     if (structureXml.children.length > 0) {
-      page.workspaces.structure = Blockly.Xml.domToText(structureXml);
+      // page.workspaces.structure = Blockly.Xml.domToText(structureXml); // ❌ (삭제)
+      page.workspaces.structure = mergeBlockXml(page.workspaces.structure, structureXml); // ⭕ (수정)
     }
     if (styleXml.children.length > 0) {
       page.workspaces.style = Blockly.Xml.domToText(styleXml);
@@ -116,10 +171,14 @@ const handleAiBlockGeneration = (xmlText) => {
       page.workspaces.logic = Blockly.Xml.domToText(logicXml);
     }
 
-    // 6. 데이터 저장이 끝났으니, 화면(워크스페이스 + 프리뷰) 새로고침
-    savePagesToStorage(); // 로컬스토리지 저장
+    // 6. 데이터 저장이 끝났으니, 로컬스토리지 저장
+    savePagesToStorage(); 
     
-    // 현재 보고 있는 탭(activeMode)에 맞는 데이터로 워크스페이스 다시 그리기
+    // 7. 현재 보고 있는 탭(activeMode)에 맞는 데이터로 워크스페이스 다시 그리기
+    // 사용자가 현재 'structure' 탭을 보고 있다면, structureXml 내용이 화면에 나타납니다.
+    // 만약 AI가 style만 생성했다면, 현재 화면(structure)은 변하지 않을 수 있습니다. 
+    // 이를 위해 알림창으로 어떤 데이터가 갱신되었는지 알려주면 좋습니다.
+    
     const currentModeXml = page.workspaces[activeMode.value];
     workspace.clear();
     if (currentModeXml) {
@@ -129,8 +188,12 @@ const handleAiBlockGeneration = (xmlText) => {
     // 프리뷰(Iframe) 및 코드창 업데이트
     refreshCodeAndPreview();
     
+    let msg = "AI 코드 적용 완료!\n";
+    if (structureXml.children.length > 0) msg += "- 화면 구성 탭 갱신됨\n";
+    if (styleXml.children.length > 0) msg += "- 스타일 탭 갱신됨\n";
+    if (logicXml.children.length > 0) msg += "- 로직 탭 갱신됨";
+    
     console.log("✅ AI 블록 분류 및 적용 완료!");
-    alert("AI가 코드를 생성하고 각 탭에 배치했습니다.");
 
   } catch (e) {
     console.error("블록 변환 중 오류:", e);
@@ -627,46 +690,63 @@ watch(
   { deep: true, immediate: true }
 );
 
+// 기존 updateObjectListFromWorkspace 함수를 이걸로 덮어씌우세요!
 const updateObjectListFromWorkspace = () => {
-  if (!workspace) return;
+  const page = pages.value.find((p) => p.id === selectedPageId.value);
+  if (!page) return;
+
+  let targetBlocks = [];
+  let tempWorkspace = null;
+
+  // 1. 현재 탭이 '화면 구성(structure)'이면 -> 라이브 워크스페이스 사용
+  if (activeMode.value === 'structure' && workspace) {
+    targetBlocks = workspace.getAllBlocks(false);
+  } 
+  // 2. 다른 탭(스타일, 로직)이면 -> 저장된 화면 구성 XML을 파싱해서 사용
+  else {
+    try {
+      const structureXml = page.workspaces.structure;
+      if (structureXml && structureXml !== '<xml></xml>') {
+        // 임시 워크스페이스를 만들어서 블록 정보를 읽어옵니다.
+        tempWorkspace = new Blockly.Workspace();
+        const dom = Blockly.utils.xml.textToDom(structureXml);
+        Blockly.Xml.domToWorkspace(dom, tempWorkspace);
+        targetBlocks = tempWorkspace.getAllBlocks(false);
+      }
+    } catch (e) {
+      console.error("객체 목록 로드 실패:", e);
+    }
+  }
 
   const current = [];
 
-  const blocks = workspace.getAllBlocks(false);
+  // 3. 가져온 블록들 중에서 "화면 요소"만 골라내기
+  targetBlocks.forEach((block) => {
+    const type = block.type;
 
-  const ignoredTypes = new Set([
-    'event_click',
-    'event_page_load',
-    'action_alert',
-  ]);
-
-  blocks.forEach((block) => {
-    if (ignoredTypes.has(block.type)) return;
-
+    // 🔥 [필터] 오직 화면 구성용 블록만 목록에 넣습니다.
+    // (이벤트, 스타일, 로직 블록 등은 제외)
     if (
-      activeMode.value === 'structure' &&
-      (block.type.startsWith('style_') || block.type.startsWith('script'))
-    )
-      return;
-
-    if (activeMode.value === 'style' && !block.type.startsWith('style_'))
-      return;
-
-    if (
-      activeMode.value === 'logic' &&
-      !block.type.startsWith('script') &&
-      !block.type.startsWith('logic_')
-    )
-      return;
-
-    current.push({
-      id: block.id,
-      name: block.getFieldValue('NAME') || block.type,
-      type: block.type,
-    });
+      type.startsWith('layout_') || 
+      type.startsWith('content_') || 
+      type.startsWith('form_') || 
+      type.startsWith('component_')
+    ) {
+      current.push({
+        id: block.id,
+        name: block.getFieldValue('NAME') || type, // 블록에 이름 필드가 있으면 그걸 쓰고, 없으면 타입명
+        type: type,
+      });
+    }
   });
 
+  // 4. 결과 적용
   objects.value = current;
+
+  // 5. 메모리 정리 (임시 워크스페이스 삭제)
+  if (tempWorkspace) {
+    tempWorkspace.dispose();
+  }
 };
 
 const refreshCodeAndPreview = () => {
@@ -759,14 +839,32 @@ const updatePreview = () => {
   const PAGE_ID = page.id;
   const PAGE_ROUTE = page.route;
 
-  // 5. Iframe HTML 조립
+// 5. Iframe HTML 조립 (전체 수정 버전)
   const htmlParts = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
-    '<style>html, body { margin:0; padding:0; width:100%; min-height:100vh; overflow: hidden; background:#fff; } * { box-sizing: border-box; } #wrapper { width:100%; min-height:100vh; position:relative; background:#fff; } #wrapper > [data-draggable="true"][data-block-id] { position: absolute; left: 0; top: 0; transform:none; touch-action:none; user-select:none; -webkit-user-select:none; cursor: grab; } #wrapper > [data-draggable="true"][data-block-id]:is(div, section, article, header, nav, main, aside, footer, form, ul) { max-width: 100%; } .wc-highlight { outline:2px solid #ff4081 !important; z-index: 9999; } .wc-dragging { opacity:0.9; box-shadow: 0 10px 20px rgba(0,0,0,0.2); outline: 2px dashed #2196f3 !important; cursor: grabbing; transition:none !important; z-index: 9999; } .wc-guide-line { position:absolute; z-index: 10000; pointer-events:none; display:none; border-color: rgba(255, 0, 0, 0.75); border-style: dashed; } .wc-guide-v { width:0; border-left-width:1px; } .wc-guide-h { height:0; border-top-width:1px; } [data-wc-block] { position: relative; min-width: 50px; min-height: 50px; } [data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; } </style>',
+    
+    // 🔥 [수정 1] CSS 오타 수정 및 스크롤/높이 설정 완벽 적용
+    '<style>',
+    'html, body { margin:0; padding:0; width:100%; height:100%; overflow-y: auto; overflow-x: hidden; background:#fff; }',
+    '* { box-sizing: border-box; }',
+    '#wrapper { width:100%; min-height:100vh; position:relative; background:#fff; }',
+    
+    // 드래그 및 하이라이트 스타일
+    '#wrapper > [data-draggable="true"][data-block-id] { position: absolute; left: 0; top: 0; transform:none; touch-action:none; user-select:none; -webkit-user-select:none; cursor: grab; }',
+    '#wrapper > [data-draggable="true"][data-block-id]:is(div, section, article, header, nav, main, aside, footer, form, ul) { max-width: 100%; }',
+    '.wc-highlight { outline:2px solid #ff4081 !important; z-index: 9999; }',
+    '.wc-dragging { opacity:0.9; box-shadow: 0 10px 20px rgba(0,0,0,0.2); outline: 2px dashed #2196f3 !important; cursor: grabbing; transition:none !important; z-index: 9999; }',
+    '.wc-guide-line { position:absolute; z-index: 10000; pointer-events:none; display:none; border-color: rgba(255, 0, 0, 0.75); border-style: dashed; }',
+    '.wc-guide-v { width:0; border-left-width:1px; }',
+    '.wc-guide-h { height:0; border-top-width:1px; }',
+    '[data-wc-block] { position: relative; min-width: 50px; min-height: 50px; }',
+    '[data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; }',
+    '</style>',
+
     `<style id="anim-defs">${Animation.Animation.ANIMATION_KEYFRAMES}</style>`,
     '<style>body.is-design * { animation: none !important; transition: none !important; }</style>',
 
-    // ✅ 여기만 변경: 전체 styleCodeRaw가 아니라 "styleCodeForPreview"만 주입
+    // 사용자 정의 스타일 (여기만 프리뷰용 스타일 적용)
     styleCodeForPreview,
 
     '</head>',
@@ -775,8 +873,11 @@ const updatePreview = () => {
     structureCode,
     '<div id="wcGuideV" class="wc-guide-line wc-guide-v"></div><div id="wcGuideH" class="wc-guide-line wc-guide-h"></div></div>',
     finalLogicScript,
+    
     '<script>',
     `const WC_POSITIONS = ${positionsJSON}; const isRunning = ${isRunning.value}; const PAGE_ID = "${PAGE_ID}"; const PAGE_ROUTE = "${PAGE_ROUTE}";`,
+    
+    // 기본 헬퍼 함수들
     'function navigateToPage(targetId) { window.parent.postMessage({ type: "NAVIGATE", pageId: targetId }, "*"); }',
     'function redirectToPage(targetId) { window.parent.postMessage({ type: "REDIRECT", pageId: targetId }, "*"); }',
     'function goToPage(targetId) { navigateToPage(targetId); }',
@@ -790,16 +891,89 @@ const updatePreview = () => {
     'function applyPositions(){ const wrap = document.getElementById("wrapper"); if(!wrap) return; const targets = wrap.querySelectorAll(":scope > [data-draggable=\'true\']"); targets.forEach(el => { const id = el.getAttribute("data-block-id"); const p = WC_POSITIONS[id]; if(p && typeof p.x === "number"){ el.style.setProperty("position", "absolute", "important"); el.style.setProperty("left", p.x + "px", "important"); el.style.setProperty("top", p.y + "px", "important"); el.style.setProperty("transform", "none", "important"); } }); }',
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
-    'function init(){applyBuilderStyles();applyContentAttrs();syncClassStyles();applyPositions();window.addEventListener("message",(e)=>{if(e&&e.data&&e.data.type==="highlight_element"){document.querySelectorAll(".wc-highlight").forEach(el=>el.classList.remove("wc-highlight"));const t=document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");t&&t.classList.add("wc-highlight")}});if(isRunning)return;const wrap=document.getElementById("wrapper");if(!wrap)return;let dragging=null;wrap.addEventListener("pointerdown",(ev)=>{const t=ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]");if(!t)return;const r=t.getBoundingClientRect(),wr=wrap.getBoundingClientRect();dragging={el:t,baseLeft:r.left-wr.left,baseTop:r.top-wr.top,startX:ev.clientX,startY:ev.clientY,guides:collectGuides(t),pointerId:ev.pointerId};t.classList.add("wc-dragging");t.setPointerCapture(ev.pointerId);window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*")});wrap.addEventListener("pointermove",(ev)=>{if(!dragging)return;const dx=ev.clientX-dragging.startX,dy=ev.clientY-dragging.startY;let nextL=dragging.baseLeft+dx,nextT=dragging.baseTop+dy;const r=dragging.el.getBoundingClientRect(),wr=wrap.getBoundingClientRect();if(nextL<0)nextL=0;if(nextT<0)nextT=0;if(nextL+r.width>wr.width)nextL=wr.width-r.width;if(nextT+r.height>wr.height)nextT=wr.height-r.height;const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:r.width,height:r.height,guides:dragging.guides});hideGuides();snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);dragging.el.style.left=nextL+snap.dx+"px";dragging.el.style.top=nextT+snap.dy+"px"});wrap.addEventListener("pointerup",(ev)=>{if(!dragging)return;const t=dragging.el;hideGuides();t.classList.remove("wc-dragging");window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left),y:parseInt(t.style.top)},"*");dragging=null})}',
+    
+    // 🔥 [수정 2] 화면 높이 자동 조절 함수 (updateWrapperHeight)
+    'function updateWrapperHeight() {',
+    '  const wrap = document.getElementById("wrapper");',
+    '  const els = wrap.querySelectorAll("[data-block-id]");',
+    '  let maxBottom = 1080; // 기본 높이',
+    '  els.forEach(el => {',
+    '    const bottom = el.offsetTop + el.offsetHeight;',
+    '    if(bottom > maxBottom) maxBottom = bottom;',
+    '  });',
+    '  wrap.style.minHeight = (maxBottom + 50) + "px";',
+    '  document.body.style.minHeight = (maxBottom + 50) + "px";',
+    '}',
+
+    // 초기화 및 이벤트 리스너 등록
+    'function init(){',
+    '  applyBuilderStyles();',
+    '  applyContentAttrs();',
+    '  syncClassStyles();',
+    '  applyPositions();',
+    
+    // 높이 조절 실행
+    '  updateWrapperHeight();',
+    '  setInterval(updateWrapperHeight, 1000);', // 1초마다 감시
+
+    '  window.addEventListener("message",(e)=>{',
+    '    if(e&&e.data&&e.data.type==="highlight_element"){',
+    '      document.querySelectorAll(".wc-highlight").forEach(el=>el.classList.remove("wc-highlight"));',
+    '      const t=document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
+    '      t&&t.classList.add("wc-highlight");',
+    '    }',
+    '    // 드래그 후 위치 업데이트 시 높이 재계산',
+    '    if(e.data.type === "update_free_position") { setTimeout(updateWrapperHeight, 100); }',
+    '  });',
+
+    '  if(isRunning) return;',
+    '  const wrap=document.getElementById("wrapper");',
+    '  if(!wrap) return;',
+    '  let dragging=null;',
+    '  wrap.addEventListener("pointerdown",(ev)=>{',
+    '    const t=ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]");',
+    '    if(!t)return;',
+    '    const r=t.getBoundingClientRect(),wr=wrap.getBoundingClientRect();',
+    '    dragging={el:t,baseLeft:r.left-wr.left,baseTop:r.top-wr.top,startX:ev.clientX,startY:ev.clientY,guides:collectGuides(t),pointerId:ev.pointerId};',
+    '    t.classList.add("wc-dragging");',
+    '    t.setPointerCapture(ev.pointerId);',
+    '    window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*");',
+    '  });',
+    '  wrap.addEventListener("pointermove",(ev)=>{',
+    '    if(!dragging)return;',
+    '    const dx=ev.clientX-dragging.startX,dy=ev.clientY-dragging.startY;',
+    '    let nextL=dragging.baseLeft+dx,nextT=dragging.baseTop+dy;',
+    '    const r=dragging.el.getBoundingClientRect(),wr=wrap.getBoundingClientRect();',
+    '    if(nextL<0)nextL=0;if(nextT<0)nextT=0;',
+    '    // 높이 제한 제거 (아래로 무한정 갈 수 있게)',
+    '    // if(nextT+r.height>wr.height)nextT=wr.height-r.height; (제거됨)', 
+    '    const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:r.width,height:r.height,guides:dragging.guides});',
+    '    hideGuides();',
+    '    snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);',
+    '    snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);',
+    '    dragging.el.style.left=nextL+snap.dx+"px";',
+    '    dragging.el.style.top=nextT+snap.dy+"px";',
+    '  });',
+    '  wrap.addEventListener("pointerup",(ev)=>{',
+    '    if(!dragging)return;',
+    '    const t=dragging.el;',
+    '    hideGuides();',
+    '    t.classList.remove("wc-dragging");',
+    '    window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left),y:parseInt(t.style.top)},"*");',
+    '    setTimeout(updateWrapperHeight, 100);', // 드래그 끝난 후 높이 재계산
+    '    dragging=null;',
+    '  });',
+    '}',
     'window.onload = init;',
     '<\/script>',
     '</body></html>',
   ];
-
-  previewSrc.value = '';
-  nextTick(() => {
-    previewSrc.value = htmlParts.join('\n');
-  });
+  const newHtml = htmlParts.join('\n');
+  
+  // 기존 코드와 비교해서 다를 때만 업데이트!
+  if (previewSrc.value !== newHtml) {
+    previewSrc.value = newHtml;
+  }
 };
 
 /* ============================================================
@@ -973,12 +1147,7 @@ const selectPage = (pageId) => {
   saveCurrentWorkspaceToPage();
 
   codeCache.value = { structure: '', style: '', logic: '' };
-
-  activeMode.value = 'structure';
-
-  activeParent.value = 'structure';
-
-  activeTab.value = null;
+  selectParent('structure');
 
   loadPageById(pageId);
 };
@@ -1119,106 +1288,95 @@ const handleThemeApply = (payload) => {
   isThemeModalOpen.value = false;
 }
 onMounted(async () => {
+  // 0. 한국어 설정
   if (Ko) Blockly.setLocale(Ko);
+
+  // 1. 블록 정의
   defineCustomBlocks();
   await nextTick();
 
-  // 1. Blockly 주입
+  // ============================================================
+  // ✨ [설정] Blockly 주입 (기본 'zelos' 사용 - 뚱뚱한 블록)
+  // ============================================================
   workspace = Blockly.inject('blocklyDiv', {
-    renderer: 'zelos',
+    renderer: 'zelos',  // 👈 형이 원한 뚱뚱한 스타일!
     toolbox: toolboxXMLs.empty,
     move: { scrollbars: true, drag: true, wheel: true },
-    zoom: { controls: true, wheel: true, startScale: 0.8 },
+    zoom: { 
+      controls: true, 
+      wheel: false, // Ctrl+휠 줌을 위해 기본 휠 줌은 끔
+      startScale: 0.8 
+    },
     grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
     trashcan: true,
   });
+
+  // 2. 테마 적용 (저장된 설정 불러오기)
   let savedTheme = currentTheme;
   try {
     const loaded = localStorage.getItem('wc_theme_settings');
     if (loaded) {
       savedTheme = JSON.parse(loaded);
-      // 상태 변수도 동기화
       Object.assign(currentTheme, savedTheme); 
     }
   } catch (e) {}
 
-  // 2. DOM에 색상 적용
+  // 색상 적용
   const flyoutBg = document.querySelector('.flyout-bg-panel');
-  if (flyoutBg) flyoutBg.style.backgroundColor = savedTheme.toolboxColor; // div니까 backgroundColor
-
+  if (flyoutBg) flyoutBg.style.backgroundColor = savedTheme.toolboxColor;
   const wsBg = document.querySelector('.blocklyMainBackground');
-  if (wsBg) wsBg.style.fill = savedTheme.workspaceColor; // svg니까 fill
-
+  if (wsBg) wsBg.style.fill = savedTheme.workspaceColor;
   const blocklyDiv = document.getElementById('blocklyDiv');
   if (blocklyDiv) blocklyDiv.style.backgroundColor = savedTheme.workspaceColor;
-  // =================================================================
-  // 🔥 [핵심 수정] MetricsManager 강제 조작 (밀림 현상 원천 봉쇄)
-  // =================================================================
-  // 최신 Blockly는 MetricsManager를 통해 화면 구성을 계산합니다.
-  // 이 매니저가 "툴박스/플라이아웃 너비"를 0으로 보고하게 만들면
-  // Blockly는 공간 확보를 위해 블록을 밀지 않게 됩니다.
-  
+
+  // ============================================================
+  // ✨ [설정] UI 밀림 방지 (회색바 제거)
+  // ============================================================
   const metricsManager = workspace.getMetricsManager();
-
-  // (1) 툴박스(회색 영역) 치수 0으로 고정
-  metricsManager.getToolboxMetrics = function() {
-    return {
-      width: 0,
-      height: 0,
-      position: Blockly.TOOLBOX_AT_LEFT,
-    };
-  };
-
-  // (2) 플라이아웃(메뉴) 치수 0으로 고정
-  metricsManager.getFlyoutMetrics = function() {
-    return {
-      width: 0,
-      height: 0,
-      position: Blockly.TOOLBOX_AT_LEFT,
-    };
-  };
-
-  // (3) 닫힘 방지 설정
-  const flyout = workspace.getFlyout();
-  if (flyout) {
-    flyout.autoClose = false;
-  }
+  metricsManager.getToolboxMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
+  metricsManager.getFlyoutMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
   
-  // 변경 사항 적용
+  const flyout = workspace.getFlyout();
+  if (flyout) flyout.autoClose = false;
   workspace.resize();
-  // =================================================================
 
-  // 4. 이벤트 리스너 등록
+  // ============================================================
+  // ✨ [추가] VS Code 스타일 줌 (Ctrl + Wheel)
+  // ============================================================
+  blocklyDiv.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const direction = e.deltaY > 0 ? -1 : 1;
+      workspace.zoom(e.offsetX, e.offsetY, direction);
+    }
+  }, { passive: false });
+
+  // 3. Blockly 이벤트 리스너
   let debounceTimer = null;
   workspace.addChangeListener((e) => {
     if (e.type === Blockly.Events.SELECTED) {
-      if (!isSelectingProgrammatically)
-        handleSelection(e.newElementId, 'blockly');
+      if (!isSelectingProgrammatically) handleSelection(e.newElementId, 'blockly');
       return;
     }
     if (e.type === Blockly.Events.UI || e.type === Blockly.Events.CLICK) return;
-    if (
-      [
-        Blockly.Events.BLOCK_CHANGE,
-        Blockly.Events.BLOCK_CREATE,
-        Blockly.Events.BLOCK_DELETE,
-        Blockly.Events.BLOCK_MOVE,
-      ].includes(e.type)
-    ) {
+    
+    // 블록 변경 시 업데이트
+    if ([Blockly.Events.BLOCK_CHANGE, Blockly.Events.BLOCK_CREATE, Blockly.Events.BLOCK_DELETE, Blockly.Events.BLOCK_MOVE].includes(e.type)) {
       updateObjectListFromWorkspace();
     }
+    
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       refreshCodeAndPreview();
-      if (selectedBlockId.value)
-        handleSelection(selectedBlockId.value, 'blockly');
+      if (selectedBlockId.value) handleSelection(selectedBlockId.value, 'blockly');
     }, 500);
   });
 
-  // 5. iframe 통신
+  // 4. Iframe 통신 (드래그, 선택 등)
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data) return;
+    
     if (data.type === 'update_free_position') {
       const { blockId, x, y } = data;
       const block = workspace.getBlockById(blockId);
@@ -1228,6 +1386,7 @@ onMounted(async () => {
         refreshCodeAndPreview();
       }
     }
+    // 페이지 이동 등 나머지 메시지 처리
     if (data.type === 'NAVIGATE' || data.type === 'REDIRECT' || data.type === 'change_page_request') {
       const targetId = data.pageId;
       const targetPage = pages.value.find((p) => p.id === targetId || p.route === targetId || p.name === targetId);
@@ -1242,30 +1401,238 @@ onMounted(async () => {
     if (data.type === 'deselect_block') handleSelection(null, 'iframe');
   });
 
-  // 6. 전역 함수
+  // 5. 전역 함수 및 데이터 로드
   window.WC_GET_PAGES = () => {
     if (!pages.value || pages.value.length === 0) return [['페이지 없음', '']];
     return pages.value.map((p) => [p.name, p.id]);
   };
 
-  // 7. 데이터 로드
   const stored = loadPagesFromStorage();
   if (stored && stored.length > 0) {
     pages.value = stored;
-    const isIdValid = pages.value.some((p) => p.id === selectedPageId.value);
-    const targetId = isIdValid ? selectedPageId.value : pages.value[0].id;
-    selectedPageId.value = targetId;
-    loadPageById(targetId);
+    loadPageById(pages.value[0].id);
   } else {
     savePagesToStorage();
     loadPageById(pages.value[0].id);
   }
 
-  // 8. 리사이즈 감지
+  // 6. 리사이즈 감지 (Workspace & Iframe)
   new ResizeObserver(() => {
     if (workspace) Blockly.svgResize(workspace);
   }).observe(document.getElementById('workspace-area'));
+
+  // 🔥 반응형 PC 뷰를 위한 Iframe 크기 감지
+// onMounted 맨 마지막 부분의 iframeResizeObserver 수정
+  const iframeResizeObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      wrapperWidth.value = entry.contentRect.width;
+      // 👇 [추가] 높이도 실시간으로 잽니다!
+      wrapperHeight.value = entry.contentRect.height; 
+    }
+  });
+  const iframeWrapper = document.querySelector('.iframe-wrapper');
+  if (iframeWrapper) iframeResizeObserver.observe(iframeWrapper);
+
+  // 7. ESC 키 종료
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && isRunning.value) toggleRun();
+  });
 });
+// PC 모드일 때는 강제로 넓게 잡고 축소해서 보여줌
+const iframeStyle = computed(() => {
+  if (isPhone.value) {
+    return {
+      width: '100%',
+      height: '100%',
+      transform: 'none',
+      border: 'none'
+    };
+  } else {
+    const baseWidth = 1920; 
+    const baseHeight = 1080; // 기본 FHD 높이
+    
+    // 1. 박스 크기 가져오기
+    const currentWidth = wrapperWidth.value || 600; 
+    const currentHeight = wrapperHeight.value || 800;
+
+    // 2. 배율 계산
+    const scaleRatio = currentWidth / baseWidth; 
+
+    // 🔥 [핵심 로직] 
+    // "미리보기 박스 높이"를 "배율"로 나누면, iframe이 가져야 할 실제 높이가 나옵니다.
+    // 예: 박스 800px / 배율 0.5 = iframe은 1600px이 되어야 꽉 참.
+    // 단, 최소 1080px은 보장해야 함 (Math.max 사용)
+    const finalHeight = Math.max(baseHeight, currentHeight / scaleRatio);
+
+    return {
+      position: 'absolute',
+      transformOrigin: 'top left',
+      
+      width: `${baseWidth}px`,      
+      height: `${finalHeight}px`, // 👈 계산된 높이 적용 (빈 공간 제거됨!)
+      
+      transform: `scale(${scaleRatio})`, 
+      border: 'none',
+      backgroundColor: '#fff',
+      boxShadow: '0 0 30px rgba(0,0,0,0.1)' // (선택) 그림자 좀 더 진하게
+    };
+  }
+});
+// 📚 애니메이션 도서관 (이름: CSS코드)
+const ANIMATION_LIBRARY = {
+  // [등장]
+  fadeIn: `@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }`,
+  zoomIn: `@keyframes zoomIn { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }`,
+  flipInY: `@keyframes flipInY { from { transform: perspective(400px) rotateY(90deg); opacity: 0; } to { transform: perspective(400px) rotateY(0deg); opacity: 1; } }`,
+  backInDown: `@keyframes backInDown { 0% { transform: translateY(-1200px) scale(0.7); opacity: 0.7; } 80% { transform: translateY(0px) scale(0.7); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }`,
+  rollIn: `@keyframes rollIn { from { opacity: 0; transform: translateX(-100%) rotate(-120deg); } to { opacity: 1; transform: translateX(0px) rotate(0deg); } }`,
+  slideInDown: `@keyframes slideInDown { from { transform: translateY(-100%); visibility: visible; } to { transform: translateY(0); } }`,
+  bounceIn: `@keyframes bounceIn { 0%, 20%, 40%, 60%, 80%, 100% { transition-timing-function: cubic-bezier(0.215, 0.61, 0.355, 1); } 0% { opacity: 0; transform: scale3d(0.3, 0.3, 0.3); } 20% { transform: scale3d(1.1, 1.1, 1.1); } 40% { transform: scale3d(0.9, 0.9, 0.9); } 60% { opacity: 1; transform: scale3d(1.03, 1.03, 1.03); } 80% { transform: scale3d(0.97, 0.97, 0.97); } 100% { opacity: 1; transform: scale3d(1, 1, 1); } }`,
+  jackInTheBox: `@keyframes jackInTheBox { 0% { opacity: 0; transform: scale(0.1) rotate(30deg); transform-origin: center bottom; } 50% { transform: rotate(-10deg); } 70% { transform: rotate(3deg); } 100% { opacity: 1; transform: scale(1); } }`,
+  blurIn: `@keyframes blurIn { from { filter: blur(20px); opacity: 0; } to { filter: blur(0); opacity: 1; } }`,
+  swirlIn: `@keyframes swirlIn { from { transform: rotate(-540deg) scale(0); opacity: 0; } to { transform: rotate(0) scale(1); opacity: 1; } }`,
+  
+  // [강조]
+  pulse: `@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.05); } }`,
+  heartbeat: `@keyframes heartbeat { 0% { transform: scale(1); } 14% { transform: scale(1.1); } 28% { transform: scale(1); } 42% { transform: scale(1.1); } 70% { transform: scale(1); } }`,
+  jello: `@keyframes jello { 11.1% { transform: translate3d(0, 0, 0); } 22.2% { transform: skewX(-12.5deg) skewY(-12.5deg); } 33.3% { transform: skewX(6.25deg) skewY(6.25deg); } 44.4% { transform: skewX(-3.125deg) skewY(-3.125deg); } 55.5% { transform: skewX(1.5625deg) skewY(1.5625deg); } 66.6% { transform: skewX(-0.78125deg) skewY(-0.78125deg); } 77.7% { transform: skewX(0.390625deg) skewY(0.390625deg); } 88.8% { transform: skewX(-0.1953125deg) skewY(-0.1953125deg); } 100% { transform: translate3d(0, 0, 0); } }`,
+  floating: `@keyframes floating { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }`,
+  shake: `@keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }`,
+  tada: `@keyframes tada { 0% { transform: scale3d(1, 1, 1); } 10%, 20% { transform: scale3d(0.9, 0.9, 0.9) rotate3d(0, 0, 1, -3deg); } 30%, 50%, 70%, 90% { transform: scale3d(1.1, 1.1, 1.1) rotate3d(0, 0, 1, 3deg); } 40%, 60%, 80% { transform: scale3d(1.1, 1.1, 1.1) rotate3d(0, 0, 1, -3deg); } 100% { transform: scale3d(1, 1, 1); } }`,
+  rubberBand: `@keyframes rubberBand { 0% { transform: scale3d(1, 1, 1); } 30% { transform: scale3d(1.25, 0.75, 1); } 40% { transform: scale3d(0.75, 1.25, 1); } 50% { transform: scale3d(1.15, 0.85, 1); } 65% { transform: scale3d(0.95, 1.05, 1); } 75% { transform: scale3d(1.05, 0.95, 1); } 100% { transform: scale3d(1, 1, 1); } }`,
+  swing: `@keyframes swing { 20% { transform: rotate3d(0, 0, 1, 15deg); } 40% { transform: rotate3d(0, 0, 1, -10deg); } 60% { transform: rotate3d(0, 0, 1, 5deg); } 80% { transform: rotate3d(0, 0, 1, -5deg); } 100% { transform: rotate3d(0, 0, 1, 0deg); } }`,
+  rainbow: `@keyframes rainbow { 0% { color: #ff0000; } 33% { color: #00ff00; } 66% { color: #0000ff; } 100% { color: #ff0000; } }`,
+  flip3D: `@keyframes flip3D { from { transform: perspective(400px) rotateY(0); } to { transform: perspective(400px) rotateY(360deg); } }`,
+  swinging: `@keyframes swinging {0% { transform: rotate(0deg); transform-origin: top center; } 20% { transform: rotate(15deg); }40% { transform: rotate(-10deg); }60% { transform: rotate(5deg); }80% { transform: rotate(-5deg); }100% { transform: rotate(0deg); }}`
+};
+// 💾 [배포] 전체 프로젝트를 ZIP으로 다운로드 (화면 깨짐 방지 + 멀티 페이지)
+const downloadProject = async () => {
+  const zip = new JSZip();
+  
+  // 1. 페이지 ID와 파일명 매핑 정보 생성 (링크 이동용)
+  // 예: { "page_123": "index.html", "page_456": "login.html" }
+  const pageMap = {};
+  pages.value.forEach((p, index) => {
+    // 첫 페이지는 무조건 index.html, 나머지는 페이지이름.html
+    const filename = index === 0 ? 'index.html' : `${p.name.trim()}.html`;
+    pageMap[p.id] = filename;
+  });
+
+  // 2. 모든 페이지 순회하며 파일 생성
+  for (const page of pages.value) {
+    const filename = pageMap[page.id];
+    
+    // (1) 해당 페이지의 코드 생성
+    // 주의: 현재 워크스페이스가 아니라, 저장된 데이터(page.workspaces)를 써야 함
+    const structCode = generateCodeFromXML(page.workspaces.structure);
+    const styleCode = generateCodeFromXML(page.workspaces.style);
+    const logicCode = generateCodeFromXML(page.workspaces.logic);
+
+    // (2) 애니메이션 Tree Shaking (쓰인 것만 추출)
+    const fullSourceCode = structCode + styleCode + logicCode;
+    let usedKeyframes = '';
+    Object.keys(ANIMATION_LIBRARY).forEach(name => {
+      if (fullSourceCode.includes(name)) {
+        usedKeyframes += ANIMATION_LIBRARY[name] + '\n';
+      }
+    });
+
+    // (3) HTML 세탁 (편집용 속성 제거)
+    const cleanContainer = document.createElement('div');
+    cleanContainer.innerHTML = structCode;
+
+    const dirtyAttributes = [
+      'data-block-id', 'data-draggable', 'data-wc-block', 'data-wc-style', 
+      'contenteditable', 'spellcheck'
+    ];
+
+    cleanContainer.querySelectorAll('*').forEach(el => {
+      dirtyAttributes.forEach(attr => el.removeAttribute(attr));
+      el.classList.remove('wc-highlight', 'wc-dragging', 'selected');
+      if (el.classList.length === 0) el.removeAttribute('class');
+      
+      // ⚠️ 중요: style 속성은 절대 지우면 안 됨 (좌표값 들어있음)
+      // data-x, data-y는 지워도 됨
+      el.removeAttribute('data-x');
+      el.removeAttribute('data-y');
+    });
+
+    const cleanHtmlBody = cleanContainer.innerHTML;
+
+    // (4) 최종 HTML 조립 (깨짐 방지 CSS 포함)
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${page.name}</title>
+  <style>
+    /* 🔥 [필수] 화면 깨짐 방지용 리셋 CSS */
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
+    body { 
+      background-color: #fff; 
+      overflow-x: hidden; 
+      position: relative; /* 중요: 절대 좌표의 기준점 */
+    }
+    * { box-sizing: border-box; }
+    
+    /* 콘텐츠 래퍼 (이 안에서 absolute가 작동함) */
+    #root {
+      position: relative;
+      width: 100%;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* 사용자 정의 CSS */
+    ${styleCode}
+
+    ${usedKeyframes}
+  </style>
+</head>
+<body>
+  <div id="root">
+    ${cleanHtmlBody}
+  </div>
+
+  <script>
+    // 🚀 페이지 이동 로직 (배포용)
+    const PAGE_MAP = ${JSON.stringify(pageMap)};
+    
+    function navigateToPage(targetId) {
+      if (PAGE_MAP[targetId]) {
+        window.location.href = PAGE_MAP[targetId];
+      } else {
+        console.error('이동할 페이지를 찾을 수 없습니다:', targetId);
+      }
+    }
+    
+    // 블록리 사용 함수들 연결
+    function redirectToPage(targetId) { navigateToPage(targetId); }
+    function goToPage(targetId) { navigateToPage(targetId); }
+
+    // 사용자 로직 실행
+    ${logicCode}
+  <\/script>
+</body>
+</html>`.trim();
+
+    // ZIP에 파일 추가
+    zip.file(filename, htmlContent);
+  }
+
+  // 3. ZIP 파일 생성 및 다운로드
+  const content = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(content);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'WebCrafter_Project.zip'; // 폴더명
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
 </script>
 
 <template>
@@ -1294,13 +1661,6 @@ onMounted(async () => {
           </span>
 
           <div class="control-buttons">
-            <button
-              class="btn-ai"
-              :class="isPhone ? 'phone-hide' : ''"
-              @click="showAiModal = true"
-            >
-              ✨ AI
-            </button>
 
             <button
               class="btn-toggle"
@@ -1326,9 +1686,8 @@ onMounted(async () => {
             <button
               class="btn-deploy"
               :class="isPhone ? 'phone-hide' : ''"
-              @click="alert(generatedCode)"
-            >
-              🚀 배포
+              @click="downloadProject"  >
+              🚀 저장 (ZIP)
             </button>
           </div>
 
@@ -1344,15 +1703,17 @@ onMounted(async () => {
             {{ currentPageUrl }}
           </div>
 
-          <iframe
-            :key="`${isRunning}-${selectedPageId}-${isPhone}`"
-            id="previewFrame"
-            :srcdoc="previewSrc"
-            frameborder="0"
-            style="border: none; width: 100%; height: 100%; display: block;"
-            :sandbox="'allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox allow-scripts'"
-          >
-          </iframe>
+          <div class="iframe-wrapper">
+            <iframe
+              :key="`${isRunning}-${selectedPageId}-${isPhone}`"
+              id="previewFrame"
+              :srcdoc="previewSrc"
+              :style="iframeStyle" 
+              frameborder="0"
+              :sandbox="'allow-same-origin allow-forms allow-popups allow-modals allow-popups-to-escape-sandbox allow-scripts'"
+            >
+            </iframe>
+          </div>
         </div>
       </div>
 
@@ -1520,14 +1881,6 @@ onMounted(async () => {
       </div>
     </div>
     <!-- AI 생성 모달-->
-    <AiGenerationModal 
-      :open="showAiModal"
-      @close="showAiModal = false" 
-      @generate="handleAiBlockGeneration"
-    />
-
-    <!--삭제/취소 모달-->
-
     <ConfirmModal
       :open="confirmModal.open"
       type="warning"
@@ -1538,8 +1891,6 @@ onMounted(async () => {
       @cancel="closeDeleteConfirm"
     />
 
-    <!--단순 안내 모달-->
-
     <GlobalModal
       :open="modal.open"
       :message="modal.message"
@@ -1547,6 +1898,34 @@ onMounted(async () => {
       @confirm="closeModal"
     />
   </div>
+
+  <Teleport to="body">
+    <AiChatBot @generate="handleAiBlockGeneration" />
+  </Teleport>
+
+  <Teleport to="body">
+    <div v-if="isRunning" class="fullscreen-modal">
+      <div class="modal-header">
+        <div class="header-left">
+          <span class="preview-badge">LIVE PREVIEW</span>
+          <span class="page-info">{{ currentPageUrl }}</span>
+        </div>
+        
+        <button class="btn-close" @click="toggleRun">
+          ✕ 종료 (Esc)
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <iframe
+          id="fullscreenFrame"
+          :srcdoc="previewSrc"
+          frameborder="0"
+          class="full-iframe"
+        ></iframe>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -2501,6 +2880,90 @@ iframe {
   max-width: 100%;
 }
 
+/* ✨ [수정] Flex 제거하고 일반 박스로 변경 */
+.iframe-wrapper {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;        /* 넘치는 것 자르기 */
+  background-color: #fff;
+  position: relative;      /* 자식(iframe)의 기준점 */
+  display: block;          /* 🔥 Flex 삭제! 그냥 블록으로! */
+}
+</style>
+<style>
+/* 🚀 [중요] 모달 스타일은 scoped 밖으로 빼야 body로 이동해도 깨지지 않습니다 */
+.fullscreen-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: white;
+  z-index: 99999 !important; /* 무조건 최상단 */
+  display: flex;
+  flex-direction: column;
+}
 
+.modal-header {
+  height: 50px;
+  background: #1a1a2e;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 20px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0; /* 헤더 크기 고정 */
+}
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  color: white;
+}
+
+.preview-badge {
+  background: #ff4081;
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: bold;
+  animation: pulse 1.5s infinite;
+}
+
+.page-info {
+  font-size: 0.9rem;
+  color: #ccc;
+  font-family: monospace;
+}
+
+.btn-close {
+  background: #333;
+  color: white;
+  border: 1px solid #555;
+  padding: 6px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: 0.2s;
+}
+
+.btn-close:hover {
+  background: #d32f2f;
+}
+
+.modal-body {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+}
+
+.full-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
 </style>

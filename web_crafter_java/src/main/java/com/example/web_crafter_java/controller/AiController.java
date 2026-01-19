@@ -1,17 +1,15 @@
 package com.example.web_crafter_java.controller;
 
 import com.example.web_crafter_java.service.AiService;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.Map;
-import java.util.HashMap;
 
 @RestController
 @RequestMapping("/api/ai")
-@CrossOrigin(origins = "http://localhost:5173") 
+@CrossOrigin(origins = "http://localhost:5173") // Vue 프론트 주소 허용
 public class AiController {
 
-    // 서비스 주입
     private final AiService aiService;
 
     public AiController(AiService aiService) {
@@ -19,15 +17,12 @@ public class AiController {
     }
 
     @PostMapping("/generate")
-    public ResponseEntity<Map<String, String>> generateBlocklyXml(@RequestBody Map<String, String> request) {
-        String userPrompt = request.get("prompt");
-        
-        // 🔥 진짜 AI 호출!
-        String generatedXml = aiService.getBlocklyXml(userPrompt);
+    public Map<String, String> generate(@RequestBody Map<String, String> request) {
+        String prompt = request.get("prompt");
+        String mode = request.getOrDefault("mode", "gen"); // 기본값은 생성 모드
 
-        Map<String, String> response = new HashMap<>();
-        response.put("xml", generatedXml);
+        System.out.println("🔍 요청 모드: " + mode + ", 내용: " + prompt);
 
-        return ResponseEntity.ok(response);
+        return aiService.generateResponse(prompt, mode);
     }
 }

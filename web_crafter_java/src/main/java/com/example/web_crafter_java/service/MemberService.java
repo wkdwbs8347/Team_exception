@@ -15,12 +15,15 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import com.example.web_crafter_java.dao.MemberDao;
 import com.example.web_crafter_java.dao.RememberTokenDao;
 import com.example.web_crafter_java.dto.CodeInfo;
 import com.example.web_crafter_java.dto.Member;
 import com.example.web_crafter_java.dto.MemberRegisterReq;
+import com.example.web_crafter_java.dto.MemberUpdateReq;
 
 @Service
 public class MemberService {
@@ -203,5 +206,59 @@ public class MemberService {
 	public Member getMe(Integer memberId) {
 		return memberDao.findByIdWithoutPassword(memberId);
 	}
+
+@Transactional
+public Member updateProfile(Integer id, MemberUpdateReq req) {
+
+    Member currentMember = memberDao.findByIdWithPassword(id);
+    if (currentMember == null) {
+        throw new ResponseStatusException(
+            HttpStatus.NOT_FOUND, "사용자 정보를 찾을 수 없습니다."
+        );
+    }
+
+    // 🔐 비밀번호 변경
+    if (req.getNewPassword() != null && !req.getNewPassword().isBlank()) {
+
+        if (req.getCurrentPassword() == null || req.getCurrentPassword().isBlank()) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "현재 비밀번호를 입력해주세요."
+            );
+        }
+
+        if (!encoder.matches(req.getCurrentPassword(), currentMember.getLoginPw())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "현재 비밀번호가 일치하지 않습니다."
+            );
+        }
+
+        if (req.getCurrentPassword().equals(req.getNewPassword())) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "새 비밀번호는 기존 비밀번호와 달라야 합니다."
+            );
+        }
+
+        if (req.getNewPassword().length() < 8) {
+            throw new ResponseStatusException(
+                HttpStatus.BAD_REQUEST, "비밀번호는 최소 8자 이상이어야 합니다."
+            );
+        }
+
+        memberDao.updatePassword(id, encoder.encode(req.getNewPassword()));
+    }
+
+    // ✏️ 프로필 수정
+    String nickname = req.getNickname() != null
+            ? req.getNickname()
+            : currentMember.getNickname();
+
+    String bio = req.getBio() != null
+            ? req.getBio()
+            : currentMember.getBio();
+
+    memberDao.updateProfile(id, nickname, bio);
+
+    return memberDao.findByIdWithoutPassword(id);
+}
 
 }

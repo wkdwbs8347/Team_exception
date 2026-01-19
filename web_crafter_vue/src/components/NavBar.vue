@@ -1,14 +1,32 @@
 <script setup>
+import api from '@/api/axios';
 import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue';
 import { useAuthStore } from '@/stores/auth';
 import { Blocks } from 'lucide-vue-next';
 
+
 defineProps({ scrollY: Number });
 
 const router = useRouter();
 const auth = useAuthStore();
+
+/* ✅ 프로필 카드 클릭 → 마이페이지 이동 */
+const handleProfileCardClick = () => {
+  closeMenu();
+
+  // 비로그인 상태
+  if (!auth.isAuthed) {
+    openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
+      router.push('/login');
+    });
+    return;
+  }
+
+  // 로그인 상태
+  router.push('/mypage');
+};
 
 const isMenuOpen = ref(false);
 const toggleMenu = () => (isMenuOpen.value = !isMenuOpen.value);
@@ -55,10 +73,10 @@ const handleLogout = async () => {
   }
 };
 
-const handleIdeClick = () => {
+const handleIdeClick = async () => {
   isMenuOpen.value = false;
 
-  // 로그인 안 된 상태
+  // 1. 로그인 체크
   if (!auth.isAuthed) {
     openModal('로그인이 필요한 기능입니다.', 'warning', () => {
       router.push('/login');
@@ -66,8 +84,27 @@ const handleIdeClick = () => {
     return;
   }
 
-  // 로그인 되어 있으면 정상 이동
-  router.push('/ide');
+  try {
+    // 2. 서버에 프로젝트 생성 요청 (경로에서 /api 제거 확인 완료)
+    const res = await api.post('/projects/create'); 
+    const newWebId = res.data; 
+
+    // 3. 닉네임 가져오기
+    const nickname = auth.me?.nickname || 'guest';
+
+    // 4. 성공 시 에디터로 이동 (이동 후 함수 종료)
+    router.push(`/ide/${nickname}/${newWebId}`);
+    
+  } catch (e) {
+    console.error("프로젝트 생성 실패 상세:", e);
+    // 401 에러인 경우 세션 만료 안내
+    const errorMsg = e.response?.status === 401 
+      ? '세션이 만료되었습니다. 다시 로그인해주세요.' 
+      : (e.response?.data?.message || '프로젝트를 생성할 수 없습니다.');
+      
+    openModal(errorMsg, 'error');
+  }
+  // ❌ 함수 끝에 있던 router.push('/ide')를 삭제했습니다.
 };
 
 /* ✅ 프로필 영역 표시용 (auth.me 기반) */
@@ -138,7 +175,7 @@ const closeMenu = () => (isMenuOpen.value = false);
 
         <!-- 하단 프로필 + 오른쪽 로그인/로그아웃 버튼만 -->
         <li class="drawer-footer">
-          <div class="profile-card">
+          <div class="profile-card" @click="handleProfileCardClick">
             <div class="profile-left">
               <!-- ✅ 프로필 이미지 영역 -->
               <div class="avatar">
@@ -186,7 +223,7 @@ const closeMenu = () => (isMenuOpen.value = false);
                 v-if="!auth.isAuthed"
                 class="profile-btn"
                 type="button"
-                @click="
+                @click.stop="
                   closeMenu();
                   router.push('/login');
                 "
@@ -197,7 +234,7 @@ const closeMenu = () => (isMenuOpen.value = false);
               <button
                 v-else
                 class="profile-btn danger"
-                type="button"
+                type.stop="button"
                 @click="handleLogout"
               >
                 로그아웃
@@ -825,4 +862,41 @@ const closeMenu = () => (isMenuOpen.value = false);
   font-size: 0.74rem;
   color: rgba(224, 224, 224, 0.65);
 }
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 18px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.06),
+    rgba(255, 255, 255, 0.03)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+  cursor: pointer; /* 클릭 가능한 느낌 */
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+/* 마우스 올렸을 때 */
+.profile-card:hover {
+  transform: translateY(-2px); /* 살짝 떠오르듯 */
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(0, 212, 255, 0.08),
+    rgba(255, 255, 255, 0.04)
+  );
+}
+
+/* 클릭했을 때 */
+.profile-card:active {
+  transform: scale(0.97); /* 눌린 느낌 */
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+}
+
 </style>

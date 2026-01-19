@@ -11,6 +11,7 @@ CREATE TABLE `user` (
     , email VARCHAR(100) NOT NULL UNIQUE COMMENT '로그인 이메일'
     , loginPw VARCHAR(200) NOT NULL COMMENT '비밀번호'
     , nickname VARCHAR(50) NOT NULL UNIQUE COMMENT '유저 닉네임'
+    , bio VARCHAR(200) DEFAULT 'Welcome to my workspace!' COMMENT '상태 메시지'
     , authPath VARCHAR(100) NOT NULL DEFAULT 'local' COMMENT '인증 경로 (local, 소셜 등)'
     , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '가입일'
     , `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1: 정상 0: 탈퇴유예'
@@ -107,4 +108,5 @@ CREATE TABLE notification (
     , isRead TINYINT(1) DEFAULT 0 COMMENT '읽음 여부 (1: 읽음)'
     , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     , CONSTRAINT fk_noti_receiver FOREIGN KEY (receiverId) REFERENCES `user`(id) ON DELETE CASCADE
+
 );

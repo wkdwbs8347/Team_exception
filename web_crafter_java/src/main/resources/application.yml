@@ -27,3 +27,11 @@ server:
   port: 8080
 #  servlet:
 #    context-path: /test
+mybatis:
+  # XML 매퍼 파일들이 있는 경로를 지정합니다.
+  mapper-locations: classpath:mapper/**/*.xml
+  # DB의 snake_case(user_id)를 Java의 camelCase(userId)로 자동 변환해줍니다.
+  configuration:
+    map-underscore-to-camel-case: true
+    # 콘솔에서 실제 실행되는 SQL을 보고 싶다면 아래 설정을 켭니다.
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl

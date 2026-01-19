@@ -4,6 +4,7 @@ import LoginView from '../views/LoginView.vue'
 import RegisterView from '../views/RegisterView.vue'
 import IDEView from '../views/IDEView.vue' // <--- 추가
 import LDEView from '../views/LDEView.vue' // <--- 추가
+import MyPageView from '../views/MyPageView.vue'  
 
 
 const router = createRouter({
@@ -25,9 +26,16 @@ const router = createRouter({
       component: RegisterView
     },
     {
-      path: '/ide', // <--- 추가된 경로
+      path: '/mypage',
+      name: 'mypage',
+      component: MyPageView
+    },
+    {
+      // :nickname과 :webId 뒤에 ?를 붙여서 값이 없어도 /ide 주소로 접속 가능하게 합니다.
+      path: '/ide/:nickname?/:webId?', 
       name: 'ide',
-      component: IDEView
+      component: () => import('../views/IDEView.vue'),
+      props: true
     },
     {
       path : '/lde', // <--- 추가된 경로

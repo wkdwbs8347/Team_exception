@@ -2,17 +2,21 @@ package com.example.web_crafter_java.controller;
 
 import java.util.Map;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.example.web_crafter_java.dto.Member;
 import com.example.web_crafter_java.dto.MemberLoginReq;
 import com.example.web_crafter_java.dto.MemberRegisterReq;
+import com.example.web_crafter_java.dto.MemberUpdateReq;
 import com.example.web_crafter_java.service.MemberService;
 
 import jakarta.servlet.http.Cookie;
@@ -161,6 +165,33 @@ public class MemberController {
 
 		return ResponseEntity.ok(Map.of("message", "로그아웃 되었습니다."));
 	}
+
+	@PutMapping("/profile")
+	public ResponseEntity<?> updateProfile(@RequestBody MemberUpdateReq req, HttpSession session) {
+		Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+
+		if (memberId == null) {
+			return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+					.body(Map.of("message", "로그인이 필요합니다."));
+		}
+
+		try {
+			Member updatedMember = memberService.updateProfile(memberId, req);
+			return ResponseEntity.ok(updatedMember);
+
+		} catch (ResponseStatusException e) {
+			return ResponseEntity
+					.status(e.getStatusCode())
+					.body(Map.of("message", e.getReason()));
+
+		} catch (Exception e) {
+			e.printStackTrace();
+			return ResponseEntity
+					.status(HttpStatus.INTERNAL_SERVER_ERROR)
+					.body(Map.of("message", "수정 중 알 수 없는 오류가 발생했습니다."));
+		}
+	}
+
 
 	// 로그인체크 및 사용자 정보(필요한 값만)
 	@GetMapping("/me")

@@ -1,86 +1,86 @@
 <script setup>
 // ==============================
-// 1️⃣ 컴포넌트 import 영역
+// 1️⃣ 컴포넌트 및 라이브러리 import
 // ==============================
+import { ref, onMounted, onBeforeUnmount } from 'vue' // onUnmount를 onBeforeUnmount로 수정
+import { useRouter } from 'vue-router'
+import api from '@/api/axios' 
+import { useAuthStore } from '@/stores/auth'
 
-// 메인 히어로 섹션
+// 섹션 컴포넌트
 import HeroSection from '../components/HeroSection.vue'
-
-// 기능 소개 섹션
 import FeaturesSection from '../components/FeaturesSection.vue'
-
-// 통계 / 수치 표시 섹션
 import StatsSection from '../components/StatsSection.vue'
 
-// Vue의 반응형 상태를 만들기 위한 ref import
-import { ref } from 'vue'
-
+const router = useRouter()
+const auth = useAuthStore()
 
 // ==============================
 // 2️⃣ 반응형 상태 정의
 // ==============================
-
-// 현재 스크롤 Y 좌표를 저장할 반응형 변수
-// ref(0) → 초기값 0
-// scrollY.value 값이 바뀌면 이를 사용하는 컴포넌트도 자동 재렌더링됨
 const scrollY = ref(0)
 
+// ==============================
+// 3️⃣ 핵심 로직: 프로젝트 생성 및 페이지 이동
+// ==============================
+const handleCreateProject = async () => {
+  try {
+    // 1. 백엔드 API 호출 (ProjectController.java의 /create 실행)
+    const res = await api.post('/api/projects/create')
+    const newWebId = res.data // DB에서 생성된 자동 증가 ID
+
+    // 2. 유저 닉네임 확보 (로그인 정보가 없으면 guest로 처리)
+    const nickname = auth.member?.nickname || 'guest'
+
+    // 3. 에디터 페이지로 이동 (라우터 규칙: /ide/:nickname/:webId)
+    // 예: /ide/jjy/7
+    router.push(`/ide/${nickname}/${newWebId}`)
+    
+  } catch (error) {
+    console.error("프로젝트 생성 중 오류 발생:", error)
+    
+    // 401 에러(권한 없음) 발생 시 로그인 페이지로 유도
+    if (error.response?.status === 401) {
+      alert("로그인이 필요한 서비스입니다.")
+      router.push('/login')
+    } else {
+      alert("서버와의 통신에 실패했습니다. 다시 시도해주세요.")
+    }
+  }
+}
 
 // ==============================
-// 3️⃣ 스크롤 이벤트 핸들러 함수
+// 4️⃣ 스크롤 이벤트 관리 (에러 수정 완료)
 // ==============================
-
-// 스크롤이 발생할 때마다 실행되는 함수
 const handleScroll = () => {
-  // window.scrollY
-  // → 현재 브라우저의 세로 스크롤 위치(px)
-  // → 이 값을 scrollY에 저장
   scrollY.value = window.scrollY
 }
 
-
-// ==============================
-// 4️⃣ 브라우저 환경 체크 후 이벤트 등록
-// ==============================
-
-// Vite는 SSR(서버 사이드 렌더링)도 가능하기 때문에
-// window 객체가 존재하는지 먼저 확인
-if (typeof window !== 'undefined') {
-  // 브라우저에서 스크롤이 발생할 때마다
-  // handleScroll 함수 실행
+onMounted(() => {
   window.addEventListener('scroll', handleScroll)
-}
+})
+
+// Vue 3 표준 명칭인 onBeforeUnmount로 교체하여 SyntaxError 해결
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleScroll)
+})
 </script>
 
-
 <template>
-  <!-- ==============================
-       5️⃣ 화면 렌더링 영역
-       ============================== -->
   <div class="home">
+    <HeroSection @create="handleCreateProject" />
 
-
-    <!-- 메인 히어로 섹션 -->
-    <HeroSection />
-
-    <!-- 기능 소개 섹션 -->
     <FeaturesSection />
-
-    <!-- 통계 / 수치 섹션 -->
     <StatsSection />
-
   </div>
 </template>
 
-
 <style scoped>
-/* ==============================
-   6️⃣ 스타일 영역
-   ============================== */
-
 /* 홈 전체 레이아웃 */
 .home {
-  width: 100%;          /* 전체 가로폭 사용 */
-  overflow-x: hidden;  /* 가로 스크롤 방지 (애니메이션/배경 확장 시 필수) */
+  width: 100%;
+  overflow-x: hidden;
+  /* App.vue에서 설정한 그라데이션 배경이 보이도록 투명 설정 */
+  background: transparent; 
 }
 </style>
