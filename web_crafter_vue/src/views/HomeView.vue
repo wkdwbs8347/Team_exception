@@ -26,7 +26,7 @@ const scrollY = ref(0)
 const handleCreateProject = async () => {
   try {
     // 1. 백엔드 API 호출 (ProjectController.java의 /create 실행)
-    const res = await api.post('/api/projects/create')
+    const res = await api.post('/projects/create')
     const newWebId = res.data // DB에서 생성된 자동 증가 ID
 
     // 2. 유저 닉네임 확보 (로그인 정보가 없으면 guest로 처리)

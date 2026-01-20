@@ -24,28 +24,23 @@ public class AiService {
         this.restTemplate = new RestTemplate();
     }
 
-    // 🔥 메인 메서드: 모드에 따라 프롬프트 전략 변경
+    // [메인 메서드]
     public Map<String, String> generateResponse(String userPrompt, String mode) {
         String systemInstruction;
         
         if ("chat".equals(mode)) {
-            // [대화 모드] 친절한 멘토 역할
             systemInstruction = "당신은 Web Crafter의 친절한 코딩 멘토입니다. 사용자의 웹 개발 질문에 한국어로 친절하게 답변해주세요. 코드를 직접 짜주기보다는 개념을 설명해주세요. XML은 생성하지 마세요.";
         } else {
-            // [생성 모드] 블록 XML 생성기 역할 (파일에서 읽어옴)
             systemInstruction = getSystemPromptFromFile();
         }
 
         String finalPrompt = systemInstruction + "\n\nUser Request: " + userPrompt;
         String aiResponse = callGeminiApi(finalPrompt);
 
-        // 결과 반환 맵 생성
         Map<String, String> result = new HashMap<>();
-        
         if ("chat".equals(mode)) {
-            result.put("message", aiResponse); // 채팅 응답
+            result.put("message", aiResponse);
         } else {
-            // XML만 깔끔하게 추출
             String cleanXml = cleanXml(aiResponse);
             result.put("xml", cleanXml);
             result.put("message", "요청하신 기능을 블록으로 생성했습니다.");
@@ -54,14 +49,15 @@ public class AiService {
         return result;
     }
 
-    // Gemini API 호출 로직 (공통)
+    // Gemini API 호출 로직
     private String callGeminiApi(String prompt) {
+        // 현재 사용 중인 모델명으로 URL 설정 (gemini-1.5-flash 권장)
         String requestUrl = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + geminiProperties.getKey();
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        // Request Body 구성
+        // Request Body 구성 (Gemini 규격)
         Map<String, Object> requestBody = new HashMap<>();
         List<Map<String, Object>> contents = new ArrayList<>();
         Map<String, Object> content = new HashMap<>();
@@ -73,6 +69,12 @@ public class AiService {
         content.put("parts", parts);
         contents.add(content);
         requestBody.put("contents", contents);
+
+        // 답변 짤림 방지 및 정확도 설정
+        Map<String, Object> config = new HashMap<>();
+        config.put("maxOutputTokens", 8192);
+        config.put("temperature", 0.2);
+        requestBody.put("generationConfig", config);
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
 
@@ -96,7 +98,6 @@ public class AiService {
         return "";
     }
 
-    // 마크다운 제거
     private String cleanXml(String text) {
         if (text == null) return "";
         int start = text.indexOf("<xml");
@@ -107,7 +108,6 @@ public class AiService {
         return text.replace("```xml", "").replace("```", "").trim();
     }
 
-    // 시스템 프롬프트 파일 읽기
     private String getSystemPromptFromFile() {
         try {
             ClassPathResource resource = new ClassPathResource("system-prompt.txt");

@@ -84,27 +84,21 @@ const handleIdeClick = async () => {
     return;
   }
 
-  try {
-    // 2. 서버에 프로젝트 생성 요청 (경로에서 /api 제거 확인 완료)
+try {
+    // 1. 서버에 프로젝트 생성 요청
     const res = await api.post('/projects/create'); 
     const newWebId = res.data; 
-
-    // 3. 닉네임 가져오기
+    
+    // 2. Pinia 등에서 관리하는 내 닉네임 가져오기
     const nickname = auth.me?.nickname || 'guest';
 
-    // 4. 성공 시 에디터로 이동 (이동 후 함수 종료)
+    // 3. 고유 주소로 이동 (예: /ide/jjy/25)
     router.push(`/ide/${nickname}/${newWebId}`);
     
   } catch (e) {
-    console.error("프로젝트 생성 실패 상세:", e);
-    // 401 에러인 경우 세션 만료 안내
-    const errorMsg = e.response?.status === 401 
-      ? '세션이 만료되었습니다. 다시 로그인해주세요.' 
-      : (e.response?.data?.message || '프로젝트를 생성할 수 없습니다.');
-      
-    openModal(errorMsg, 'error');
+    // 세션 만료 시 401 에러가 발생하므로 로그인 유도
+    alert('세션이 만료되었습니다. 다시 로그인해주세요.');
   }
-  // ❌ 함수 끝에 있던 router.push('/ide')를 삭제했습니다.
 };
 
 /* ✅ 프로필 영역 표시용 (auth.me 기반) */

@@ -7,6 +7,8 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -207,6 +209,11 @@ public class MemberService {
 		return memberDao.findByIdWithoutPassword(memberId);
 	}
 
+	public Member getMyPageData(Integer memberId) {
+    // MemberDao에 추가한 통계 쿼리 메서드 호출
+    	return memberDao.getMyPageStats(memberId);
+	}
+
 @Transactional
 public Member updateProfile(Integer id, MemberUpdateReq req) {
 
@@ -260,5 +267,15 @@ public Member updateProfile(Integer id, MemberUpdateReq req) {
 
     return memberDao.findByIdWithoutPassword(id);
 }
+
+// 📂 내가 만든 프로젝트 목록 가져오기
+    public List<Map<String, Object>> getMyProjects(Integer userId) {
+        return memberDao.getMyProjects(userId);
+    }
+
+    // 🤝 초대받은 협업 프로젝트 목록 가져오기
+    public List<Map<String, Object>> getSharedProjects(Integer userId) {
+        return memberDao.getSharedProjects(userId);
+    }
 
 }

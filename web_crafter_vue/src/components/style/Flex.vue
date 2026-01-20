@@ -76,14 +76,14 @@
                   ["가로 반대 (row-reverse)", "row-reverse"],
                   ["세로 (column)", "column"],
                   ["세로 반대 (column-reverse)", "column-reverse"]
-              ]), "DIR");
+              ]), "DIRECTION");
           this.setPreviousStatement(true, "FLEX_CHILD");
           this.setNextStatement(true, "FLEX_CHILD");
           this.setColour(BLOCK_COLOR);
         }
       };
     }
-    javascriptGenerator.forBlock['style_flex_direction'] = (block) => `  flex-direction: ${block.getFieldValue('DIR')} !important;\n`;
+    javascriptGenerator.forBlock['style_flex_direction'] = (block) => `  flex-direction: ${block.getFieldValue('DIRECTION')} !important;\n`;
 
     // 2. flex-wrap (줄바꿈)
     if (!Blockly.Blocks['style_flex_wrap']) {

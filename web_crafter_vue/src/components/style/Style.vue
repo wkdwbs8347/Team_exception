@@ -133,79 +133,6 @@ export const defineBlocks = () => {
     },
   };
 
-  Blockly.Blocks['style_padding'] = {
-    init() {
-      this.appendDummyInput('MAIN')
-        .appendField('📦 안쪽 여백')
-        .appendField(new Blockly.FieldDropdown([
-          ['전체', 'padding'],
-          ['위+아래', 'vertical'],
-          ['왼쪽+오른쪽', 'horizontal'],
-          ['위', 'padding-top'],
-          ['아래', 'padding-bottom'],
-          ['왼쪽', 'padding-left'],
-          ['오른쪽', 'padding-right']
-        ], this.validate.bind(this)), 'SIDE')
-      .appendField(new Blockly.FieldTextInput('0'), 'VAL1');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-    validate(newValue) {
-    const mainInput = this.getInput('MAIN');
-    if (this.getField('TEXT_PRE')) mainInput.removeField('TEXT_PRE');
-    if (this.getField('TEXT_AND')) mainInput.removeField('TEXT_AND');
-    if (this.getField('VAL2')) mainInput.removeField('VAL2');
-
-    if (newValue === 'vertical' || newValue === 'horizontal') {
-      const labelPre = (newValue === 'vertical') ? ' 위: ' : ' 왼쪽: ';
-      const labelAnd = (newValue === 'vertical') ? ' 아래: ' : ' 오른쪽: ';
-
-      // 첫 번째 입력창(VAL1) 앞에 라벨 삽입
-      mainInput.insertFieldAt(2, new Blockly.FieldLabel(labelPre), 'TEXT_PRE');
-      // 뒤쪽에 라벨과 두 번째 입력창 추가
-      mainInput.appendField(labelAnd, 'TEXT_AND')
-                .appendField(new Blockly.FieldTextInput('0'), 'VAL2');
-    }
-      return newValue;
-    }
-  };
-
-  Blockly.Blocks['style_margin'] = {
-    init() {
-      this.appendDummyInput('MAIN')
-        .appendField('↔️ 바깥 여백')
-        .appendField(new Blockly.FieldDropdown([
-          ['전체', 'margin'],
-          ['위+아래', 'vertical'],
-          ['왼쪽+오른쪽', 'horizontal'],
-          ['위', 'margin-top'],
-          ['아래', 'margin-bottom'],
-          ['왼쪽', 'margin-left'],
-          ['오른쪽', 'margin-right']
-        ],this.validate.bind(this)), 'SIDE')
-          .appendField(new Blockly.FieldTextInput('0'), 'VAL1');
-      this.setPreviousStatement(true, 'STYLE');
-      this.setNextStatement(true, 'STYLE');
-      this.setColour('#ab47bc');
-    },
-    validate(newValue) {
-    const mainInput = this.getInput('MAIN');
-    if (this.getField('TEXT_PRE')) mainInput.removeField('TEXT_PRE');
-    if (this.getField('TEXT_AND')) mainInput.removeField('TEXT_AND');
-    if (this.getField('VAL2')) mainInput.removeField('VAL2');
-
-    if (newValue === 'vertical' || newValue === 'horizontal') {
-      const labelPre = (newValue === 'vertical') ? ' 위: ' : ' 왼쪽: ';
-      const labelAnd = (newValue === 'vertical') ? ' 아래: ' : ' 오른쪽: ';
-
-      mainInput.insertFieldAt(2, new Blockly.FieldLabel(labelPre), 'TEXT_PRE');
-      mainInput.appendField(labelAnd, 'TEXT_AND')
-                .appendField(new Blockly.FieldTextInput('0'), 'VAL2');
-    }
-      return newValue;
-    }
-  };
 
   Blockly.Blocks['style_display'] = {
     init() {
@@ -378,44 +305,48 @@ Blockly.Blocks['style_filter'] = {
   }
 };
   // --- 제너레이터 정의 시작 (defineBlocks 함수 안에 포함) ---
-
 javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
   const raw = (block.getFieldValue('SELECTOR') || 'container').trim();
   const cls = raw.replace(/^[.#]/, '');
   const state = block.getFieldValue('STATE') || '';
   const bodyCode = generator.statementToCode(block, 'BODY') || '';
 
-  let posCSS = '';
-  // 마우스로 옮긴 좌표 데이터가 있을 때
-  if (block.data && state === '') {
-    try {
-      const pos = JSON.parse(block.data);
-      if (typeof pos.x === 'number' && typeof pos.y === 'number') {
-        // ✨ [핵심 해결책]
-        // 초기 배치 시 transition: none !important를 주어 
-        // 브라우저가 위치 이동을 애니메이션으로 처리하는 것을 원천 차단합니다.
-        posCSS = `position: absolute !important;left: ${pos.x}px !important;top: ${pos.y}px !important;margin: 0 !important;transition: none !important; `;
-      }
-    } catch (e) {}
-  }
-  // 이제 사용자님이 원한 '부드러운 효과'는 bodyCode 내부에 있는 
-  // transition 설정에 의해 다시 살아나지만, 초기 배치는 이미 끝난 후이므로 튀지 않습니다.
-  return `<style>\n.${cls}${state} {\n${posCSS}${bodyCode.trim()}\n}\n<\/style>\n`;
+  // ❌ [삭제] block.data를 이용한 posCSS 생성 로직을 완전히 제거했습니다.
+  // 이제 에디터 내 블록 위치(x, y)가 실제 요소의 위치(top, left)를 결정하지 않습니다.
+
+  // bodyCode 내부의 스타일 속성만 깔끔하게 반환합니다.
+  return `<style>\n.${cls}${state} {\n  ${bodyCode.trim()}\n}\n<\/style>\n`;
 };
 
-  javascriptGenerator.forBlock['style_tag_all'] = function (block, generator) {
-    const bodyCode = generator.statementToCode(block, 'BODY') || '';
-    return `<style> \n#wrapper {\n ${bodyCode.trim()} }<\/style>\n`;
-  };
+// 1. 전체 스타일 태그 (#wrapper 대상)
+javascriptGenerator.forBlock['style_tag_all'] = function (block, generator) {
+  const bodyCode = generator.statementToCode(block, 'BODY') || '';
+  
+  if (!bodyCode.trim()) return '';
 
-  javascriptGenerator.forBlock['style_size'] = (block) => {
-    const w = block.getFieldValue('WIDTH');
-    const h = block.getFieldValue('HEIGHT');
-    let code = '';
-    if (w && w !== 'auto') code += `width: ${/^\d+$/.test(w) ? w + 'px' : w}; `;
-    if (h && h !== 'auto') code += `height: ${/^\d+$/.test(h) ? h + 'px' : h}; `;
-    return code + '\n';
-  };
+  return `<style>\n#wrapper {\n  ${bodyCode.trim()}\n}\n</style>\n`;
+};
+
+// 2. 크기(너비/높이) 설정 블록
+javascriptGenerator.forBlock['style_size'] = (block) => {
+  const w = block.getFieldValue('WIDTH');
+  const h = block.getFieldValue('HEIGHT');
+  let code = '';
+
+  // 너비 처리: 숫자만 있으면 px 추가, 단위가 있으면 그대로 유지
+  if (w && w !== 'auto') {
+    const widthValue = /^\d+(\.\d+)?$/.test(w) ? w + 'px' : w;
+    code += `width: ${widthValue} !important; `;
+  }
+
+  // 높이 처리: 숫자만 있으면 px 추가, 단위가 있으면 그대로 유지
+  if (h && h !== 'auto') {
+    const heightValue = /^\d+(\.\d+)?$/.test(h) ? h + 'px' : h;
+    code += `height: ${heightValue} !important; `;
+  }
+
+  return code + '\n';
+};
 
   javascriptGenerator.forBlock['style_list_style'] = (block) => {
     const type = block.getFieldValue('TYPE');
@@ -424,24 +355,6 @@ javascriptGenerator.forBlock['style_tag'] = function (block, generator) {
     return `list-style-type: ${type};\nlist-style-position: ${position};\n`;
   };
   javascriptGenerator.forBlock['style_border_radius'] = (block) => `border-radius: ${block.getFieldValue('RADIUS')}px;\n`;
-
-  javascriptGenerator.forBlock['style_padding'] = (block) => {
-    const side = block.getFieldValue('SIDE');
-    const v1 = block.getFieldValue('VAL1');
-    const v2 = block.getFieldValue('VAL2');
-    if (side === 'vertical') return `padding-top: ${withUnit(v1)}; padding-bottom: ${withUnit(v2)};\n`;
-    if (side === 'horizontal') return `padding-left: ${withUnit(v1)}; padding-right: ${withUnit(v2)};\n`;
-    return `${side}: ${withUnit(v1)};\n`;
-  };
-
-  javascriptGenerator.forBlock['style_margin'] = (block) => {
-    const side = block.getFieldValue('SIDE');
-    const v1 = block.getFieldValue('VAL1');
-    const v2 = block.getFieldValue('VAL2');
-    if (side === 'vertical') return `margin-top: ${withUnit(v1)}; margin-bottom: ${withUnit(v2)};\n`;
-    if (side === 'horizontal') return `margin-left: ${withUnit(v1)}; margin-right: ${withUnit(v2)};\n`;
-    return `${side}: ${withUnit(v1)};\n`;
-  };
 
   javascriptGenerator.forBlock['style_display'] = (block) => {
     const display = block.getFieldValue('DISPLAY');
@@ -543,5 +456,109 @@ javascriptGenerator.forBlock['style_filter'] = (block) => {
   const finalValue = withUnit(val, defaultUnit);
   
   return `filter: ${type}(${finalValue}) !important;\n`;
+};
+  /* =========================================================
+   [Padding] 안쪽 여백 (수정됨)
+   - 값 통일: all, vertical, horizontal, top, bottom...
+========================================================= */
+Blockly.Blocks['style_padding'] = {
+  init() {
+    this.appendDummyInput('MAIN')
+      .appendField('📦 안쪽 여백')
+      .appendField(new Blockly.FieldDropdown([
+        ['전체', 'all'],       // 🔥 수정: 'padding' -> 'all' (AI랑 맞춤)
+        ['위+아래', 'vertical'],
+        ['왼쪽+오른쪽', 'horizontal'],
+        ['위', 'top'],
+        ['아래', 'bottom'],
+        ['왼쪽', 'left'],
+        ['오른쪽', 'right']
+      ], this.validate.bind(this)), 'SIDE')
+      .appendField(new Blockly.FieldTextInput('0'), 'VAL1');
+    this.setPreviousStatement(true, 'STYLE');
+    this.setNextStatement(true, 'STYLE');
+    this.setColour('#ab47bc');
+  },
+  validate(newValue) {
+    const mainInput = this.getInput('MAIN');
+    if (this.getField('TEXT_PRE')) mainInput.removeField('TEXT_PRE');
+    if (this.getField('TEXT_AND')) mainInput.removeField('TEXT_AND');
+    if (this.getField('VAL2')) mainInput.removeField('VAL2');
+
+    if (newValue === 'vertical' || newValue === 'horizontal') {
+      const labelPre = (newValue === 'vertical') ? ' 위: ' : ' 왼쪽: ';
+      const labelAnd = (newValue === 'vertical') ? ' 아래: ' : ' 오른쪽: ';
+      mainInput.insertFieldAt(2, new Blockly.FieldLabel(labelPre), 'TEXT_PRE');
+      mainInput.appendField(labelAnd, 'TEXT_AND')
+      .appendField(new Blockly.FieldTextInput('0'), 'VAL2');
+    }
+    return newValue;
+  }
+};
+
+// 🔥 [제너레이터 수정] 올바른 CSS 속성명 생성 (padding-top 등)
+javascriptGenerator.forBlock['style_padding'] = (block) => {
+  const side = block.getFieldValue('SIDE');
+  const v1 = block.getFieldValue('VAL1');
+  const v2 = block.getFieldValue('VAL2');
+  
+  if (side === 'all') return `padding: ${withUnit(v1)} !important;\n`;
+  if (side === 'vertical') return `padding-top: ${withUnit(v1)} !important; padding-bottom: ${withUnit(v2 || v1)} !important;\n`;
+  if (side === 'horizontal') return `padding-left: ${withUnit(v1)} !important; padding-right: ${withUnit(v2 || v1)} !important;\n`;
+  
+  // top, bottom, left, right 인 경우
+  return `padding-${side}: ${withUnit(v1)} !important;\n`;
+};
+
+
+/* =========================================================
+[Margin] 바깥 여백 (수정됨)
+========================================================= */
+Blockly.Blocks['style_margin'] = {
+  init() {
+    this.appendDummyInput('MAIN')
+    .appendField('↔️ 바깥 여백')
+    .appendField(new Blockly.FieldDropdown([
+        ['전체', 'all'],       // 🔥 수정: 'margin' -> 'all'
+        ['위+아래', 'vertical'],
+        ['왼쪽+오른쪽', 'horizontal'],
+        ['위', 'top'],
+        ['아래', 'bottom'],
+        ['왼쪽', 'left'],
+        ['오른쪽', 'right']
+      ], this.validate.bind(this)), 'SIDE')
+      .appendField(new Blockly.FieldTextInput('0'), 'VAL1');
+      this.setPreviousStatement(true, 'STYLE');
+      this.setNextStatement(true, 'STYLE');
+      this.setColour('#ab47bc');
+    },
+    validate(newValue) {
+      const mainInput = this.getInput('MAIN');
+      if (this.getField('TEXT_PRE')) mainInput.removeField('TEXT_PRE');
+      if (this.getField('TEXT_AND')) mainInput.removeField('TEXT_AND');
+      if (this.getField('VAL2')) mainInput.removeField('VAL2');
+      
+      if (newValue === 'vertical' || newValue === 'horizontal') {
+        const labelPre = (newValue === 'vertical') ? ' 위: ' : ' 왼쪽: ';
+        const labelAnd = (newValue === 'vertical') ? ' 아래: ' : ' 오른쪽: ';
+        mainInput.insertFieldAt(2, new Blockly.FieldLabel(labelPre), 'TEXT_PRE');
+        mainInput.appendField(labelAnd, 'TEXT_AND')
+        .appendField(new Blockly.FieldTextInput('0'), 'VAL2');
+      }
+      return newValue;
+    }
+  };
+
+// 🔥 [제너레이터 수정]
+javascriptGenerator.forBlock['style_margin'] = (block) => {
+  const side = block.getFieldValue('SIDE');
+  const v1 = block.getFieldValue('VAL1');
+  const v2 = block.getFieldValue('VAL2');
+
+  if (side === 'all') return `margin: ${withUnit(v1)} !important;\n`;
+  if (side === 'vertical') return `margin-top: ${withUnit(v1)} !important; margin-bottom: ${withUnit(v2 || v1)} !important;\n`;
+  if (side === 'horizontal') return `margin-left: ${withUnit(v1)} !important; margin-right: ${withUnit(v2 || v1)} !important;\n`;
+  
+  return `margin-${side}: ${withUnit(v1)} !important;\n`;
 };
 </script>

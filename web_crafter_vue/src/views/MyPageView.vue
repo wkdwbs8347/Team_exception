@@ -1,8 +1,8 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth'; // Pinia/Vuex 스토어
-import axios from '@/api/axios'; // Axios 인터셉터 설정 파일
+import api from '@/api/axios'; // Axios 인터셉터 설정 파일
 import EditProfileModal from '@/modal/EditProfileModal.vue'; // 프로필 수정 모달
 
 const router = useRouter();
@@ -11,39 +11,121 @@ const authStore = useAuthStore();
 // 1. 데이터 상태 관리 (DB 컬럼 구조 반영)
 const myProjects = ref([]);    // 내가 방장인 프로젝트
 const sharedProjects = ref([]); // 초대받은 협업 프로젝트
+const currentTab = ref('ALL'); // ✅ 추가: 현재 선택된 탭 (ALL, MY, SHARED)
+const myProjectCount = ref(0);    // 숫자 표시용 변수 추가
+const sharedProjectCount = ref(0);
 const unreadNotiCount = ref(0); // 읽지 않은 알림 수
 const isEditModalOpen = ref(false); // 모달 제어를 위한 상태 변수
 
 // 2. 초기 데이터 로드 (백엔드 API 연동)
 onMounted(async () => {
   try {
-    // 백엔드 컨트롤러(/api/mypage/data)에서 데이터를 한 번에 가져옴
-    const response = await axios.get('/member/me');
-    authStore.user = response.data;
-    myProjects.value = response.data.myProjects || [];
-    sharedProjects.value = response.data.sharedProjects || [];
-    unreadNotiCount.value = response.data.unreadNotiCount || 0;
+    const response = await api.get('/member/me');
+    const data = response.data; // { member: {...}, myProjects: [...], sharedProjects: [...] }
+
+    // 1. 전체 유저 및 통계 정보를 스토어에 저장 (data.member 사용)
+    authStore.user = data.member;
+    
+    // 2. ✅ 백엔드 Map 구조에 맞춰 데이터 할당
+    // 이제 숫자는 data.member 안에 들어있습니다.
+    myProjectCount.value = data.member.myProjectCount || 0;
+    sharedProjectCount.value = data.member.sharedProjectCount || 0;
+    unreadNotiCount.value = data.member.unreadNotiCount || 0;
+
+    // 3. ✅ 프로젝트 리스트 할당 (HTML의 v-for 문과 연결됨)
+    myProjects.value = data.myProjects || [];
+    sharedProjects.value = data.sharedProjects || [];
+
+    console.log("통계 및 리스트 로드 완료:", data);
   } catch (error) {
     console.error("데이터 로드 실패:", error);
-    // 테스트용 가짜 데이터 (서버 연결 전 확인용)
-    // myProjects.value = [{ id: 1, title: '테스트 프로젝트', updateDate: new Date() }];
   }
 });
 
-// 3. 페이지 이동 및 액션 핸들러
+// MyPageView.vue 내 수정
 const enterIDE = (webId) => {
-  // 동적 라우팅 /ide/:id 로 이동
-  router.push(`/ide/${webId}`);
+  // authStore에서 현재 로그인한 유저의 닉네임을 가져옵니다.
+  const nickname = authStore.user?.nickname || 'guest';
+  
+  // ✅ 닉네임을 경로에 포함시켜 이동
+  router.push(`/ide/${nickname}/${webId}`);
 };
 
-const createNewProject = () => {
-  alert('새 프로젝트 생성 모달을 구현할 예정입니다.');
+// MyPageView.vue <script setup> 내부 수정
+
+const createNewProject = async () => {
+  try {
+    // 1. 프로젝트 생성 API 호출
+    // withCredentials: true 설정 덕분에 세션 쿠키가 함께 전송됩니다.
+    const response = await api.post('/projects/create'); 
+    const newWebId = response.data; // 서버에서 발급된 webId
+
+    // 2. 현재 사용자 닉네임 가져오기
+    const nickname = authStore.user?.nickname || 'guest';
+
+    // 3. 생성된 고유 경로로 이동 (예: /ide/test/25) [cite: 2026-01-19]
+    // 이동하면 IDE 컴포넌트에서 해당 webId를 기반으로 데이터를 불러오게 됩니다.
+    router.push(`/ide/${nickname}/${newWebId}`);
+
+  } catch (error) {
+    console.error("새 프로젝트 생성 실패:", error);
+    
+    // 세션 만료 시 로그인 페이지로 유도
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      alert("세션이 만료되었습니다. 다시 로그인해주세요.");
+      router.push('/login');
+    } else {
+      alert("프로젝트 생성 중 오류가 발생했습니다.");
+    }
+  }
 };
 
 const handleLogout = () => {
   if (confirm('로그아웃 하시겠습니까?')) {
     authStore.logout();
     router.push('/login');
+  }
+};
+
+const filteredProjects = computed(() => {
+  if (currentTab.value === 'MY') return myProjects.value;
+  if (currentTab.value === 'SHARED') return sharedProjects.value;
+  return [...myProjects.value, ...sharedProjects.value];
+});
+
+// ✅ 개별 프로젝트의 편집 상태를 추적하기 위한 함수
+const startRename = (web) => {
+  if (web.role !== 'OWNER') return;
+  web.isEditing = true;
+  web.tempTitle = web.title;
+};
+
+// MyPageView.vue <script setup> 내 saveNewName 수정
+const saveNewName = async (web) => {
+  if (!web.isEditing) return;
+  
+  // 공백 입력 방지
+  if (!web.tempTitle.trim()) {
+    web.isEditing = false;
+    return;
+  }
+
+  try {
+    // ✅ 경로를 /projects로 맞추고, 데이터 구조를 { name: ... }로 전달
+    await api.put(`/projects/${web.id}/name`, { name: web.tempTitle });
+    
+    // ✅ 성공 시에만 실제 title을 변경하고 편집 모드 종료
+    web.title = web.tempTitle;
+    web.isEditing = false;
+    
+    // 로컬 리스트 데이터도 업데이트 (필요 시)
+    const target = myProjects.value.find(p => p.id === web.id);
+    if (target) target.title = web.tempTitle;
+    
+  } catch (e) {
+    console.error("수정 실패 상세:", e.response?.data || e.message);
+    alert("이름 수정에 실패했습니다. 서버 로그를 확인해 주세요.");
+    web.isEditing = false;
   }
 };
 
@@ -89,42 +171,71 @@ const formatDate = (date) => {
       </section>
 
       <section class="stats-section">
-        <div class="stat-card">
-          <div class="stat-number">{{ myProjects.length }}</div>
+        <div class="stat-card" 
+            :class="{ active: currentTab === 'MY' }" 
+            @click="currentTab = 'MY'" 
+            style="cursor:pointer">
+          <div class="stat-number">{{ myProjectCount }}</div>
           <div class="stat-label">My Projects</div>
         </div>
-        <div class="stat-card">
-          <div class="stat-number">{{ sharedProjects.length }}</div>
+
+        <div class="stat-card" 
+            :class="{ active: currentTab === 'SHARED' }" 
+            @click="currentTab = 'SHARED'" 
+            style="cursor:pointer">
+          <div class="stat-number">{{ sharedProjectCount }}</div>
           <div class="stat-label">Collaborating</div>
         </div>
-        <div class="stat-card">
+
+        <div class="stat-card" 
+            :class="{ active: currentTab === 'ALL' }" 
+            @click="currentTab = 'ALL'" 
+            style="cursor:pointer">
           <div class="stat-number">{{ unreadNotiCount }}</div>
           <div class="stat-label">New Alerts</div>
         </div>
       </section>
 
       <section class="activity-section">
-        <h2 class="activity-title">Your Workspaces</h2>
+        <h2 class="activity-title" @click="currentTab = 'ALL'" style="cursor:pointer">
+          Your Workspaces <small v-if="currentTab !== 'ALL'">(Filtering: {{ currentTab }})</small>
+        </h2>
         
         <div class="project-grid">
-          <div v-for="web in myProjects" :key="web.id" class="activity-item project-card">
+          <div v-for="web in filteredProjects" 
+              :key="web.id" 
+              class="activity-item project-card"
+              :class="{ shared: web.role !== 'OWNER' }">
+            
             <div class="project-info">
-              <div class="activity-text">📁 {{ web.title }}</div>
-              <div class="activity-time">Owner | Last updated: {{ formatDate(web.updateDate) }}</div>
+<div class="activity-text">
+  {{ web.role === 'OWNER' ? '📁' : '🤝' }}
+  
+  <span v-if="!web.isEditing" @dblclick="startRename(web)" class="editable-title">
+    {{ web.title }}
+  </span>
+  
+  <input v-else 
+         v-model="web.tempTitle" 
+         @blur="saveNewName(web)" 
+         @keyup.enter="saveNewName(web)"
+         class="inline-edit-input" 
+         autofocus />
+</div>
+              
+              <div class="activity-time">
+                {{ web.role }} | Last updated: {{ formatDate(web.updateDate) }}
+                <span v-if="web.ownerNickname">| From @{{ web.ownerNickname }}</span>
+              </div>
             </div>
-            <button class="btn-sm" @click="enterIDE(web.id)">Open</button>
+            
+            <button class="btn-sm" @click="enterIDE(web.id)">
+              {{ web.role === 'OWNER' ? 'Open' : 'Join' }}
+            </button>
           </div>
 
-          <div v-for="web in sharedProjects" :key="web.id" class="activity-item project-card shared">
-            <div class="project-info">
-              <div class="activity-text">🤝 {{ web.title }}</div>
-              <div class="activity-time">Editor | From @{{ web.ownerNickname }}</div>
-            </div>
-            <button class="btn-sm" @click="enterIDE(web.id)">Join</button>
-          </div>
-
-          <div v-if="myProjects.length === 0 && sharedProjects.length === 0" class="empty-msg">
-            생성하거나 초대받은 프로젝트가 없습니다.
+          <div v-if="filteredProjects.length === 0" class="empty-msg">
+            표시할 프로젝트가 없습니다.
           </div>
         </div>
       </section>
@@ -402,6 +513,24 @@ main {
   background: rgba(0, 217, 255, 0.1);
   padding: 0.2rem 0.6rem;
   border-radius: 4px;
+}
+
+.editable-title {
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.editable-title:hover {
+  background: rgba(0, 217, 255, 0.1);
+}
+.inline-edit-input {
+  background: #1e293b;
+  border: 1px solid #00d9ff;
+  color: white;
+  padding: 2px 5px;
+  border-radius: 4px;
+  outline: none;
+  width: auto;
 }
 
 </style>

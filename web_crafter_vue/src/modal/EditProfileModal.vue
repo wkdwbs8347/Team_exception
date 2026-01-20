@@ -2,7 +2,7 @@
 import { reactive } from 'vue';
 import { useAuthStore } from '@/stores/auth';
 import { useRouter } from 'vue-router';
-import axios from '@/api/axios';
+import api from '@/api/axios';
 
 const props = defineProps(['user']);
 const emit = defineEmits(['close', 'updated']);
@@ -42,7 +42,7 @@ const handleUpdate = async () => {
   }
 
   try {
-    const response = await axios.put('/member/profile', editData);
+    const response = await api.put('/member/profile', editData);
     
     // Pinia 스토어 갱신
     if (authStore.user) {

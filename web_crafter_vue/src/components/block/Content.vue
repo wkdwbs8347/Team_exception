@@ -122,14 +122,20 @@ export const defineBlocks = () => {
 
   // ✅ 체크 OFF면 TEXT만
   // ✅ 체크 ON면 TEXT + (INLINE 자식 HTML) 그대로 뒤에 붙임 (구분자/공백 추가 없음)
-  const renderTextPlusInlineChildren = (block, textFieldName, fallback = '') => {
+  const renderTextPlusInlineChildren = (
+    block,
+    textFieldName,
+    fallback = ''
+  ) => {
     const text = safeText(block.getFieldValue(textFieldName) || fallback);
     const on = block.getFieldValue('INLINE_WRAP') === 'TRUE';
     if (!on) return text;
 
     if (!block.getInput('INLINE_CONTENT')) return text;
 
-    const childHtml = (getInlineChildrenHtml(block, 'INLINE_CONTENT') || '').trim();
+    const childHtml = (
+      getInlineChildrenHtml(block, 'INLINE_CONTENT') || ''
+    ).trim();
     return childHtml ? `${text}${childHtml}` : text;
   };
 
@@ -282,7 +288,9 @@ export const defineBlocks = () => {
         .appendField(new Blockly.FieldTextInput('dup_btn'), 'NAME')
         .appendField('대상:')
         .appendField(
-          new Blockly.FieldDropdown(DUPLICATE_FIELDS.map((f) => [f.label, f.key])),
+          new Blockly.FieldDropdown(
+            DUPLICATE_FIELDS.map((f) => [f.label, f.key])
+          ),
           'TARGET_KEY'
         )
         .appendField('텍스트:')
@@ -375,7 +383,10 @@ export const defineBlocks = () => {
         .appendField('이름:')
         .appendField(new Blockly.FieldTextInput('이미지_요소'), 'NAME')
         .appendField('SRC:')
-        .appendField(new Blockly.FieldTextInput('https://via.placeholder.com/150'), 'SRC');
+        .appendField(
+          new Blockly.FieldTextInput('https://via.placeholder.com/150'),
+          'SRC'
+        );
 
       this.setPreviousStatement(true, 'ELEMENT');
       this.setNextStatement(true, 'ELEMENT');
@@ -386,7 +397,9 @@ export const defineBlocks = () => {
 
   javascriptGenerator.forBlock['content_image'] = (block) => {
     const { safeName } = getBlockMeta(block, '이미지');
-    const imgSrc = safeAttr(block.getFieldValue('SRC') || 'https://via.placeholder.com/150');
+    const imgSrc = safeAttr(
+      block.getFieldValue('SRC') || 'https://via.placeholder.com/150'
+    );
     const style = getStyle('max-width:100%; height:auto;');
     const builderStyleAttr = getBuilderStyleAttr(style);
 
@@ -436,13 +449,19 @@ export const defineBlocks = () => {
     let href = (block.getFieldValue('HREF') || '#').trim();
 
     const looksInternal =
-      href.startsWith('/') || /^wc:\/\//i.test(href) || /^page:/i.test(href) || href.startsWith('#');
+      href.startsWith('/') ||
+      /^wc:\/\//i.test(href) ||
+      /^page:/i.test(href) ||
+      href.startsWith('#');
     if (looksInternal) href = 'https://example.com';
 
-    if (href && href !== '#' && !/^https?:\/\//i.test(href)) href = 'https://' + href;
+    if (href && href !== '#' && !/^https?:\/\//i.test(href))
+      href = 'https://' + href;
 
     const targetAttr = ' target="_blank" rel="noopener noreferrer"';
-    const style = getStyle('color:#1a73e8; text-decoration:underline; cursor:pointer;');
+    const style = getStyle(
+      'color:#1a73e8; text-decoration:underline; cursor:pointer;'
+    );
     const builderStyleAttr = getBuilderStyleAttr(style);
 
     return `<a class="${safeName}" href="${safeAttr(href)}"${targetAttr} data-block-id="${block.id}"${builderStyleAttr}>${inner}</a>\n`;
@@ -459,7 +478,10 @@ export const defineBlocks = () => {
         .appendField('이름:')
         .appendField(new Blockly.FieldTextInput('문단'), 'NAME')
         .appendField('내용:')
-        .appendField(new Blockly.FieldTextInput('문단 내용을 입력하세요'), 'TEXT')
+        .appendField(
+          new Blockly.FieldTextInput('문단 내용을 입력하세요'),
+          'TEXT'
+        )
         .appendField('추가')
         .appendField(new Blockly.FieldCheckbox('FALSE'), 'INLINE_WRAP');
 
@@ -568,73 +590,74 @@ export const defineBlocks = () => {
   // ✅ [Input] (서버필드(고급) 추가 + date 포함)
   // =========================================================
   Blockly.Blocks['content_input'] = {
-    init() {
-      titleWithSep(this, '⌨️ 입력(Input)');
+  init() {
+    titleWithSep(this, '⌨️ 입력(Input)');
 
-      this.appendDummyInput('MAIN_ROW')
-        .appendField('이름:')
-        .appendField(new Blockly.FieldTextInput('input'), 'NAME')
-        .appendField('type:')
-        .appendField(
-          new Blockly.FieldDropdown([
-            ['text', 'text'],
-            ['email', 'email'],
-            ['password', 'password'],
-            ['number', 'number'],
-            ['date', 'date'],
-          ]),
-          'TYPE'
-        )
-        .appendField('placeholder:')
-        .appendField(new Blockly.FieldTextInput(''), 'PLACEHOLDER')
-        .appendField('고급')
-        .appendField(new Blockly.FieldCheckbox('FALSE'), 'ADV');
+    // 1. 기본 행 (항상 보임)
+    this.appendDummyInput('MAIN_ROW')
+      .appendField('이름:')
+      .appendField(new Blockly.FieldTextInput('input'), 'NAME')
+      .appendField('type:')
+      .appendField(new Blockly.FieldDropdown([
+        ['text', 'text'], ['email', 'email'], ['password', 'password'],
+        ['number', 'number'], ['date', 'date'],
+      ]), 'TYPE')
+      .appendField('placeholder:')
+      .appendField(new Blockly.FieldTextInput(''), 'PLACEHOLDER')
+      .appendField('고급')
+      .appendField(new Blockly.FieldCheckbox('FALSE'), 'ADV');
 
-      this.setPreviousStatement(true, 'ELEMENT');
-      this.setNextStatement(true, 'ELEMENT');
-      this.setColour('#00c853');
-      this.setInputsInline(true);
+    // 2. 고급 설정 행 (미리 만들어두고 숨김 처리)
+    this.appendDummyInput('ADV_ROW')
+      .appendField('서버필드:')
+      .appendField(new Blockly.FieldDropdown([
+        ['(없음)', ''], ...SERVER_FIELDS.map((f) => [f.label, f.key]),
+      ]), 'SERVER_KEY')
+      .appendField('value:')
+      .appendField(new Blockly.FieldTextInput(''), 'VALUE')
+      .appendField('required')
+      .appendField(new Blockly.FieldCheckbox('FALSE'), 'REQUIRED')
+      .appendField('disabled')
+      .appendField(new Blockly.FieldCheckbox('FALSE'), 'DISABLED');
 
-      this.updateShape_();
-    },
+    this.setPreviousStatement(true, 'ELEMENT');
+    this.setNextStatement(true, 'ELEMENT');
+    this.setColour('#00c853');
+    this.setInputsInline(true);
 
-    saveExtraState() {
-      return { adv: this.getFieldValue('ADV') === 'TRUE' };
-    },
-    loadExtraState(state) {
-      this.setFieldValue(state?.adv ? 'TRUE' : 'FALSE', 'ADV');
-      this.updateShape_();
-    },
+    // 최초 1회 실행하여 초기 상태(숨김) 적용
+    this.updateShape_();
+  },
 
-    onchange() {
-      this.updateShape_();
-    },
+  // XML/JSON 저장 시 상태 저장
+  saveExtraState() {
+    return { adv: this.getFieldValue('ADV') === 'TRUE' };
+  },
 
-    updateShape_() {
-      const adv = this.getFieldValue('ADV') === 'TRUE';
+  // 불러올 때 상태 복원
+  loadExtraState(state) {
+    this.setFieldValue(state?.adv ? 'TRUE' : 'FALSE', 'ADV');
+    this.updateShape_();
+  },
 
-      if (adv && !this.getInput('ADV_ROW')) {
-        this.appendDummyInput('ADV_ROW')
-          .appendField('서버필드:')
-          .appendField(
-            new Blockly.FieldDropdown([
-              ['(없음)', ''],
-              ...SERVER_FIELDS.map((f) => [f.label, f.key]),
-            ]),
-            'SERVER_KEY'
-          )
-          .appendField('value:')
-          .appendField(new Blockly.FieldTextInput(''), 'VALUE')
-          .appendField('required')
-          .appendField(new Blockly.FieldCheckbox('FALSE'), 'REQUIRED')
-          .appendField('disabled')
-          .appendField(new Blockly.FieldCheckbox('FALSE'), 'DISABLED');
-      }
+  onchange() {
+    this.updateShape_();
+  },
 
-      if (!adv && this.getInput('ADV_ROW')) this.removeInput('ADV_ROW');
-      this.setInputsInline(true);
-    },
-  };
+  updateShape_() {
+    const adv = this.getFieldValue('ADV') === 'TRUE';
+    const advInput = this.getInput('ADV_ROW');
+    
+    if (advInput) {
+      // ✅ 핵심: removeInput() 대신 setVisible()을 사용하여 필드와 데이터를 보존합니다.
+      advInput.setVisible(adv);
+    }
+
+    if (this.rendered) {
+      this.render();
+    }
+  }
+};
 
   javascriptGenerator.forBlock['content_input'] = (block) => {
     const { safeName } = getBlockMeta(block, 'input');
@@ -643,14 +666,18 @@ export const defineBlocks = () => {
     const placeholder = safeAttr(block.getFieldValue('PLACEHOLDER') || '');
 
     const adv = block.getFieldValue('ADV') === 'TRUE';
-    const serverKey = adv ? (block.getFieldValue('SERVER_KEY') || '').trim() : '';
+    const serverKey = adv
+      ? (block.getFieldValue('SERVER_KEY') || '').trim()
+      : '';
 
     const value = adv ? safeAttr(block.getFieldValue('VALUE') || '') : '';
     const required = adv && block.getFieldValue('REQUIRED') === 'TRUE';
     const disabled = adv && block.getFieldValue('DISABLED') === 'TRUE';
 
     const nameAttr = serverKey ? ` name="${safeAttr(serverKey)}"` : '';
-    const fieldAttr = serverKey ? ` data-wc-field="${safeAttr(serverKey)}"` : '';
+    const fieldAttr = serverKey
+      ? ` data-wc-field="${safeAttr(serverKey)}"`
+      : '';
 
     const phAttr = placeholder ? ` placeholder="${placeholder}"` : '';
     const valueAttr = value ? ` value="${value}"` : '';
@@ -761,7 +788,13 @@ export const defineBlocks = () => {
           if (!block.workspace) return;
           Blockly.Events.setGroup(true);
           Blockly.Events.fire(
-            new Blockly.Events.BlockChange(block, 'mutation', 'optionCount', oldCount, newCount)
+            new Blockly.Events.BlockChange(
+              block,
+              'mutation',
+              'optionCount',
+              oldCount,
+              newCount
+            )
           );
         } finally {
           Blockly.Events.setGroup(false);
@@ -865,10 +898,14 @@ export const defineBlocks = () => {
       }
 
       for (let idx = 1; idx <= count; idx++) {
-        const defaultText = idx === 1 ? '옵션1' : idx === 2 ? '옵션2' : `옵션${idx}`;
+        const defaultText =
+          idx === 1 ? '옵션1' : idx === 2 ? '옵션2' : `옵션${idx}`;
         this.appendDummyInput(`OPT_${idx}`)
           .appendField('-')
-          .appendField(new Blockly.FieldTextInput(defaultText), `OPT_TEXT_${idx}`);
+          .appendField(
+            new Blockly.FieldTextInput(defaultText),
+            `OPT_TEXT_${idx}`
+          );
       }
 
       this.setInputsInline(true);
@@ -885,7 +922,8 @@ export const defineBlocks = () => {
     const disAttr = disabled ? ' disabled' : '';
 
     let optionsHtml = '';
-    if (adv && ph) optionsHtml += `<option value="" selected disabled>${ph}</option>\n`;
+    if (adv && ph)
+      optionsHtml += `<option value="" selected disabled>${ph}</option>\n`;
 
     for (let i = 1; i <= count; i++) {
       const text = safeText(block.getFieldValue(`OPT_TEXT_${i}`) || `옵션${i}`);
@@ -1033,7 +1071,9 @@ ${optionsHtml}</select>\n`;
     const group = safeAttr(block.getFieldValue('GROUP') || 'group1');
 
     const adv = block.getFieldValue('ADV') === 'TRUE';
-    const value = adv ? safeAttr(block.getFieldValue('VALUE') || 'option1') : '';
+    const value = adv
+      ? safeAttr(block.getFieldValue('VALUE') || 'option1')
+      : '';
     const checked = adv && block.getFieldValue('CHECKED') === 'TRUE';
     const disabled = adv && block.getFieldValue('DISABLED') === 'TRUE';
 

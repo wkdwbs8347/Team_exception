@@ -110,3 +110,20 @@ CREATE TABLE notification (
     , CONSTRAINT fk_noti_receiver FOREIGN KEY (receiverId) REFERENCES `user`(id) ON DELETE CASCADE
 
 );
+
+/* preview 회원가입/로그인 */
+CREATE TABLE wc_user (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  login_id VARCHAR(50) NOT NULL,
+  email VARCHAR(120) NULL,
+  nickname VARCHAR(50) NULL,
+  NAME VARCHAR(50) NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  birth DATE NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_login_id (login_id),
+  UNIQUE KEY uq_email (email),
+  UNIQUE KEY uq_nickname (nickname)
+);
+

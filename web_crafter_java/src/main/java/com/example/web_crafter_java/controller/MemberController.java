@@ -1,5 +1,7 @@
 package com.example.web_crafter_java.controller;
 
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.HttpStatus;
@@ -196,15 +198,26 @@ public class MemberController {
 	// 로그인체크 및 사용자 정보(필요한 값만)
 	@GetMapping("/me")
 	public ResponseEntity<?> me(HttpSession session) {
-		Integer memberId = (Integer) session.getAttribute("loginedMemberId");
-		if (memberId == null) {
-			return ResponseEntity.status(401)
-					.body(Map.of("message", "로그인이 필요합니다."));
-		}
+    Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+    if (memberId == null) {
+        return ResponseEntity.status(401)
+                .body(Map.of("message", "로그인이 필요합니다."));
+    }
 
-		Member member = memberService.getMe(memberId);
+    // 1. 회원 정보 및 통계 숫자 (이미 구현된 것)
+    Member member = memberService.getMyPageData(memberId);
 
-		return ResponseEntity.ok(member);
-	}
+    // 2. 프로젝트 리스트 가져오기 (Service에 메서드 추가 필요)
+    List<Map<String, Object>> myProjects = memberService.getMyProjects(memberId);
+    List<Map<String, Object>> sharedProjects = memberService.getSharedProjects(memberId);
+
+    // 3. 통합 응답 맵 구성
+    Map<String, Object> response = new HashMap<>();
+    response.put("member", member);
+    response.put("myProjects", myProjects);
+    response.put("sharedProjects", sharedProjects);
+
+    return ResponseEntity.ok(response);
+}
 
 }

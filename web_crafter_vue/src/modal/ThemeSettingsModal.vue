@@ -9,9 +9,11 @@ import {
   Monitor,
   MousePointer2
 } from 'lucide-vue-next'
+import api from '@/api/axios';
 
 const props = defineProps({
   open: Boolean,
+  project: Object,
   currentThemeId: {
     type: String,
     default: 'default'
@@ -57,29 +59,60 @@ const formData = reactive({
 })
 
 // 모달 열릴 때 props 값으로 초기화
-watch(() => props.open, (isOpen) => {
-  if (isOpen) {
-    formData.themeId = props.currentThemeId
-    activeCategory.value = 'general' // 열릴 때 기본 탭
-  }
-})
+// SettingModal.vue 수정
+watch(
+  // ✅ 열림 상태뿐만 아니라 부모가 주는 '이름' 값 자체를 감시합니다.
+  () => [props.open, props.project?.title], 
+  ([isOpen, newTitle]) => {
+    if (isOpen) {
+      formData.themeId = props.currentThemeId;
+      
+      // ✅ [중요] 데이터가 확실히 존재할 때만 이름을 업데이트합니다.
+      // 서버에서 온 진짜 이름(newTitle)이 있다면 그것을 최우선으로 적용합니다.
+      const actualName = newTitle;
+      
+      if (actualName) {
+        formData.projectName = actualName;
+      }
+      
+      activeCategory.value = 'general';
+    }
+  }, 
+  { immediate: true } // 즉시 실행하여 초기값 매핑 보장
+);
 
-// 테마 선택 핸들러
 const selectTheme = (id) => {
   formData.themeId = id
 }
 
 // 최종 저장 (모든 설정을 부모에게 전달)
-const handleSave = () => {
-  // 1. 선택된 테마 객체 찾기
-  const selectedTheme = themeList.find(t => t.id === formData.themeId)
-  
-  // 2. 부모에게 이벤트 전송 (테마 + 다른 설정들 통째로)
-  emit('apply', {
-    theme: selectedTheme,
-    settings: { ...formData } // 복사본 전달
-  })
-}
+// SettingModal.vue 내부 수정
+
+const handleSave = async () => {
+  try {
+    // 1. 프로젝트 이름 DB 저장 (마이페이지와 동일한 API)
+    // props.project.id가 부모로부터 정상적으로 넘어오고 있는지 확인하세요.
+    await api.put(`/projects/${props.project.id}/name`, { 
+      name: formData.projectName 
+    });
+
+    // 2. 테마 정보 찾기 (기존 로직)
+    const selectedTheme = themeList.find(t => t.id === formData.themeId);
+    
+    // 3. 부모(IDE 메인)에게 알려서 화면의 이름과 테마를 즉시 갱신
+    emit('apply', {
+      theme: selectedTheme,
+      settings: { ...formData }
+    });
+
+    alert("설정이 성공적으로 저장되었습니다.");
+    emit('close'); // 모달 닫기
+
+  } catch (error) {
+    console.error("저장 실패:", error);
+    alert("서버 저장 중 오류가 발생했습니다. (api가 정의되었는지 확인하세요)");
+  }
+};
 </script>
 
 <template>

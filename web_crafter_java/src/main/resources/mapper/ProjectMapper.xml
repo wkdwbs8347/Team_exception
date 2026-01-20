@@ -8,8 +8,23 @@
     </insert>
 
     <insert id="insertUserWebPage">
-        INSERT INTO userWeb_pages (webId, pageName, regDate, updateDate)
-        VALUES (#{webId}, #{pageName}, NOW(), NOW())
+        INSERT INTO userWeb_pages (
+            webId, 
+            pageName, 
+            layoutData, 
+            styleData, 
+            logicData, 
+            regDate, 
+            updateDate
+        )
+        VALUES (
+            #{webId}, 
+            'index', 
+            '{}', '{}', 
+            '{}', 
+            NOW(), 
+            NOW()
+        )
     </insert>
 
     <insert id="insertProjectMember">

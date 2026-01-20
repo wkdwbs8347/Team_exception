@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.example.web_crafter_java.dao.MemberDao">
+
+    <select id="getMyPageStats" resultType="com.example.web_crafter_java.dto.Member">
+        SELECT 
+            u.id,
+            u.nickname, 
+            u.bio,
+            /* CASE WHEN을 사용해 역할별 프로젝트 개수 합산 */
+            COUNT(DISTINCT CASE WHEN pwm.role = 'OWNER' THEN pwm.webId END) as myProjectCount,
+            COUNT(DISTINCT CASE WHEN pwm.role != 'OWNER' THEN pwm.webId END) as sharedProjectCount,
+            /* 안 읽은 알림 개수 합산 */
+            COUNT(DISTINCT CASE WHEN n.isRead = 0 THEN n.id END) as unreadNotiCount
+        FROM `user` u
+        LEFT JOIN userWeb_member pwm ON u.id = pwm.userId
+        LEFT JOIN notification n ON u.id = n.receiverId AND n.isRead = 0
+        WHERE u.id = #{userId}
+        GROUP BY u.id
+    </select>
+
+</mapper>

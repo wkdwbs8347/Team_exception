@@ -1,5 +1,8 @@
 package com.example.web_crafter_java.dao;
 
+import java.util.List;
+import java.util.Map;
+
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
@@ -81,5 +84,26 @@ void updatePassword(@Param("id") int id, @Param("newPassword") String newPasswor
     WHERE id = #{id}
 """)
 Member findByIdWithPassword(Integer id);
+
+Member getMyPageStats(@Param("userId") Integer userId);
+
+// MemberDao.java 내부에 추가
+@Select("""
+    SELECT id, title, updateDate, 'OWNER' as role
+    FROM userWeb 
+    WHERE userId = #{userId} 
+    ORDER BY updateDate DESC
+""")
+List<Map<String, Object>> getMyProjects(@Param("userId") Integer userId);
+
+@Select("""
+    SELECT w.id, w.title, w.updateDate, m.role, u.nickname as ownerNickname
+    FROM userWeb w
+    JOIN userWeb_member m ON w.id = m.webId
+    JOIN `user` u ON w.userId = u.id
+    WHERE m.userId = #{userId} AND m.role != 'OWNER'
+    ORDER BY w.updateDate DESC
+""")
+List<Map<String, Object>> getSharedProjects(@Param("userId") Integer userId);
 
 }
