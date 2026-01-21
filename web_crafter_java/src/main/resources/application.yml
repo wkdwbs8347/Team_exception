@@ -35,3 +35,6 @@ mybatis:
     map-underscore-to-camel-case: true
     # 콘솔에서 실제 실행되는 SQL을 보고 싶다면 아래 설정을 켭니다.
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+gemini:
+    api:
+      key: ${GEMINI_API_KEY:default-key}

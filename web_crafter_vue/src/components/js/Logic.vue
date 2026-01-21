@@ -53,6 +53,16 @@ export const toolbox = `
 `
 
 /* =====================
+   문자열 이스케이프 (single quote)
+===================== */
+const escapeJsStringSingleQuote = (s) =>
+  String(s ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+
+/* =====================
    블록 정의 및 생성기
 ===================== */
 export const defineBlocks = () => {
@@ -173,7 +183,9 @@ export const defineBlocks = () => {
   /* 🔢 숫자 */
   Blockly.Blocks['value_number'] = {
     init() {
-      this.appendDummyInput().appendField('🔢').appendField(new Blockly.FieldNumber(0), 'NUM')
+      this.appendDummyInput()
+        .appendField('🔢 숫자')
+        .appendField(new Blockly.FieldNumber(0), 'NUM')
       this.setOutput(true, null)
       this.setColour('#4ca454')
     },
@@ -187,7 +199,7 @@ export const defineBlocks = () => {
   Blockly.Blocks['value_text'] = {
     init() {
       this.appendDummyInput()
-        .appendField('📝')
+        .appendField('📝문자')
         .appendField(new Blockly.FieldTextInput('텍스트'), 'TEXT')
       this.setOutput(true, null)
       this.setColour('#4ca454')
@@ -195,7 +207,7 @@ export const defineBlocks = () => {
   }
 
   javascriptGenerator.forBlock['value_text'] = (block) => {
-    const v = block.getFieldValue('TEXT') || ''
+    const v = escapeJsStringSingleQuote(block.getFieldValue('TEXT') || '')
     return [`'${v}'`, javascriptGenerator.ORDER_ATOMIC]
   }
 
@@ -223,10 +235,11 @@ export const defineBlocks = () => {
 
   /* =====================================================
      ✅ 폼 값 가져오기 (드롭다운 + 커스텀)
+     - ✅ IIFE 금지: 런타임 함수 호출만 반환
   ===================================================== */
   Blockly.Blocks['form_value'] = {
     init() {
-      const options = SERVER_FIELDS.map((f) => [f.label, f.key])
+      const options = SERVER_FIELDS.map((f) => [f.label, String(f.key)])
       options.push(['직접입력...', '__custom__'])
 
       this.appendDummyInput()
@@ -267,49 +280,16 @@ export const defineBlocks = () => {
   }
 
   javascriptGenerator.forBlock['form_value'] = (block) => {
-    const key = block.getFieldValue('FIELD_KEY') || 'email'
+    const key = (block.getFieldValue('FIELD_KEY') || 'email').toString()
     const custom = (block.getFieldValue('FIELD_CUSTOM') || '').trim()
     const field = key === '__custom__' ? custom : key
-    const fieldSafe = String(field || '').replace(/"/g, '\\"')
+    const fieldSafe = String(field || '').trim()
 
     if (!fieldSafe) return ["''", javascriptGenerator.ORDER_ATOMIC]
 
+    // ✅ 안전: JSON.stringify로 문자열 리터럴 만들기
     return [
-      `(function(){
-  try{
-    var btn = window.__WC_LAST_EVENT_TARGET__ || null;
-
-    // 1) auth runtime 있으면 우선 사용
-    var form = null;
-    if(window.wcAuthFindForm){
-      form = window.wcAuthFindForm(btn);
-    }
-
-    // 2) fallback: closest('form')
-    if(!form && btn && btn.closest){
-      form = btn.closest('form');
-    }
-
-    // 3) 그래도 없으면 document에서 첫 form
-    if(!form){
-      form = document.querySelector('form');
-    }
-    if(!form) return '';
-
-    var el = form.querySelector('[name="${fieldSafe}"]');
-    if(!el) return '';
-
-    if(typeof el.value !== 'undefined' && el.value !== null){
-      return String(el.value);
-    }
-
-    if(typeof el.checked !== 'undefined'){
-      return el.checked ? 'true' : 'false';
-    }
-
-    return '';
-  }catch(e){ return ''; }
-})()`,
+      `window.wcFormValue(${JSON.stringify(fieldSafe)})`,
       javascriptGenerator.ORDER_FUNCTION_CALL,
     ]
   }
@@ -338,7 +318,6 @@ export const defineBlocks = () => {
 
   /* =====================================================
      ✅ 문자열 길이
-     - text_length("abc") => 3
   ===================================================== */
   Blockly.Blocks['text_length'] = {
     init() {
@@ -359,7 +338,6 @@ export const defineBlocks = () => {
 
   /* =====================================================
      ✅ 공백 포함 여부
-     - text_has_space("a b") => true
   ===================================================== */
   Blockly.Blocks['text_has_space'] = {
     init() {
@@ -375,16 +353,12 @@ export const defineBlocks = () => {
     const t =
       javascriptGenerator.valueToCode(block, 'TEXT', javascriptGenerator.ORDER_NONE) ||
       "''"
-    return [
-      `(/\\s/.test(String(${t})))`,
-      javascriptGenerator.ORDER_FUNCTION_CALL,
-    ]
+    return [`(/\\s/.test(String(${t})))`, javascriptGenerator.ORDER_FUNCTION_CALL]
   }
 
   /* =====================================================
      ✅ 정규식 매칭
-     - text_matches_regex("abc@a.com", "^[^@]+@[^@]+\\.[^@]+$") => true
-     - flags: "i" 같은 옵션 가능(선택)
+     - ✅ IIFE 금지: 런타임 함수 호출만 반환
   ===================================================== */
   Blockly.Blocks['text_matches_regex'] = {
     init() {
@@ -409,19 +383,8 @@ export const defineBlocks = () => {
       javascriptGenerator.valueToCode(block, 'FLAGS', javascriptGenerator.ORDER_NONE) ||
       "''"
 
-    // 안전: pattern/flags가 문자열이 아닐 수도 있으니 String() 처리
     return [
-      `(function(){
-  try{
-    var _t = String(${text});
-    var _p = String(${pattern});
-    var _f = String(${flags} || '');
-    var re = new RegExp(_p, _f);
-    return re.test(_t);
-  }catch(e){
-    return false;
-  }
-})()`,
+      `window.wcTextMatchesRegex(${text}, ${pattern}, ${flags})`,
       javascriptGenerator.ORDER_FUNCTION_CALL,
     ]
   }

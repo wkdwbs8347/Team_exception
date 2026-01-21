@@ -7,11 +7,27 @@ import com.example.web_crafter_java.dto.UserWebPage;
 @Mapper
 public interface ProjectDao {
     
+/* 1. 프로젝트 메인 생성: userWeb 테이블 */
+    @Insert("""
+        INSERT INTO userWeb (userId, title, regDate, updateDate)
+        VALUES (#{userId}, #{title}, NOW(), NOW())
+    """)
+    @Options(useGeneratedKeys = true, keyProperty = "id") // 생성된 PK(id)를 다시 가져옴 [cite: 2026-01-16]
     void insertUserWeb(UserWeb userWeb);
+
+    /* 2. 초기 페이지 생성: userWeb_pages 테이블 */
+    @Insert("""
+        INSERT INTO userWeb_pages (webId, pageName, layoutData, styleData, logicData, regDate, updateDate)
+        VALUES (#{webId}, #{pageName}, #{layoutData}, #{styleData}, #{logicData}, NOW(), NOW())
+    """)
     void insertUserWebPage(UserWebPage page); 
-    void insertProjectMember(@Param("webId") Integer webId,
-                             @Param("userId") Integer userId,
-                             @Param("role") String role);
+
+    /* 3. 멤버 권한 등록: userWeb_member 테이블 */
+    @Insert("""
+        INSERT INTO userWeb_member (webId, userId, role, regDate)
+        VALUES (#{webId}, #{userId}, #{role}, NOW())
+    """)
+    void insertProjectMember(@Param("webId") Integer webId, @Param("userId") Integer userId, @Param("role") String role);
 
     @Update("""
         UPDATE userWeb 
@@ -27,28 +43,26 @@ public interface ProjectDao {
      * webId가 일치하는 데이터만 가져오기 때문에 프로젝트별 데이터 분리가 가능해집니다.
      */
     @Select("""
-        SELECT 
-            p.*, 
-            w.title AS title 
-        FROM userWeb_pages p
-        JOIN userWeb w ON p.webId = w.id
-        WHERE p.webId = #{webId} AND p.pageName = 'index'
+        SELECT *
+        FROM userWeb_pages
+        WHERE webId = #{webId}
+        AND pageName = #{pageName}
     """)
-    UserWebPage getPageData(@Param("webId") Integer webId);
+    UserWebPage getPageData( @Param("webId") Integer webId, @Param("pageName") String pageName);
 
-    /**
-     * 2. 특정 프로젝트의 페이지 데이터(블록 등) 업데이트
-     * WHERE webId 조건이 있어야 다른 프로젝트의 데이터를 덮어씌우지 않습니다.
-     */
+
+    // 이 방식이 '이름 변경'과 '다중 페이지' 대응에 최적화된 최종형입니다. [cite: 2026-01-21]
     @Update("""
         UPDATE userWeb_pages 
-        SET layoutData = #{layoutData}, 
-            styleData = #{styleData}, 
-            logicData = #{logicData}, 
+        SET layoutData = #{pageData.layoutData}, 
+            styleData = #{pageData.styleData}, 
+            logicData = #{pageData.logicData}, 
+            pageName = #{pageData.pageName},
             updateDate = NOW()
-        WHERE webId = #{webId}
+        WHERE webId = #{webId} AND pageName = #{oldPageName}
     """)
-    void updatePageData(UserWebPage page);
+    void updatePageData(
+        @Param("webId") Integer webId, @Param("oldPageName") String oldPageName, @Param("pageData") UserWebPage pageData);
 
     /**
      * 3. 프로젝트 삭제
@@ -57,4 +71,10 @@ public interface ProjectDao {
      */
     @Delete("DELETE FROM userWeb WHERE id = #{projectId}")
     void deleteProject(@Param("projectId") Integer projectId);
+
+@Insert("""
+        INSERT INTO userWeb_pages (webId, pageName, layoutData, styleData, logicData)
+        VALUES (#{webId}, #{pageName}, #{layoutData}, #{styleData}, #{logicData})
+    """)
+    void insertNewPage(UserWebPage pageData); 
 }

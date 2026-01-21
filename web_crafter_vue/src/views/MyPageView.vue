@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth'; // Pinia/Vuex 스토어
 import api from '@/api/axios'; // Axios 인터셉터 설정 파일
 import EditProfileModal from '@/modal/EditProfileModal.vue'; // 프로필 수정 모달
-
+import GlobalModal from '@/modal/GlobalModal.vue';
 const router = useRouter();
 const authStore = useAuthStore();
 
@@ -36,11 +36,15 @@ onMounted(async () => {
     myProjects.value = data.myProjects || [];
     sharedProjects.value = data.sharedProjects || [];
 
+    isLoading.value = false;
     console.log("통계 및 리스트 로드 완료:", data);
   } catch (error) {
-    console.error("데이터 로드 실패:", error);
+    if (error.response?.status === 401) {
+      alert("로그인이 필요합니다.");
+      router.push('/login'); // 로그인이 안 되어 있으면 즉시 이동
+    }
   }
-});
+})
 
 // MyPageView.vue 내 수정
 const enterIDE = (webId) => {
@@ -72,8 +76,9 @@ const createNewProject = async () => {
     
     // 세션 만료 시 로그인 페이지로 유도
     if (error.response?.status === 401 || error.response?.status === 403) {
-      alert("세션이 만료되었습니다. 다시 로그인해주세요.");
+      openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
       router.push('/login');
+    });
     } else {
       alert("프로젝트 생성 중 오류가 발생했습니다.");
     }
@@ -133,6 +138,47 @@ const saveNewName = async (web) => {
 const formatDate = (date) => {
   if (!date) return 'Just now';
   return new Date(date).toLocaleDateString();
+};
+  // ✅ 1. 드롭다운 메뉴 상태 관리 변수
+const activeMenuId = ref(null);
+
+// ✅ 2. 메뉴 토글 함수: 클릭 시 메뉴를 열거나 닫음
+const toggleMenu = (id) => {
+  activeMenuId.value = activeMenuId.value === id ? null : id;
+};
+
+// ✅ 3. 메뉴 외부 클릭 시 자동으로 닫히는 로직 등록
+onMounted(() => {
+  window.addEventListener('click', (e) => {
+    // 클릭된 요소가 메뉴 영역(.menu-container)이 아니면 메뉴를 닫음
+    if (!e.target.closest('.menu-container')) {
+      activeMenuId.value = null;
+    }
+  });
+});
+
+// ✅ 4. 프로젝트 삭제 실행 함수
+const confirmDelete = async (webId) => {
+  activeMenuId.value = null; // 메뉴를 먼저 닫음
+
+  if (!confirm("정말로 이 프로젝트를 삭제하시겠습니까?")) return;
+
+  try {
+    // 서버에 삭제 요청 (설계하신 /projects/:id 경로 사용)
+    await api.delete(`/projects/${webId}`); 
+    
+    // UI에서 해당 프로젝트 즉시 제거
+    myProjects.value = myProjects.value.filter(p => p.id !== webId);
+    
+    // 상단 통계 숫자 1 감소
+    myProjectCount.value = Math.max(0, myProjectCount.value - 1);
+    
+    alert("삭제되었습니다.");
+  } catch (error) {
+    console.error("삭제 실패:", error);
+    const msg = error.response?.data?.message || "삭제 권한이 없거나 오류가 발생했습니다.";
+    alert(msg);
+  }
 };
 </script>
 
@@ -228,6 +274,16 @@ const formatDate = (date) => {
                 <span v-if="web.ownerNickname">| From @{{ web.ownerNickname }}</span>
               </div>
             </div>
+
+            <div class="menu-container" style="position: relative; display: inline-block; margin-right: 12px;">
+              <button class="btn-more" @click.stop="toggleMenu(web.id)">⋮</button>
+              
+              <div v-if="activeMenuId === web.id" class="dropdown-menu">
+                  <button v-if="web.role === 'OWNER'" class="delete-opt" @click="confirmDelete(web.id)">
+                    Delete
+                  </button>
+              </div>
+          </div>
             
             <button class="btn-sm" @click="enterIDE(web.id)">
               {{ web.role === 'OWNER' ? 'Open' : 'Join' }}
@@ -531,6 +587,57 @@ main {
   border-radius: 4px;
   outline: none;
   width: auto;
+}
+
+/* [위치]: <style scoped> 내의 기존 코드 맨 아래에 추가 */
+
+/* 1. 프로젝트 카드 내부 정렬 */
+.project-card {
+  display: flex;
+  justify-content: space-between; /* 정보는 왼쪽, 버튼들은 오른쪽 끝 [cite: 2026-01-21] */
+  align-items: center;
+  padding: 1.2rem 1.5rem;
+}
+
+/* 2. [핵심] 정보와 버튼 사이를 벌려주는 장치 */
+.project-info {
+  flex-grow: 1; /* 이 영역이 남는 공간을 다 차지해서 버튼들을 오른쪽으로 밀어냅니다 [cite: 2026-01-21] */
+}
+
+/* 3. 점 3개 컨테이너: margin-left: auto를 지우고 간격만 설정 [cite: 2026-01-21] */
+.menu-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  margin-right: 12px; /* ⋮ 버튼과 Open 버튼 사이의 간격 [cite: 2026-01-21] */
+}
+
+/* 4. 드롭다운(Delete) 위치: 점 3개 바로 왼쪽 옆 [cite: 2026-01-21] */
+.dropdown-menu {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 15px; /* 점 3개에서 왼쪽으로 35px 이동하여 배치 [cite: 2026-01-21] */
+  background: transparent;
+  border: none;
+  z-index: 9999;
+}
+
+/* 5. Delete 버튼: Open 버튼과 동일한 크기 (Open 버튼 스타일 참고) [cite: 2026-01-21] */
+.delete-opt {
+  min-width: 70px;      /* Open 버튼과 동일한 너비 [cite: 2026-01-21] */
+  height: 38px;         /* Open 버튼과 동일한 높이 [cite: 2026-01-21] */
+  padding: 0 1.2rem;
+  border-radius: 6px;
+  background: #2d1b1b;
+  border: 1px solid #ff4d4d;
+  color: #ff4d4d !important;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 </style>

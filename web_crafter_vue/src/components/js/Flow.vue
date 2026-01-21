@@ -72,7 +72,7 @@ export const defineBlocks = () => {
   Blockly.Blocks['flow_try'] = {
     init() {
       this.appendDummyInput()
-        .appendField('🧯 try / catch / finally')
+        .appendField('🧯 예외처리')
         .appendField('에러변수')
         .appendField(new Blockly.FieldTextInput('e'), 'ERR_NAME');
 
@@ -91,7 +91,7 @@ export const defineBlocks = () => {
   // - 회원가입 검증에서 첫 번째 에러 발견 시 즉시 중단 같은 패턴에 필요
   Blockly.Blocks['flow_return'] = {
     init() {
-      this.appendDummyInput().appendField('⛔ return (중단)');
+      this.appendDummyInput().appendField('⛔ 중단');
       this.setPreviousStatement(true);
       this.setNextStatement(true);
       this.setColour('#ffab19');

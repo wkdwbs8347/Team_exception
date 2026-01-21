@@ -117,7 +117,7 @@ CREATE TABLE wc_user (
   login_id VARCHAR(50) NOT NULL,
   email VARCHAR(120) NULL,
   nickname VARCHAR(50) NULL,
-  NAME VARCHAR(50) NULL,
+  `name` VARCHAR(50) NULL,
   password_hash VARCHAR(255) NOT NULL,
   birth DATE NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -126,4 +126,3 @@ CREATE TABLE wc_user (
   UNIQUE KEY uq_email (email),
   UNIQUE KEY uq_nickname (nickname)
 );
-

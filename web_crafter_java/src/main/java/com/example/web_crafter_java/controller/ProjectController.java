@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+
 @RestController
 @RequestMapping("/api/projects")
 public class ProjectController {
@@ -54,15 +55,80 @@ public ResponseEntity<?> create(HttpSession session) {
     }
 
     @GetMapping("/{webId}/data")
-    public ResponseEntity<?> getProjectData(@PathVariable Integer webId) {
+        public ResponseEntity<?> getProjectData(
+                @PathVariable Integer webId,
+                // 1. URL 파라미터에서 pageName을 읽어옵니다. (없으면 기본값 "index")
+                @RequestParam(value = "pageName") String pageName
+        ) {
+            try {
+                // 2. 이제 정의된 pageName 변수를 서비스에 넘겨줄 수 있습니다.
+                com.example.web_crafter_java.dto.UserWebPage data = projectService.getProjectPageData(webId, pageName); 
+                return ResponseEntity.ok(data);
+            } catch (Exception e) {
+                e.printStackTrace(); 
+                return ResponseEntity.status(500).body("데이터 조회 실패");
+            }
+        }
+
+    // 🔥 [신규] 프로젝트 데이터 저장 API
+    @PutMapping("/{webId}/data")
+    public ResponseEntity<?> updateProjectData(
+            @PathVariable Integer webId,
+            @RequestParam String oldPageName,
+            @RequestBody com.example.web_crafter_java.dto.UserWebPage pageData,
+            HttpSession session) {
+        
+        Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+        if (memberId == null) {
+            return ResponseEntity.status(401).body("로그인이 필요합니다.");
+        }
+
         try {
-            // 서비스에서 null 체크가 포함된 데이터를 가져옵니다.
-            com.example.web_crafter_java.dto.UserWebPage data = projectService.getProjectPageData(webId);
-            return ResponseEntity.ok(data);
+            pageData.setWebId(webId);
+            projectService.updateProjectData(webId, oldPageName ,pageData);
+            return ResponseEntity.ok().build();
         } catch (Exception e) {
-            // 500 에러 발생 시 원인을 파악하기 위해 로그를 남깁니다.
-            e.printStackTrace(); 
-            return ResponseEntity.status(500).body("데이터 조회 실패");
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("데이터 저장 실패");
         }
     }
+
+    @DeleteMapping("/{projectId}")
+    public ResponseEntity<?> deleteProject(@PathVariable Integer projectId, HttpSession session) {
+        // 보안을 위해 세션 체크 추가 [cite: 2026-01-16]
+        
+        Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+        if (memberId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+        try {
+            // projectDao 대신 projectService를 호출합니다. [cite: 2026-01-21]
+            projectService.deleteProject(projectId, memberId); 
+            return ResponseEntity.ok().body("프로젝트가 성공적으로 삭제되었습니다.");
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body("삭제 실패: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/{webId}/pages")
+    public ResponseEntity<?> createNewPage(
+            @PathVariable Integer webId,
+            @RequestBody com.example.web_crafter_java.dto.UserWebPage pageData,
+            HttpSession session) {
+        
+        Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+        if (memberId == null) {
+            return ResponseEntity.status(401).body("로그인이 필요합니다.");
+        }
+
+        try {
+            pageData.setWebId(webId);
+            // 서비스에 새 페이지를 DB에 삽입하는 메서드를 호출합니다.
+            projectService.insertNewPage(pageData); 
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("페이지 생성 실패: " + e.getMessage());
+        }
+    }
+
 }

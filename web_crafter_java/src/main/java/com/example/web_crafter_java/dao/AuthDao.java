@@ -20,4 +20,20 @@ public interface AuthDao {
     """)
     @Options(useGeneratedKeys = true, keyProperty = "id")
     int insertUser(AuthUserRow row);
+
+    // ✅ 로그인 조회
+    @Select("""
+        SELECT
+          id,
+          login_id AS loginId,
+          email,
+          nickname,
+          name,
+          password_hash AS passwordHash,
+          birth
+        FROM wc_user
+        WHERE login_id = #{loginId}
+        LIMIT 1
+    """)
+    AuthUserRow findByLoginId(@Param("loginId") String loginId);
 }

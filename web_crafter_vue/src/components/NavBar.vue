@@ -17,12 +17,7 @@ const handleProfileCardClick = () => {
   closeMenu();
 
   // 비로그인 상태
-  if (!auth.isAuthed) {
-    openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
-      router.push('/login');
-    });
-    return;
-  }
+
 
   // 로그인 상태
   router.push('/mypage');
@@ -49,7 +44,7 @@ const closeModal = () => {
 /* 엔터키로 모달 끄기 */
 const handleKeydown = (e) => {
   if (!modal.value.open) return;
-  if (e.key === 'Enter') {
+  if (e.key === 'esc') {
     e.preventDefault();
     closeModal();
   }
@@ -73,33 +68,34 @@ const handleLogout = async () => {
   }
 };
 
-const handleIdeClick = async () => {
-  isMenuOpen.value = false;
+const createNewProject = async () => {
+  try {
+    // 1. 프로젝트 생성 API 호출
+    // withCredentials: true 설정 덕분에 세션 쿠키가 함께 전송됩니다.
+    const response = await api.post('/projects/create'); 
+    const newWebId = response.data; // 서버에서 발급된 webId
 
-  // 1. 로그인 체크
-  if (!auth.isAuthed) {
-    openModal('로그인이 필요한 기능입니다.', 'warning', () => {
+    // 2. 현재 사용자 닉네임 가져오기
+    const nickname = auth.user?.nickname || 'guest';
+
+    // 3. 생성된 고유 경로로 이동 (예: /ide/test/25) [cite: 2026-01-19]
+    // 이동하면 IDE 컴포넌트에서 해당 webId를 기반으로 데이터를 불러오게 됩니다.
+    router.push(`/ide/${nickname}/${newWebId}`);
+
+  } catch (error) {
+    console.error("새 프로젝트 생성 실패:", error);
+    
+    // 세션 만료 시 로그인 페이지로 유도
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
       router.push('/login');
     });
-    return;
-  }
-
-try {
-    // 1. 서버에 프로젝트 생성 요청
-    const res = await api.post('/projects/create'); 
-    const newWebId = res.data; 
-    
-    // 2. Pinia 등에서 관리하는 내 닉네임 가져오기
-    const nickname = auth.me?.nickname || 'guest';
-
-    // 3. 고유 주소로 이동 (예: /ide/jjy/25)
-    router.push(`/ide/${nickname}/${newWebId}`);
-    
-  } catch (e) {
-    // 세션 만료 시 401 에러가 발생하므로 로그인 유도
-    alert('세션이 만료되었습니다. 다시 로그인해주세요.');
+    } else {
+      alert("프로젝트 생성 중 오류가 발생했습니다.");
+    }
   }
 };
+
 
 /* ✅ 프로필 영역 표시용 (auth.me 기반) */
 const userName = computed(
@@ -154,15 +150,14 @@ const closeMenu = () => (isMenuOpen.value = false);
 
         <!-- 메뉴 섹션 -->
         <li class="drawer-section">
-          <RouterLink
+          <button
             class="drawer-item"
-            to="/ide"
-            @click.prevent="handleIdeClick"
+            @click.prevent="createNewProject"
           >
             <span class="drawer-dot"></span>
             <span class="drawer-text">웹 만들기</span>
             <span class="drawer-chevron">›</span>
-          </RouterLink>
+          </button>
         </li>
 
         <li class="drawer-divider"></li>

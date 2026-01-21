@@ -12,6 +12,7 @@ import org.springframework.web.client.RestTemplate;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 @Service
 public class AiService {
@@ -20,35 +21,60 @@ public class AiService {
     private final RestTemplate restTemplate;
 
     public AiService(GeminiProperties geminiProperties) {
-        this.geminiProperties = geminiProperties;
-        this.restTemplate = new RestTemplate();
-    }
+            this.geminiProperties = geminiProperties;
+            
+            // [수정] 타임아웃 설정 추가 (이거 없으면 무한 대기함)
+            SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+            factory.setConnectTimeout(5000);  // 연결 시도: 5초 지나면 에러 뱉고 끊기
+            factory.setReadTimeout(60000);    // 응답 대기: 60초 지나면 에러 뱉고 끊기 (AI는 생각하는 시간이 깁니다)
+            
+            this.restTemplate = new RestTemplate(factory);
+        }
 
     // [메인 메서드]
-    public Map<String, String> generateResponse(String userPrompt, String mode) {
-        String systemInstruction;
+    public Map<String, String> generateResponse(String userPrompt, String mode, Boolean isEditMode, Map<String, String> context) {
         
+        // 1. 시스템 프롬프트 설정
+        String systemInstruction;
         if ("chat".equals(mode)) {
-            systemInstruction = "당신은 Web Crafter의 친절한 코딩 멘토입니다. 사용자의 웹 개발 질문에 한국어로 친절하게 답변해주세요. 코드를 직접 짜주기보다는 개념을 설명해주세요. XML은 생성하지 마세요.";
+            systemInstruction = "당신은 Web Crafter의 친절한 코딩 멘토입니다. 한국어로 답변하세요.";
         } else {
             systemInstruction = getSystemPromptFromFile();
         }
 
-        String finalPrompt = systemInstruction + "\n\nUser Request: " + userPrompt;
-        String aiResponse = callGeminiApi(finalPrompt);
+        // 2. 최종 프롬프트 조립
+        StringBuilder finalPrompt = new StringBuilder();
+        finalPrompt.append(systemInstruction).append("\n\n");
 
+        // ✅ 수정 모드일 때만 기존 코드를 프롬프트에 추가
+        if (Boolean.TRUE.equals(isEditMode) && context != null) {
+            finalPrompt.append("--- [CURRENT XML CONTEXT (DO NOT REMOVE IDs)] ---\n");
+            finalPrompt.append("Structure XML: ").append(context.getOrDefault("structure", "")).append("\n");
+            finalPrompt.append("Style XML: ").append(context.getOrDefault("style", "")).append("\n");
+            finalPrompt.append("Logic XML: ").append(context.getOrDefault("logic", "")).append("\n");
+            finalPrompt.append("-----------------------------\n");
+            finalPrompt.append("위의 XML 코드를 바탕으로, 사용자의 요청('").append(userPrompt).append("')에 맞춰 수정된 XML만 출력하세요.\n");
+        } else {
+            finalPrompt.append("User Request: ").append(userPrompt);
+        }
+
+        // 3. API 호출
+        System.out.println("🚀 Gemini API 호출 중...");
+        String aiResponse = callGeminiApi(finalPrompt.toString());
+
+        // 4. 결과 반환
         Map<String, String> result = new HashMap<>();
         if ("chat".equals(mode)) {
             result.put("message", aiResponse);
         } else {
             String cleanXml = cleanXml(aiResponse);
+            System.out.println("🤖 생성된 XML 길이: " + cleanXml.length()); // 로그 확인용
             result.put("xml", cleanXml);
-            result.put("message", "요청하신 기능을 블록으로 생성했습니다.");
+            result.put("message", isEditMode ? "수정이 완료되었습니다." : "생성이 완료되었습니다.");
         }
         
         return result;
     }
-
     // Gemini API 호출 로직
     private String callGeminiApi(String prompt) {
         // 현재 사용 중인 모델명으로 URL 설정 (gemini-1.5-flash 권장)

@@ -2,6 +2,7 @@ package com.example.web_crafter_java.service;
 
 import com.example.web_crafter_java.dao.AuthDao;
 import com.example.web_crafter_java.dao.AuthUserRow;
+import com.example.web_crafter_java.dto.AuthLoginReq;
 import com.example.web_crafter_java.dto.AuthRegisterReq;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -20,23 +21,22 @@ public class AuthService {
     public void register(AuthRegisterReq req) {
         String loginId = trim(req.getLoginId());
         String password = trim(req.getPassword());
+        String confirm = trim(req.getPasswordConfirm());
 
-        if (!StringUtils.hasText(loginId)) throw new IllegalArgumentException("아이디를 입력하세요.");
-        if (!StringUtils.hasText(password)) throw new IllegalArgumentException("비밀번호를 입력하세요.");
+        if (!StringUtils.hasText(loginId)) throw new IllegalArgumentException("LOGIN_ID_REQUIRED");
+        if (!StringUtils.hasText(password)) throw new IllegalArgumentException("PASSWORD_REQUIRED");
+        if (StringUtils.hasText(confirm) && !password.equals(confirm))
+            throw new IllegalArgumentException("PASSWORD_CONFIRM_MISMATCH");
 
-        if (authDao.countByLoginId(loginId) > 0) throw new IllegalArgumentException("이미 사용 중인 아이디입니다.");
+        if (authDao.countByLoginId(loginId) > 0) throw new IllegalArgumentException("LOGIN_ID_TAKEN");
 
         String email = trim(req.getEmail());
         if (StringUtils.hasText(email) && authDao.countByEmail(email) > 0)
-            throw new IllegalArgumentException("이미 사용 중인 이메일입니다.");
+            throw new IllegalArgumentException("EMAIL_TAKEN");
 
         String nickname = trim(req.getNickname());
         if (StringUtils.hasText(nickname) && authDao.countByNickname(nickname) > 0)
-            throw new IllegalArgumentException("이미 사용 중인 닉네임입니다.");
-
-        String confirm = trim(req.getPasswordConfirm());
-        if (StringUtils.hasText(confirm) && !password.equals(confirm))
-            throw new IllegalArgumentException("비밀번호가 일치하지 않습니다.");
+            throw new IllegalArgumentException("NICKNAME_TAKEN");
 
         AuthUserRow row = new AuthUserRow();
         row.setLoginId(loginId);
@@ -46,11 +46,42 @@ public class AuthService {
         row.setPasswordHash(encoder.encode(password));
 
         String birth = trim(req.getBirth());
-        if (StringUtils.hasText(birth)) {
-            row.setBirth(LocalDate.parse(birth)); // "YYYY-MM-DD"
-        }
+        if (StringUtils.hasText(birth)) row.setBirth(LocalDate.parse(birth));
 
         authDao.insertUser(row);
+    }
+
+    public AuthUserRow login(AuthLoginReq req) {
+        String loginId = trim(req.getLoginId());
+        String password = trim(req.getPassword());
+
+        if (!StringUtils.hasText(loginId)) throw new IllegalArgumentException("LOGIN_ID_REQUIRED");
+        if (!StringUtils.hasText(password)) throw new IllegalArgumentException("PASSWORD_REQUIRED");
+
+        AuthUserRow user = authDao.findByLoginId(loginId);
+        if (user == null) throw new IllegalArgumentException("LOGIN_FAILED");
+
+        if (!encoder.matches(password, user.getPasswordHash()))
+            throw new IllegalArgumentException("LOGIN_FAILED");
+
+        // 응답용으로 비번해시 제거
+        user.setPasswordHash(null);
+        return user;
+    }
+
+    public boolean isAvailable(String field, String value) {
+        String f = trim(field);
+        String v = trim(value);
+
+        if (!StringUtils.hasText(f)) throw new IllegalArgumentException("FIELD_REQUIRED");
+        if (!StringUtils.hasText(v)) throw new IllegalArgumentException("VALUE_REQUIRED");
+
+        return switch (f) {
+            case "loginId" -> authDao.countByLoginId(v) == 0;
+            case "email" -> authDao.countByEmail(v) == 0;
+            case "nickname" -> authDao.countByNickname(v) == 0;
+            default -> throw new IllegalArgumentException("FIELD_NOT_ALLOWED");
+        };
     }
 
     private String trim(String s) {

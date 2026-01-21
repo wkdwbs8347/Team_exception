@@ -42,75 +42,88 @@ const setMode = (mode) => {
   currentMode.value = mode;
 };
 
-// 🔥 수정된 메시지 전송 로직
+// AiChatBot.vue 의 sendMessage 함수 전체
+
 const sendMessage = async () => {
+  // 1. 입력값이 없거나 로딩 중이면 중단
   if (!input.value.trim() || isLoading.value) return;
 
   const userText = input.value;
-  const editModeActive = isEditMode.value; 
-  
-  // ✅ [중요] AI에게 현재 모든 탭의 정보를 넘겨주기 위한 컨텍스트 구성
+  const editModeActive = isEditMode.value; // 현재 수정 모드 체크 여부
+
+  // ✅ [안전장치] 현재 탭들의 코드를 가져오되, 값이 없으면 빈 문자열('')로 처리
+  // props.workspaces가 부모로부터 안 넘어왔을 경우를 대비합니다.
+  const ws = props.workspaces || {};
   const currentContext = {
-    structure: props.workspaces.structure,
-    style: props.workspaces.style,
-    logic: props.workspaces.logic
+    structure: ws.structure || '',
+    style: ws.style || '',
+    logic: ws.logic || ''
   };
 
+  // 2. 화면에 사용자 메시지 표시
   messages.value.push({ id: Date.now(), role: 'user', text: userText });
   input.value = '';
   isLoading.value = true;
   scrollToBottom();
 
   try {
-    console.log(`%c🚀 [AI 요청] 모드: ${currentMode.value}, 수정: ${editModeActive}`, "color: #00d4ff; font-weight: bold;");
+    console.log(`🚀 [AI 요청] 모드: ${currentMode.value}, 수정모드: ${editModeActive}`);
+    if(editModeActive) console.log("📦 전송되는 컨텍스트:", currentContext);
 
+    // 3. 백엔드로 전송
     const response = await fetch('http://localhost:8080/api/ai/generate', { 
        method: 'POST',
        headers: { 'Content-Type': 'application/json' },
        body: JSON.stringify({ 
           prompt: userText,
-          mode: currentMode.value,
-          isEditMode: editModeActive,
-          // ✅ 수정 모드일 때만 현재 블록 정보(context)를 보냅니다.
+          mode: currentMode.value,       // "gen" or "chat"
+          isEditMode: editModeActive,    // true or false
+          // ✅ 수정 모드일 때만 컨텍스트를 보내고, 아니면 null을 명시적으로 보냄
           context: editModeActive ? currentContext : null 
        })
     });
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error?.message || `API 오류: ${response.status}`);
+      throw new Error(errorData.error?.message || `서버 오류 (${response.status})`);
     }
 
     const data = await response.json();
 
-    // 1️⃣ [대화 모드] 처리
+    // 4. 응답 처리: [대화 모드]
     if (currentMode.value === 'chat') {
-        const replyText = data.message || data.text || "답변이 없습니다.";
+        const replyText = data.message || "답변이 없습니다.";
         messages.value.push({ id: Date.now() + 1, role: 'ai', text: replyText });
         return; 
     }
 
-    // 2️⃣ [생성 모드] 처리
+    // 5. 응답 처리: [생성 모드]
     if (currentMode.value === 'gen') {
         if (data.xml && data.xml.includes('<xml')) {
-            // ✅ 부모(IDEView)에게 XML과 수정 모드 여부를 함께 전달합니다.
+            // 📝 [디버깅] 브라우저 콘솔에 AI가 만든 XML 출력
+            console.group("🤖 AI Generated XML");
+            console.log(data.xml);
+            console.groupEnd();
+
+            // ✅ 부모(IDEView)에게 XML 전달 (수정 모드 여부 포함)
             emit('generate', data.xml, editModeActive); 
 
             messages.value.push({ 
               id: Date.now() + 2,
               role: 'ai', 
-              text: data.message || `✅ ${editModeActive ? '수정' : '생성'} 작업을 완료했습니다.`
+              text: data.message || (editModeActive ? '✅ 수정이 완료되었습니다.' : '✅ 생성이 완료되었습니다.')
             });
             
+            // 작업 끝났으니 수정 모드 체크 해제
             isEditMode.value = false; 
         } else {
-            throw new Error("AI가 유효한 블록 코드를 반환하지 않았습니다.");
+            throw new Error("AI가 코드를 생성하지 못했습니다. 다시 시도해주세요.");
         }
     }
 
   } catch (e) {
     console.error("🔥 에러 발생:", e);
-    messages.value.push({ id: Date.now() + 1, role: 'ai', text: `❌ ${e.message}` });
+    messages.value.push({ id: Date.now() + 1, role: 'ai', text: `❌ 오류: ${e.message}` });
   } finally {
     isLoading.value = false;
     scrollToBottom();
