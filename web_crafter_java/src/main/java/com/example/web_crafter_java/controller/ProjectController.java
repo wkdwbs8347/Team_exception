@@ -109,26 +109,28 @@ public ResponseEntity<?> create(HttpSession session) {
         }
     }
 
-    @PostMapping("/{webId}/pages")
-    public ResponseEntity<?> createNewPage(
-            @PathVariable Integer webId,
-            @RequestBody com.example.web_crafter_java.dto.UserWebPage pageData,
-            HttpSession session) {
-        
-        Integer memberId = (Integer) session.getAttribute("loginedMemberId");
-        if (memberId == null) {
-            return ResponseEntity.status(401).body("로그인이 필요합니다.");
-        }
+    // ProjectController.java 수정
+@PostMapping("/{webId}/pages")
+public ResponseEntity<?> createNewPage(
+        @PathVariable Integer webId,
+        @RequestBody com.example.web_crafter_java.dto.UserWebPage pageData,
+        HttpSession session) {
+    
+    Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+    if (memberId == null) {
+        return ResponseEntity.status(401).body("로그인이 필요합니다.");
+    }
 
-        try {
-            pageData.setWebId(webId);
-            // 서비스에 새 페이지를 DB에 삽입하는 메서드를 호출합니다.
-            projectService.insertNewPage(pageData); 
-            return ResponseEntity.ok().build();
+   try {
+            // 서비스에서 목록 가져오기 (Service, DAO, Mapper가 준비되어 있어야 함)
+            java.util.List<com.example.web_crafter_java.dto.UserWebPage> pages = projectService.getPageList(webId);
+            
+            // 목록 반환 (프론트엔드의 allPages 변수로 들어갑니다)
+            return ResponseEntity.ok(pages);
         } catch (Exception e) {
             e.printStackTrace();
-            return ResponseEntity.status(500).body("페이지 생성 실패: " + e.getMessage());
+            return ResponseEntity.status(500).body("목록 조회 실패: " + e.getMessage());
         }
-    }
+}
 
 }

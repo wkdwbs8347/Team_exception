@@ -36,8 +36,6 @@ public interface ProjectDao {
     """)
     void updateTitle(@Param("projectId") Integer projectId, @Param("newName") String newName);
 
-    // --- ⬇️ 여기서부터 새로 추가되는 코드입니다 ⬇️ ---
-
     /**
      * 1. 특정 프로젝트의 페이지 데이터 조회
      * webId가 일치하는 데이터만 가져오기 때문에 프로젝트별 데이터 분리가 가능해집니다.
@@ -77,4 +75,20 @@ public interface ProjectDao {
         VALUES (#{webId}, #{pageName}, #{layoutData}, #{styleData}, #{logicData})
     """)
     void insertNewPage(UserWebPage pageData); 
+
+// ProjectDao.java 인터페이스 내부
+
+@Delete("""
+    DELETE FROM userWeb_pages 
+    WHERE webId = #{webId} AND pageName = #{pageName}
+""")
+void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String pageName);
+
+@Select("""
+        SELECT id, webId, pageName, route, status
+        FROM userWeb_pages
+        WHERE webId = #{webId}
+    """)
+    java.util.List<UserWebPage> selectPagesByWebId(Integer webId);
+
 }

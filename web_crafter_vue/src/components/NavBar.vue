@@ -50,8 +50,32 @@ const handleKeydown = (e) => {
   }
 };
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
+
+  // 이미 정보가 있다면 API 호출 스킵 (선택 사항)
+  // if (auth.me) return; 
+
+  try {
+    // 📡 서버에 "나 누구야?" 라고 물어봅니다.
+    const response = await api.get('/member/me');
+    const data = response.data; // { member: {...}, ... }
+
+    // 💾 받아온 정보를 Pinia 스토어의 'me'에 저장합니다.
+    // (NavBar 템플릿에서 auth.me를 쓰고 있으므로 여기에 넣어야 합니다)
+    auth.me = data.member;
+    
+    // 로그인 상태 true로 변경 (스토어 로직에 따라 다를 수 있음)
+    auth.isAuthed = true; 
+
+    console.log("NavBar: 사용자 정보 로드 완료", auth.me);
+  } catch (error) {
+    // 401 에러(비로그인)는 자연스러운 현상이므로 조용히 넘어갑니다.
+    // 로그인 안 한 사람은 guest 상태로 남습니다.
+    if (error.response?.status !== 401) {
+        console.error("사용자 정보 로드 실패:", error);
+    }
+  }
 });
 
 onBeforeUnmount(() => {
@@ -70,28 +94,23 @@ const handleLogout = async () => {
 
 const createNewProject = async () => {
   try {
-    // 1. 프로젝트 생성 API 호출
-    // withCredentials: true 설정 덕분에 세션 쿠키가 함께 전송됩니다.
     const response = await api.post('/projects/create'); 
-    const newWebId = response.data; // 서버에서 발급된 webId
+    const newWebId = response.data;
 
-    // 2. 현재 사용자 닉네임 가져오기
-    const nickname = auth.user?.nickname || 'guest';
+    // 2. ✅ 닉네임 가져오기 수정 (auth.user -> auth.me)
+    // 위 onMounted에서 auth.me에 데이터를 넣었으므로 여기서도 me를 써야 합니다.
+    const nickname = auth.me?.nickname || 'guest';
 
-    // 3. 생성된 고유 경로로 이동 (예: /ide/test/25) [cite: 2026-01-19]
-    // 이동하면 IDE 컴포넌트에서 해당 webId를 기반으로 데이터를 불러오게 됩니다.
     router.push(`/ide/${nickname}/${newWebId}`);
 
   } catch (error) {
     console.error("새 프로젝트 생성 실패:", error);
-    
-    // 세션 만료 시 로그인 페이지로 유도
     if (error.response?.status === 401 || error.response?.status === 403) {
       openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
-      router.push('/login');
-    });
+        router.push('/login');
+      });
     } else {
-      alert("프로젝트 생성 중 오류가 발생했습니다.");
+      openModal("프로젝트 생성 중 오류가 발생했습니다.", "error");
     }
   }
 };

@@ -13,8 +13,7 @@
 
  */
 import JSZip from 'jszip';
-import { ref, onMounted, nextTick, watch, computed, reactive, onUnmounted
- } from 'vue';
+import { ref, onMounted, nextTick, watch, computed, reactive, onUnmounted } from 'vue';
 
 import * as Blockly from 'blockly';
 
@@ -23,6 +22,8 @@ import { javascriptGenerator } from 'blockly/javascript';
 import * as Ko from 'blockly/msg/ko';
 
 import 'blockly/blocks';
+
+import ConfirmModal from '@/modal/ConfirmModal.vue';
 
 import GlobalModal from '@/modal/GlobalModal.vue';
 
@@ -34,6 +35,7 @@ import * as Layout from '@/components/block/Layout.vue';
 import * as Content from '@/components/block/Content.vue';
 import * as Form from '@/components/block/Form.vue';
 import * as ContentAttr from '@/components/block/ContentAttr.vue';
+import * as Component from '@/components/block/Component.vue';
 //style 관련 블록
 import * as Style from '@/components/style/Style.vue';
 import * as Responsive from '@/components/style/Responsive.vue';
@@ -138,7 +140,8 @@ const handleAiBlockGeneration = (xmlText, isEditMode = false) => {
       if (
         type.startsWith('layout_') ||
         type.startsWith('content_') ||
-        type.startsWith('form_')
+        type.startsWith('form_') ||
+        type.startsWith('component_')
       ) {
         categoryBuckets.structure.appendChild(blockNode);
       } else if (
@@ -155,39 +158,48 @@ const handleAiBlockGeneration = (xmlText, isEditMode = false) => {
     const page = pages.value.find((p) => p.id === selectedPageId.value);
     if (!page) return;
 
-    // 🔥 [에러 해결 핵심] page.workspaces가 없으면 초기화해줍니다.
     if (!page.workspaces) {
-      page.workspaces = {
-        structure: '<xml></xml>',
-        style: '<xml></xml>',
-        logic: '<xml></xml>',
-      };
+      page.workspaces = { structure: '<xml></xml>', style: '<xml></xml>', logic: '<xml></xml>' };
     }
 
-    // 2. 각 카테고리별로 독립적으로 병합 및 저장
+    // 2. 각 카테고리별로 데이터 주입
     Object.keys(categoryBuckets).forEach((key) => {
       const bucket = categoryBuckets[key];
-      if (bucket.children.length > 0) {
+      // 내용이 있거나, 수정 모드일 때 업데이트
+      if (bucket.children.length > 0 || isEditMode) {
+        let finalXml = '';
+        
         if (isEditMode) {
-          page.workspaces[key] = Blockly.Xml.domToText(bucket);
+          finalXml = Blockly.Xml.domToText(bucket);
         } else {
-          // 기존 XML 데이터가 유효한지 한 번 더 확인 후 병합
           const existingXml = page.workspaces[key] || '<xml></xml>';
-          page.workspaces[key] = mergeBlockXmlByCategory(
-            existingXml,
-            bucket,
-            key
-          );
+          finalXml = mergeBlockXmlByCategory(existingXml, bucket, key);
         }
+
+        // (1) XML 데이터 업데이트 (여기에 새 블록이 들어감)
+        page.workspaces[key] = finalXml;
+
+        // 🔥 [필수 수정] 기존 JSON 캐시를 날려버려야 XML을 읽습니다!
+        if (key === 'structure') page.layoutData = null;
+        if (key === 'style') page.styleData = null;
+        if (key === 'logic') page.logicData = null;
       }
     });
 
-    savePagesToStorage();
+    // ❌ [삭제됨] savePagesToStorage(); 
+    // -> 여기서 저장하면 빈 화면이 덮어써지므로 절대 호출 금지!
 
     // 3. UI 갱신 (지우지 않고 필요한 데이터만 다시 로드)
     nextTick(() => {
       loadPageById(page.id);
+      
+      // ✅ 로드가 끝난 뒤(1초 후) 안전하게 저장
+      setTimeout(() => {
+          saveCurrentWorkspaceToPage();
+          console.log("✅ XML 적용 후 데이터 동기화 완료");
+      }, 1000);
     });
+
   } catch (e) {
     console.error('분류 중 오류:', e);
   }
@@ -370,7 +382,7 @@ const categories = {
   content: Content.category,
   contentAttr: ContentAttr.category,
   form: Form.category,
-  component: { label: '컴포넌트', color: '#5c6bc0', icon: '🧱' },
+  component: Component.category,
 
   style: Style.category,
   color: Color.category,
@@ -414,6 +426,7 @@ const saveToServerAsJson = async () => {
     
     // 1. 현재 워크스페이스의 블록 상태를 JSON으로 추출 [cite: 2026-01-21]
     const state = Blockly.serialization.workspaces.save(workspace);
+    console.log("현재 워크스페이스 상태:", state);
     const jsonState = JSON.stringify(state);
 
     // 2. 현재 탭(activeMode)에 맞춰 page 객체의 해당 필드를 먼저 업데이트 [cite: 2026-01-21]
@@ -498,24 +511,6 @@ const loadWorkspaceState = (pageId) => {
   }
 };
 
-const loadPagesFromStorage = () => {
-  try {
-    const rawData = localStorage.getItem(`wc_pages_${props.webId}`);
-    if (!rawData) return []; // null 대신 빈 배열 추천
-
-    const parsed = JSON.parse(rawData);
-    
-    // 프로젝트 제목 복구
-    if (parsed.settings?.projectName) {
-      projectTitle.value = parsed.settings.projectName;
-    }
-
-    return parsed.pages ?? parsed;
-  } catch (e) {
-    console.error('로컬 로드 실패:', e);
-    return [];
-  }
-};
 const savePagesToStorage = () => {
   try {
     const dataToSave = {
@@ -577,7 +572,7 @@ const setupInitialPages = async () => {
       // 서버에 POST 요청을 보내 실제 DB 행(Row) 생성
       await api.post(`/projects/${props.webId}/pages`, {
         pageName: name,
-        layoutData: '<xml xmlns="https://developers.google.com/blockly/xml"></xml>',
+        layoutData: '{}',
         styleData: '{}',
         logicData: '{}'
       });
@@ -589,58 +584,46 @@ const setupInitialPages = async () => {
 };
 
 const addPage = async () => {
-  // 1. 새 페이지 이름 생성
   const newName = `Page ${pages.value.length + 1}`;
   
   try {
-    // 2. 서버 DB에 새 페이지 전용 행(Row) 생성 요청
-    // 💡 이 요청이 성공해야 나중에 '저장' 버튼을 눌렀을 때 DB가 데이터를 받아줍니다.
-    await api.post(`/projects/${props.webId}/pages`, {
+    // 🚀 서버 응답(response)을 변수에 담습니다. [cite: 2026-01-22]
+    const response = await api.post(`/projects/${props.webId}/pages`, {
       pageName: newName,
       layoutData: '{}', 
       styleData: '{}',
       logicData: '{}'
     });
 
-    // 3. 서버 생성 성공 시에만 로컬 리스트에 추가
-    const page = createPage(newName);
+    // 🚀 서버가 생성해서 보내준 진짜 ID를 추출합니다. [cite: 2026-01-21]
+    // (서버가 ResponseEntity.ok(webId)처럼 ID만 보낸다면 response.data가 곧 ID입니다.)
+    const realDbId = response.data.id || response.data; 
+
+    // 🚀 서버 ID를 사용해 페이지 객체를 만듭니다. [cite: 2026-01-22]
+    const page = {
+      ...createPage(newName),
+      id: realDbId 
+    };
+
     pages.value.push(page);
-    
-    // 4. 로컬 스토리지 동기화 및 페이지 이동
     savePagesToStorage();
     selectPage(page.id); 
     
-    console.log(`🚀 [${newName}] DB 행 생성 및 페이지 추가 완료`);
+    console.log(`✅ 서버 ID(${realDbId})로 페이지 생성 및 동기화 완료`);
   } catch (e) {
     console.error("페이지 생성 실패:", e);
-    alert("서버에 페이지를 생성하지 못했습니다. 다시 시도해 주세요.");
   }
 };
 
-const deletePageNow = (pageId) => {
-  if (pages.value.length <= 1) {
-    openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
-    return;
-  }
-
-  const idx = pages.value.findIndex((p) => p.id === pageId);
-
-  if (idx !== -1) {
-    pages.value.splice(idx, 1);
-
-    savePagesToStorage();
-
-    if (selectedPageId.value === pageId) loadPageById(pages.value[0].id);
-  }
-};
-
+// 1. 삭제 버튼 클릭 시 실행되는 함수
 const deletePage = (pageId) => {
+  // 💡 [첫 번째 체크] 모달을 띄우기 전에 미리 확인 [cite: 2026-01-21]
   if (pages.value.length <= 1) {
     openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
     return;
   }
 
-  openDeleteConfirm(pageId);
+  openDeleteConfirm(pageId); // 삭제 확인창 띄움 [cite: 2026-01-21]
 };
 
 const openDeleteConfirm = (pageId) => {
@@ -651,14 +634,50 @@ const openDeleteConfirm = (pageId) => {
   };
 };
 
+// 2. 삭제 확인 모달에서 '확인'을 눌렀을 때 실행되는 실제 삭제 함수
+const deletePageNow = async (pageId) => {
+  // 💡 [두 번째 체크] 실제로 지우기 직전에 한 번 더 확인 (보안 및 오류 방지) [cite: 2026-01-21]
+  if (pages.value.length <= 1) {
+    openModal('최소 하나의 페이지는 있어야 합니다.', 'info');
+    return;
+  }
+
+  const idx = pages.value.findIndex((p) => p.id === pageId);
+  if (idx === -1) return;
+
+  const targetPage = pages.value[idx];
+  // 이름 변경 대응을 위해 oldName 사용 [cite: 2026-01-21]
+  const targetName = targetPage.oldName || targetPage.name;
+
+  try {
+    // 🔥 [서버 DB 삭제] 백엔드에 삭제 요청 [cite: 2026-01-21]
+    await api.delete(`/projects/${props.webId}/pages?pageName=${encodeURIComponent(targetName)}`);
+
+    // ✅ 서버 삭제 성공 시에만 화면 리스트에서 제거 [cite: 2026-01-21]
+    pages.value.splice(idx, 1);
+    savePagesToStorage(); // 로컬 스토리지 동기화 [cite: 2026-01-21]
+
+    if (selectedPageId.value === pageId) {
+      loadPageById(pages.value[0].id);
+    }
+    
+    console.log(`✅ [${targetName}] 페이지가 성공적으로 삭제되었습니다.`);
+  } catch (e) {
+    console.error("❌ 삭제 실패:", e);
+    alert("서버 연결 오류로 삭제에 실패했습니다.");
+  }
+};
+
 const closeDeleteConfirm = () => {
-  confirmModal.value = { ...confirmModal.value, open: false };
+  confirmModal.value.open = false;
 };
 
 const confirmDeletePage = () => {
   const pageId = confirmModal.value.payload?.pageId;
+  if (!pageId) return;
+
+  deletePageNow(pageId);
   closeDeleteConfirm();
-  if (pageId) deletePageNow(pageId);
 };
 
 const openModal = (message, type = 'info', onConfirm = null) => {
@@ -841,9 +860,9 @@ const selectObjectFromList = (objId) => {
   workspace?.centerOnBlock(objId);
 };
 
-watch(
-  objects,
-  (newObjects) => {
+watch(objects,(newObjects) => {
+    if (isRestoring || !newObjects || newObjects.length === 0) return;
+
     if (Interaction.updateObjectList) Interaction.updateObjectList(newObjects);
   },
   { deep: true }
@@ -1301,6 +1320,7 @@ const defineCustomBlocks = () => {
   Layout.defineBlocks();
   Content.defineBlocks();
   ContentAttr.defineBlocks();
+  Component.defineBlocks();
   Style.defineBlocks();
   Color.defineBlocks();
   Flex.defineBlocks();
@@ -1316,6 +1336,7 @@ const toolboxXMLs = {
   layout: Layout.toolbox,
   content: Content.toolbox,
   contentAttr: ContentAttr.toolbox,
+  component: Component.toolbox,
   style: Style.toolbox,
   color: Color.toolbox,
   flex: Flex.toolbox,
@@ -1668,15 +1689,7 @@ onMounted(async () => {
   const wsBg = document.querySelector('.blocklyMainBackground');
   if (wsBg) wsBg.style.fill = savedTheme.workspaceColor;
   const blocklyDiv = document.getElementById('blocklyDiv');
-  if (blocklyDiv) blocklyDiv.style.backgroundColor = savedTheme.workspaceColor;
-  const loadedPages = loadPagesFromStorage(); 
   
-  if (loadedPages && loadedPages.length > 0) {
-    pages.value = loadedPages;
-    selectedPageId.value = loadedPages[0].id; // 첫 페이지 선택
-  } else {
-    return;
-  }
 
   // 2. 블록 화면 그리기 (중요!)
   // Blockly 주입(inject)이 완료된 후 실행해야 함
@@ -1841,84 +1854,124 @@ onMounted(async () => {
   // 1. 프로젝트 제목을 별도로 관리할 변수 선언 (이미 있다면 확인)
   // IDEView.vue 내 initProjectData 함수 수정
 
-  const initProjectData = async () => {
-    // ✅ [핵심] 서버/로컬 어떤 데이터가 오든 page.workspaces 3종은 무조건 보장
-    const normalizePage = (p = {}) => ({
-      id: p.id,
-      name: p.name || p.pageName || 'Home',
-      route: p.route || '/home',
-      aliases: Array.isArray(p.aliases) ? p.aliases : [],
-      status: p.status || 'DRAFT',
-      workspaces: p.workspaces || {
-        structure: '<xml></xml>',
-        style: '<xml></xml>',
-        logic: '<xml></xml>',
-      },
-    });
+
+// ✅ 서버에서 프로젝트 데이터를 불러와 초기화하는 함수 (수정됨)
+// ✅ 서버에서 프로젝트 데이터(목록 + 현재페이지)를 불러와 초기화하는 함수
+const initProjectData = async () => {
+  
+  // 1. JSON 파싱 헬퍼 함수
+  const safeParse = (data) => {
+    if (!data) return null;
+    if (typeof data === 'object') return data; 
+    const trimmed = String(data).trim();
+    if (trimmed.startsWith('<')) return trimmed; // XML은 그대로
 
     try {
-      const response = await api.get(`/projects/${props.webId}/data`);
-
-      // ✅ 1) 서버 데이터가 정상적으로 존재할 때
-      if (response?.data && response.data.title) {
-        const loaded = response.data;
-
-        // 프로젝트명(상단 타이틀)
-        projectTitle.value = loaded.title;
-
-        // ✅ 서버가 pages 배열을 주는 경우 (멀티 페이지)
-        if (Array.isArray(loaded.pages) && loaded.pages.length > 0) {
-          pages.value = loaded.pages.map(normalizePage);
-        }
-        // ✅ 서버가 단일 페이지 구조만 주는 경우
-        else {
-          pages.value = [
-            normalizePage({
-              id: loaded.id || props.webId, // 서버 id 있으면 우선, 없으면 webId
-              name: loaded.pageName || loaded.name || 'Home',
-              route: loaded.route || '/home',
-              aliases: loaded.aliases,
-              status: loaded.status,
-              workspaces: loaded.workspaces, // 이게 없을 수 있으니 normalize가 채워줌
-            }),
-          ];
-        }
-
-        // ✅ 서버 성공 시: 로컬도 덮어써서 예전 로컬 데이터를 밀어버림
-        savePagesToStorage();
-
-        // ✅ 첫 페이지 로드
-        if (pages.value[0]?.id) {
-          await loadPageById(pages.value[0].id);
-        }
-        return; // 🚀 중요: 서버 성공이면 여기서 끝 (아래 로컬 복구 로직 실행 금지)
-      }
+      return JSON.parse(data); // JSON 문자열 -> 객체 변환
     } catch (e) {
-      console.error('서버 데이터 로드 실패, 로컬 데이터를 시도합니다.', e);
-    }
-
-    // ✅ 2) 서버 로드 실패 시에만: 로컬스토리지 복구
-    const stored = loadPagesFromStorage();
-    if (stored) {
-      // 저장 구조가 {settings, pages} 일 수도 있고 pages 배열일 수도 있어서 둘 다 처리
-      const storedPages = Array.isArray(stored) ? stored : stored.pages;
-
-      if (Array.isArray(storedPages) && storedPages.length > 0) {
-        pages.value = storedPages.map(normalizePage);
-
-        // 프로젝트명 복원 (settings 우선)
-        if (!projectTitle.value) {
-          // loadPagesFromStorage에서 projectTitle.value를 세팅해줬다면 그대로 두고,
-          // 없다면 pages[0] 이름이라도 쓰기
-          projectTitle.value = pages.value[0]?.name || 'Untitled Project';
-        }
-
-        if (pages.value[0]?.id) {
-          await loadPageById(pages.value[0].id);
-        }
-      }
+      // console.warn("⚠️ JSON 파싱 실패:", data);
+      return data; 
     }
   };
+
+  // 2. 데이터 정규화 함수
+  const normalizePage = (p = {}) => {
+    const parsedLayout = safeParse(p.layoutData);
+    const parsedStyle = safeParse(p.styleData);
+    const parsedLogic = safeParse(p.logicData);
+
+    return {
+      id: p.id,
+      name: p.name || p.pageName || 'Home',
+      route: p.route || getUniqueRoute(p.name || 'Home'),
+      oldName: p.name || p.pageName, // 이름 변경 추적용
+      status: p.status || 'DRAFT',
+      
+      layoutData: parsedLayout, 
+      styleData: parsedStyle,
+      logicData: parsedLogic,
+
+      workspaces: {
+        structure: parsedLayout || '<xml></xml>',
+        style: parsedStyle || '<xml></xml>',
+        logic: parsedLogic || '<xml></xml>',
+      },
+    };
+  };
+
+  try {
+    console.log(`📡 [데이터 로드 시작] WebID: ${props.webId}`);
+
+    // =========================================================
+    // 🚀 [핵심 수정 1] 페이지 "전체 목록"을 먼저 가져옵니다!
+    // =========================================================
+    let allPages = [];
+    try {
+      // 백엔드에 만들어둔 GET 목록 API 호출
+      const listResponse = await api.get(`/projects/${props.webId}/pages`);
+      if (Array.isArray(listResponse.data)) {
+        // 목록 데이터를 프론트엔드 객체로 변환
+        allPages = listResponse.data.map(p => normalizePage(p));
+      }
+    } catch (e) {
+      console.warn("⚠️ 페이지 목록 로드 실패 (단일 페이지 모드로 동작)", e);
+    }
+
+    // =========================================================
+    // 🚀 [핵심 수정 2] "현재 보고 있는 페이지"의 상세 정보를 가져옵니다.
+    // =========================================================
+    
+    // 1) URL 파라미터나 저장된 ID로 현재 페이지 추적
+    let targetPageName = 'Home'; 
+    const savedPageId = pages.value.find(p => p.id === selectedPageId.value)?.name;
+    if (savedPageId) targetPageName = savedPageId;
+
+    // 2) 상세 데이터 요청
+    const detailResponse = await api.get(`/projects/${props.webId}/data?pageName=${encodeURIComponent(targetPageName)}`);
+
+    if (detailResponse?.data) {
+        const currentDetailedPage = normalizePage(detailResponse.data);
+        
+        // 프로젝트 제목 설정 (있다면)
+        if(detailResponse.data.title) projectTitle.value = detailResponse.data.title;
+
+        // =========================================================
+        // 🚀 [핵심 수정 3] 목록 + 상세 데이터 합치기 (덮어쓰기 방지)
+        // =========================================================
+        
+        if (allPages.length > 0) {
+            // (1) 먼저 전체 목록으로 채운다
+            pages.value = allPages;
+
+            // (2) 현재 페이지는 더 최신 정보(상세 데이터)로 교체해준다
+            const idx = pages.value.findIndex(p => p.id === currentDetailedPage.id || p.name === currentDetailedPage.name);
+            
+            if (idx !== -1) {
+                pages.value[idx] = currentDetailedPage;
+            } else {
+                // 목록에 없으면 추가 (혹시 모를 오류 방지)
+                pages.value.push(currentDetailedPage);
+            }
+        } else {
+            // 목록 불러오기 실패했으면 어쩔 수 없이 1개만 넣음
+            pages.value = [ currentDetailedPage ];
+        }
+
+        // 3) 화면에 블록 그리기
+        const pageToLoad = pages.value.find(p => p.name === targetPageName) || pages.value[0];
+        if (pageToLoad) {
+            selectedPageId.value = pageToLoad.id;
+            await loadPageById(pageToLoad.id);
+        }
+        
+        console.log("✅ [데이터 로드 완료] 총 페이지 수:", pages.value.length);
+        return; 
+    }
+
+  } catch (e) {
+    console.error('❌ 초기화 실패:', e);
+  }
+};
 
   // 실행 호출
   await initProjectData();
@@ -1932,7 +1985,7 @@ onMounted(async () => {
     pages.value = [createPage('Home'), createPage('Login')];
     
     // 3) 로컬 스토리지에 저장 (이 과정에서 saveToServerAsJson도 호출되어 DB에 데이터가 채워집니다) [cite: 2026-01-21]
-    savePagesToStorage();
+    await initProjectData();
 
     // 4) 첫 페이지(Home)를 즉시 불러와서 블록을 그립니다. [cite: 2026-01-21]
     if (pages.value[0]?.id) {
@@ -2421,7 +2474,11 @@ const applyManualXml = () => {
                 </span>
               </div>
 
-              <button class="btn-del" @click.stop="deletePage(page.id)">
+              <button 
+                class="btn-del" 
+                @click.stop.prevent="deletePage(page.id)" 
+                style="cursor: pointer; position: relative; z-index: 10; pointer-events: auto !important; padding: 5px;"
+              >
                 ✕
               </button>
             </li>
@@ -2572,6 +2629,17 @@ const applyManualXml = () => {
       @generate="handleAiBlockGeneration" 
     />
   </Teleport>
+
+<!-- ✅ 삭제 확인 모달 -->
+<ConfirmModal
+  :open="confirmModal.open"
+  :message="confirmModal.message"
+  type="warning" 
+  confirm-text="삭제"
+  cancel-text="취소"
+  @confirm="confirmDeletePage"
+  @cancel="closeDeleteConfirm"
+/>
 
   <Teleport to="body">
     <div v-if="isRunning" class="fullscreen-modal">
@@ -3681,5 +3749,10 @@ iframe {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.9) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 </style>

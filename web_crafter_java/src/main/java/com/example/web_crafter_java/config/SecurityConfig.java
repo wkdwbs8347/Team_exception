@@ -2,6 +2,7 @@ package com.example.web_crafter_java.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -29,6 +30,7 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable()) // ✅ POST 요청 허용을 위해 필수
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/member/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/projects/*/data").permitAll()
                 .requestMatchers("/api/login", "/api/register").permitAll()
                 .requestMatchers("/api/projects/**").permitAll() // 🔥 변경
                 .requestMatchers("/api/auth/**").permitAll() // 사용자 preview 경로 접근 허용

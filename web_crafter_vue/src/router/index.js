@@ -38,9 +38,10 @@ const router = createRouter({
       props: true
     },
     {
-      path : '/lde', // <--- 추가된 경로
+      path: '/lde/:nickname?/:webId?', // 👈 LDE도 파라미터를 받을 수 있게 수정 [cite: 2026-01-21]
       name: 'lde',
-      component: LDEView
+      component: () => import('../views/LDEView.vue'),
+      props: true
     },
   ],
   scrollBehavior(to, from, savedPosition) {

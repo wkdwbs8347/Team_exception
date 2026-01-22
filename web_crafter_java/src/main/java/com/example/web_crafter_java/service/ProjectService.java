@@ -87,4 +87,9 @@ public void insertNewPage(com.example.web_crafter_java.dto.UserWebPage pageData)
     projectDao.insertNewPage(pageData); // DAO에 있는 INSERT 쿼리를 실행합니다.
 }
 
+// ✅ 페이지 목록 조회 서비스
+    public java.util.List<UserWebPage> getPageList(Integer webId) {
+        return projectDao.selectPagesByWebId(webId);
+    }
+
 }

@@ -11,17 +11,21 @@ export const category = {
 export const toolbox = `
 <xml>
   <block type="script_tag"></block>
-  <block type="event_click"></block>
+  <block type="event_element"></block>
   <block type="event_page_load"></block>
 
   <sep gap="16"></sep>
   <block type="action_alert"></block>
 
+  <!-- ✅ 추가: 대상 선택(옵션) + 모달(오픈/클로즈/토글) -->
+  <block type="target_select_class"></block>
+  <block type="modal_state_class"></block>
+
   <block type="dom_change_text_class"></block>
   <block type="action_navigate_internal"></block>
 
   <sep gap="16"></sep>
-  
+
   <block type="form_set_field"></block>
 
   <sep gap="16"></sep>
@@ -39,14 +43,11 @@ export const toolbox = `
 // =========================================================
 // ✅ Pretty Generator (코드보기 전용)
 // =========================================================
-export const javascriptGeneratorPretty = new Blockly.Generator(
-  'JavaScriptPretty'
-);
+export const javascriptGeneratorPretty = new Blockly.Generator('JavaScriptPretty');
 
 javascriptGeneratorPretty.ORDER_ATOMIC = javascriptGenerator.ORDER_ATOMIC;
 javascriptGeneratorPretty.ORDER_NONE = javascriptGenerator.ORDER_NONE;
-javascriptGeneratorPretty.ORDER_FUNCTION_CALL =
-  javascriptGenerator.ORDER_FUNCTION_CALL;
+javascriptGeneratorPretty.ORDER_FUNCTION_CALL = javascriptGenerator.ORDER_FUNCTION_CALL;
 
 javascriptGeneratorPretty.init = function (workspace) {
   this.nameDB_ = new Blockly.Names(this.RESERVED_WORDS_);
@@ -59,10 +60,6 @@ javascriptGeneratorPretty.finish = function (code) {
 
 // Pretty util
 const _q = (s) => JSON.stringify(String(s ?? ''));
-const _v = (gen, block, name) =>
-  gen.valueToCode(block, name, gen.ORDER_NONE) || "''";
-const _s = (gen, block, name) => gen.statementToCode(block, name) || '';
-
 const _indent = (code, pad = '  ') =>
   (code || '')
     .split('\n')
@@ -73,68 +70,276 @@ const _stripTrailing = (s) => (s || '').replace(/\s+$/g, '');
 
 export const defineBlocks = () => {
   /* =========
-    1) 클릭 이벤트 (클래스 기반)
+    1) 요소 이벤트 (클래스 기반)
   ========= */
-  Blockly.Blocks['event_click'] = {
+  Blockly.Blocks['event_element'] = {
     init: function () {
       this.appendDummyInput()
         .appendField('⚡ 클래스가')
         .appendField(new Blockly.FieldTextInput('btn'), 'TARGET_CLASS')
-        .appendField('인 요소 클릭 시');
+        .appendField('인 요소')
+        .appendField(
+          new Blockly.FieldDropdown([
+            ['클릭했을 때', 'click'],
+            ['마우스 올렸을 때', 'mouseover'],
+            ['마우스 나갔을 때', 'mouseout'],
+            ['더블클릭했을 때', 'dblclick'],
+            ['우클릭했을 때', 'contextmenu'],
+          ]),
+          'WHEN'
+        )
+        .appendField('실행');
 
       this.appendStatementInput('DO').setCheck(null);
 
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#ff7043');
-      this.setTooltip('해당 클래스를 가진 요소를 클릭했을 때 실행됩니다.');
+      this.setTooltip('해당 클래스를 가진 요소에서 이벤트가 발생했을 때 실행됩니다.');
     },
   };
 
   // ===== RUN
-  javascriptGenerator.forBlock['event_click'] = function (block, generator) {
+  javascriptGenerator.forBlock['event_element'] = function (block, generator) {
     const targetClass = (block.getFieldValue('TARGET_CLASS') || '').trim();
+    const when = block.getFieldValue('WHEN') || 'click';
     const body = generator.statementToCode(block, 'DO');
     if (!targetClass) return '';
 
+    const shouldPrevent = when === 'click' || when === 'dblclick' || when === 'contextmenu';
+
     return `(function() {
-  document.addEventListener('click', function(e) {
+  document.addEventListener('${when}', function(e) {
     var target = e.target && e.target.closest ? e.target.closest('.${targetClass}') : null;
     if (target) {
-      // ✅ 폼 submit/기본 동작 방지 (페이지 리로드 때문에 분기 슬롯이 안 도는 문제 해결)
-      try { if(e && e.preventDefault) e.preventDefault(); } catch(_) {}
-      try { if(e && e.stopPropagation) e.stopPropagation(); } catch(_) {}
+      ${
+        shouldPrevent
+          ? `
+      try { e.preventDefault?.(); } catch(_) {}
+      try { e.stopPropagation?.(); } catch(_) {}
+      `
+          : ''
+      }
 
       window.__WC_LAST_EVENT_TARGET__ = target;
-      window.__WC_LAST_EVENT__ = e; // (옵션) 나중에 쓰고 싶으면 유지
+      window.__WC_LAST_EVENT__ = e;
+
+      // ✅ 기본 대상 = "자기 자신"
+      window.__WC_TARGET__ = target;
+      window.__WC_TARGET_KIND__ = 'self';
+      window.__WC_TARGET_CLASS__ = '';
+
 ${body}
     }
-  }, true); // ✅ 캡처 단계에서 잡으면 submit보다 먼저 막기 쉬움
+  }, true);
 })();\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['event_click'] = function (
-    block,
-    generator
-  ) {
+  // ===== PRETTY
+  javascriptGeneratorPretty.forBlock['event_element'] = function (block, generator) {
     const cls = (block.getFieldValue('TARGET_CLASS') || '').trim();
+    const when = block.getFieldValue('WHEN') || 'click';
     const body = generator.statementToCode(block, 'DO');
     if (!cls) return '';
 
+    const shouldPrevent = when === 'click' || when === 'dblclick' || when === 'contextmenu';
+
     return (
       _stripTrailing(
-        `document.addEventListener('click', (e) => {
+        `document.addEventListener('${when}', (e) => {
   const el = e.target?.closest?.('.${cls}');
   if (!el) return;
-
-  e?.preventDefault?.();
-  e?.stopPropagation?.();
+  ${shouldPrevent ? `e.preventDefault?.(); e.stopPropagation?.();` : ``}
 
   window.__WC_LAST_EVENT_TARGET__ = el;
   window.__WC_LAST_EVENT__ = e;
+
+  // ✅ 기본 대상 = "자기 자신"
+  window.__WC_TARGET__ = el;
+  window.__WC_TARGET_KIND__ = 'self';
+  window.__WC_TARGET_CLASS__ = '';
+
 ${_indent(body, '  ')}
 }, true);\n`
+      ) + '\n'
+    );
+  };
+
+  /* =========
+    ✅ 추가 A) 대상 선택(클래스)
+    - 기본 텍스트: "엘리먼트"
+    - 안 쓰면: event_element의 기본 대상(self)이 그대로 유지됨
+  ========= */
+  Blockly.Blocks['target_select_class'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField('🎯 대상 선택')
+        .appendField(new Blockly.FieldTextInput('엘리먼트'), 'TARGET_CLASS');
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#ff7043');
+      this.setTooltip('이 아래 동작 블록들이 바꿀 "대상"을 클래스 기준으로 지정합니다. (비우면 자기 자신)');
+    },
+  };
+
+  // RUN
+  javascriptGenerator.forBlock['target_select_class'] = function (block) {
+    const cls = (block.getFieldValue('TARGET_CLASS') || '').trim();
+
+    // "엘리먼트"는 안내용 기본값이니까, 실제로는 빈 값 취급(= 자기 자신)
+    const real = cls === '엘리먼트' ? '' : cls;
+
+    return `(function(){
+  window.__WC_TARGET_KIND__ = ${real ? `'class'` : `'self'`};
+  window.__WC_TARGET_CLASS__ = ${JSON.stringify(real)};
+  if(${real ? 'false' : 'true'}) {
+    window.__WC_TARGET__ = window.__WC_LAST_EVENT_TARGET__ || window.__WC_TARGET__ || null;
+  } else {
+    window.__WC_TARGET__ = null;
+  }
+})();\n`;
+  };
+
+  // PRETTY
+  javascriptGeneratorPretty.forBlock['target_select_class'] = function (block) {
+    const cls = (block.getFieldValue('TARGET_CLASS') || '').trim();
+    const real = cls === '엘리먼트' ? '' : cls;
+
+    return _stripTrailing(
+      `{
+  const cls = ${_q(real)};
+  window.__WC_TARGET_KIND__ = cls ? 'class' : 'self';
+  window.__WC_TARGET_CLASS__ = cls;
+  if (!cls) window.__WC_TARGET__ = window.__WC_LAST_EVENT_TARGET__ ?? window.__WC_TARGET__ ?? null;
+  else window.__WC_TARGET__ = null;
+}\n`
+    ) + '\n';
+  };
+
+  /* =========
+    ✅ 추가 B) 모달 띄우기/닫기/토글
+    - UI: "모달 / 클래스(비우면 대상) / 상태(open|close|toggle)"
+    - 실제 동작:
+      open  -> class 'open' 추가, 'close' 제거, display:flex
+      close -> class 'close' 추가, 'open' 제거, display:none
+      toggle-> open/close 반전
+  ========= */
+  Blockly.Blocks['modal_state_class'] = {
+    init: function () {
+      this.appendDummyInput()
+        .appendField('🪟 모달')
+        .appendField('클래스')
+        .appendField(new Blockly.FieldTextInput(''), 'MODAL_CLASS')
+        .appendField('상태')
+        .appendField(
+          new Blockly.FieldDropdown([
+            ['열기(open)', 'open'],
+            ['닫기(close)', 'close'],
+            ['토글(toggle)', 'toggle'],
+          ]),
+          'STATE'
+        );
+      this.setPreviousStatement(true, null);
+      this.setNextStatement(true, null);
+      this.setColour('#ff7043');
+      this.setTooltip('모달(오버레이) 요소에 open/close 클래스와 display를 적용합니다. 클래스 비우면 현재 대상(또는 자기 자신)에 적용됩니다.');
+    },
+  };
+
+  // RUN
+  javascriptGenerator.forBlock['modal_state_class'] = function (block) {
+    const modalClass = (block.getFieldValue('MODAL_CLASS') || '').trim();
+    const state = block.getFieldValue('STATE') || 'open';
+    const safeClass = JSON.stringify(modalClass);
+
+    return `(function(){
+  // ✅ 대상 해석: (1) 입력 클래스 우선 (2) target_select_class로 지정된 클래스 (3) 자기 자신
+  function __wcResolveTargets(){
+    var inputCls = (${safeClass} || "").trim();
+    if(inputCls){
+      return Array.from(document.querySelectorAll('.' + inputCls));
+    }
+    var kind = (window.__WC_TARGET_KIND__ || 'self');
+    var cls = (window.__WC_TARGET_CLASS__ || '').trim();
+    if(kind === 'class' && cls){
+      return Array.from(document.querySelectorAll('.' + cls));
+    }
+    var self = window.__WC_TARGET__ || window.__WC_LAST_EVENT_TARGET__ || null;
+    return self ? [self] : [];
+  }
+
+  function __wcOpen(el){
+    try{
+      el.classList.add('open');
+      el.classList.remove('close');
+      el.style.display = 'flex';
+      el.setAttribute('aria-hidden','false');
+    }catch(_){}
+  }
+
+  function __wcClose(el){
+    try{
+      el.classList.add('close');
+      el.classList.remove('open');
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden','true');
+    }catch(_){}
+  }
+
+  var targets = __wcResolveTargets();
+  if(!targets.length) return;
+
+  targets.forEach(function(el){
+    if(!el) return;
+
+    if(${JSON.stringify(state)} === 'open'){
+      __wcOpen(el);
+      return;
+    }
+    if(${JSON.stringify(state)} === 'close'){
+      __wcClose(el);
+      return;
+    }
+    // toggle
+    var isOpen = false;
+    try{
+      isOpen = el.classList.contains('open') && el.style.display !== 'none';
+    }catch(_){}
+    if(isOpen) __wcClose(el);
+    else __wcOpen(el);
+  });
+})();\n`;
+  };
+
+  // PRETTY
+  javascriptGeneratorPretty.forBlock['modal_state_class'] = function (block) {
+    const modalClass = (block.getFieldValue('MODAL_CLASS') || '').trim();
+    const state = block.getFieldValue('STATE') || 'open';
+
+    return (
+      _stripTrailing(
+        `{
+  const inputCls = ${_q(modalClass)}.trim();
+  const kind = window.__WC_TARGET_KIND__ || 'self';
+  const cls = (window.__WC_TARGET_CLASS__ || '').trim();
+
+  const targets = inputCls
+    ? Array.from(document.querySelectorAll('.' + inputCls))
+    : (kind === 'class' && cls)
+      ? Array.from(document.querySelectorAll('.' + cls))
+      : ((window.__WC_TARGET__ || window.__WC_LAST_EVENT_TARGET__) ? [window.__WC_TARGET__ || window.__WC_LAST_EVENT_TARGET__] : []);
+
+  const open = (el) => { el.classList.add('open'); el.classList.remove('close'); el.style.display = 'flex'; el.setAttribute('aria-hidden','false'); };
+  const close = (el) => { el.classList.add('close'); el.classList.remove('open'); el.style.display = 'none'; el.setAttribute('aria-hidden','true'); };
+
+  targets.forEach((el) => {
+    if (!el) return;
+    if (${_q(state)} === 'open') return open(el);
+    if (${_q(state)} === 'close') return close(el);
+    const isOpen = el.classList.contains('open') && el.style.display !== 'none';
+    isOpen ? close(el) : open(el);
+  });
+}\n`
       ) + '\n'
     );
   };
@@ -152,20 +357,12 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
-  javascriptGenerator.forBlock['event_page_load'] = function (
-    block,
-    generator
-  ) {
+  javascriptGenerator.forBlock['event_page_load'] = function (block, generator) {
     const body = generator.statementToCode(block, 'DO');
     return `window.addEventListener('DOMContentLoaded', function() {\n${body}});\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['event_page_load'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['event_page_load'] = function (block, generator) {
     const body = generator.statementToCode(block, 'DO');
     return (
       _stripTrailing(
@@ -191,13 +388,11 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
   javascriptGenerator.forBlock['action_alert'] = function (block) {
     const msg = block.getFieldValue('MESSAGE') ?? '';
     return `alert(${JSON.stringify(msg)});\n`;
   };
 
-  // ===== PRETTY (동일)
   javascriptGeneratorPretty.forBlock['action_alert'] = function (block) {
     const msg = block.getFieldValue('MESSAGE') ?? '';
     return `alert(${_q(msg)});\n`;
@@ -212,9 +407,7 @@ ${_indent(body, '  ')}
         .appendField('페이지 이동하기 📄')
         .appendField(
           new Blockly.FieldDropdown(function () {
-            return window.WC_GET_PAGES
-              ? window.WC_GET_PAGES()
-              : [['로딩중...', '']];
+            return window.WC_GET_PAGES ? window.WC_GET_PAGES() : [['로딩중...', '']];
           }),
           'PAGE_ID'
         );
@@ -226,17 +419,13 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
   javascriptGenerator.forBlock['action_navigate_internal'] = function (block) {
     const pageId = block.getFieldValue('PAGE_ID');
     if (!pageId) return '';
     return `goToPage('${pageId}');\n`;
   };
 
-  // ===== PRETTY (순수 코드)
-  javascriptGeneratorPretty.forBlock['action_navigate_internal'] = function (
-    block
-  ) {
+  javascriptGeneratorPretty.forBlock['action_navigate_internal'] = function (block) {
     const pageId = block.getFieldValue('PAGE_ID');
     if (!pageId) return '';
     return `goToPage(${_q(pageId)});\n`;
@@ -255,23 +444,18 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
   javascriptGenerator.forBlock['script_tag'] = function (block, generator) {
     const body = generator.statementToCode(block, 'BODY');
     return `<script>\n${body}<\/script>\n`;
   };
 
-  // ===== PRETTY (코드보기에서도 script 태그 형식)
-  javascriptGeneratorPretty.forBlock['script_tag'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['script_tag'] = function (block, generator) {
     const body = generator.statementToCode(block, 'BODY');
     return `<script>\n${body}<\/script>\n`;
   };
 
   /* =========
-    5) 요소 내용 바꾸기 (Class)
+    5) 요소 내용 바꾸기 (Class)  // ✅ 기존 그대로
   ========= */
   Blockly.Blocks['dom_change_text_class'] = {
     init: function () {
@@ -289,15 +473,9 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
-  javascriptGenerator.forBlock['dom_change_text_class'] = function (
-    block,
-    generator
-  ) {
-    const className =
-      generator.valueToCode(block, 'CLASS', generator.ORDER_NONE) || "''";
-    const text =
-      generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || "''";
+  javascriptGenerator.forBlock['dom_change_text_class'] = function (block, generator) {
+    const className = generator.valueToCode(block, 'CLASS', generator.ORDER_NONE) || "''";
+    const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || "''";
     return `
 (function(){
   var els = document.querySelectorAll('.' + ${className});
@@ -307,22 +485,16 @@ ${_indent(body, '  ')}
 })();\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['dom_change_text_class'] = function (
-    block,
-    generator
-  ) {
-    const className =
-      generator.valueToCode(block, 'CLASS', generator.ORDER_NONE) || "''";
-    const text =
-      generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || "''";
+  javascriptGeneratorPretty.forBlock['dom_change_text_class'] = function (block, generator) {
+    const className = generator.valueToCode(block, 'CLASS', generator.ORDER_NONE) || "''";
+    const text = generator.valueToCode(block, 'TEXT', generator.ORDER_NONE) || "''";
     return `document.querySelectorAll('.' + ${className}).forEach((el) => {
   el.innerText = ${text};
 });\n`;
   };
 
   // =========================================================
-  // ✅ 폼 값 "설정" (동작)만 유지
+  // ✅ 폼 값 "설정" (동작)만 유지  // ✅ 기존 그대로
   // =========================================================
   Blockly.Blocks['form_set_field'] = {
     init: function () {
@@ -341,12 +513,10 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
   javascriptGenerator.forBlock['form_set_field'] = function (block, generator) {
     const field = (block.getFieldValue('FIELD') || '').trim();
     const safe = JSON.stringify(field || '');
-    const val =
-      generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || "''";
+    const val = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || "''";
     return `(function(){
   try{
     var btn = window.__WC_LAST_EVENT_TARGET__ || null;
@@ -358,14 +528,9 @@ ${_indent(body, '  ')}
 })();\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['form_set_field'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['form_set_field'] = function (block, generator) {
     const field = (block.getFieldValue('FIELD') || '').trim();
-    const val =
-      generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || "''";
+    const val = generator.valueToCode(block, 'VALUE', generator.ORDER_NONE) || "''";
     return (
       _stripTrailing(
         `{
@@ -378,6 +543,7 @@ ${_indent(body, '  ')}
     );
   };
 
+  // ===== auth_set_mode (기존 그대로)
   Blockly.Blocks['auth_set_mode'] = {
     init: function () {
       this.appendDummyInput()
@@ -397,14 +563,12 @@ ${_indent(body, '  ')}
     },
   };
 
-  // ===== RUN
   javascriptGenerator.forBlock['auth_set_mode'] = function (block) {
     const mode = block.getFieldValue('MODE') || 'cookie';
     const key = (block.getFieldValue('KEY') || 'wc_token').trim();
     return `window.WC_AUTH_MODE=${JSON.stringify(mode)};\nwindow.WC_AUTH_TOKEN_KEY=${JSON.stringify(key)};\n`;
   };
 
-  // ===== PRETTY (순수 코드)
   javascriptGeneratorPretty.forBlock['auth_set_mode'] = function (block) {
     const mode = block.getFieldValue('MODE') || 'cookie';
     const key = (block.getFieldValue('KEY') || 'wc_token').trim();
@@ -412,38 +576,24 @@ ${_indent(body, '  ')}
   };
 
   /* =========================================================
-  ✅ 중복확인 수행 (순수 로직 블록)
-========================================================= */
+    ✅ 중복확인 수행 (순수 로직 블록)  // ✅ 기존 그대로
+  ========================================================= */
   Blockly.Blocks['auth_duplicate_check_branch'] = {
     init: function () {
       this.appendDummyInput().appendField('✅ 중복확인 API 호출');
 
-      this.appendStatementInput('ON_AVAILABLE')
-        .setCheck(null)
-        .appendField('✅ 사용 가능');
-
-      this.appendStatementInput('ON_UNAVAILABLE')
-        .setCheck(null)
-        .appendField('❌ 사용 중');
-
-      this.appendStatementInput('ON_ERROR')
-        .setCheck(null)
-        .appendField('⚠️ 오류');
+      this.appendStatementInput('ON_AVAILABLE').setCheck(null).appendField('✅ 사용 가능');
+      this.appendStatementInput('ON_UNAVAILABLE').setCheck(null).appendField('❌ 사용 중');
+      this.appendStatementInput('ON_ERROR').setCheck(null).appendField('⚠️ 오류');
 
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#ff7043');
-      this.setTooltip(
-        '중복확인을 수행하고 결과에 따라 분기 슬롯을 실행합니다. (출력/알림 없음)'
-      );
+      this.setTooltip('중복확인을 수행하고 결과에 따라 분기 슬롯을 실행합니다. (출력/알림 없음)');
     },
   };
 
-  // ===== RUN (실제 동작)
-  javascriptGenerator.forBlock['auth_duplicate_check_branch'] = function (
-    block,
-    generator
-  ) {
+  javascriptGenerator.forBlock['auth_duplicate_check_branch'] = function (block, generator) {
     const onA = generator.statementToCode(block, 'ON_AVAILABLE');
     const onU = generator.statementToCode(block, 'ON_UNAVAILABLE');
     const onE = generator.statementToCode(block, 'ON_ERROR');
@@ -513,11 +663,7 @@ ${onE}
 })();\n`;
   };
 
-  // ===== PRETTY (코드보기용, 의미 중심)
-  javascriptGeneratorPretty.forBlock['auth_duplicate_check_branch'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['auth_duplicate_check_branch'] = function (block, generator) {
     const onA = generator.statementToCode(block, 'ON_AVAILABLE');
     const onU = generator.statementToCode(block, 'ON_UNAVAILABLE');
     const onE = generator.statementToCode(block, 'ON_ERROR');
@@ -549,17 +695,13 @@ ${_indent(onE, '  ')}
   };
 
   /* =========================================================
-    ✅ 고정 엔드포인트 Auth API 호출 (유지)
+    ✅ 고정 엔드포인트 Auth API 호출 (유지)  // ✅ 기존 그대로
   ========================================================= */
   Blockly.Blocks['auth_register_call_fixed'] = {
     init: function () {
       this.appendDummyInput().appendField('🧾 회원가입 API 호출');
-      this.appendStatementInput('ON_SUCCESS')
-        .setCheck(null)
-        .appendField('✅ 성공했을 때');
-      this.appendStatementInput('ON_FAIL')
-        .setCheck(null)
-        .appendField('❌ 실패했을 때');
+      this.appendStatementInput('ON_SUCCESS').setCheck(null).appendField('✅ 성공했을 때');
+      this.appendStatementInput('ON_FAIL').setCheck(null).appendField('❌ 실패했을 때');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#ff7043');
@@ -567,11 +709,7 @@ ${_indent(onE, '  ')}
     },
   };
 
-  // ===== RUN
-  javascriptGenerator.forBlock['auth_register_call_fixed'] = function (
-    block,
-    generator
-  ) {
+  javascriptGenerator.forBlock['auth_register_call_fixed'] = function (block, generator) {
     const okBranch = generator.statementToCode(block, 'ON_SUCCESS');
     const failBranch = generator.statementToCode(block, 'ON_FAIL');
 
@@ -601,11 +739,7 @@ ${failBranch}
 })();\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['auth_register_call_fixed'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['auth_register_call_fixed'] = function (block, generator) {
     const ok = generator.statementToCode(block, 'ON_SUCCESS');
     const fail = generator.statementToCode(block, 'ON_FAIL');
 
@@ -630,12 +764,8 @@ ${_indent(fail, '  ')}
   Blockly.Blocks['auth_login_call_fixed'] = {
     init: function () {
       this.appendDummyInput().appendField('🧾 로그인 API 호출');
-      this.appendStatementInput('ON_SUCCESS')
-        .setCheck(null)
-        .appendField('✅ 성공했을 때');
-      this.appendStatementInput('ON_FAIL')
-        .setCheck(null)
-        .appendField('❌ 실패했을 때');
+      this.appendStatementInput('ON_SUCCESS').setCheck(null).appendField('✅ 성공했을 때');
+      this.appendStatementInput('ON_FAIL').setCheck(null).appendField('❌ 실패했을 때');
       this.setPreviousStatement(true, null);
       this.setNextStatement(true, null);
       this.setColour('#ff7043');
@@ -643,11 +773,7 @@ ${_indent(fail, '  ')}
     },
   };
 
-  // ===== RUN
-  javascriptGenerator.forBlock['auth_login_call_fixed'] = function (
-    block,
-    generator
-  ) {
+  javascriptGenerator.forBlock['auth_login_call_fixed'] = function (block, generator) {
     const okBranch = generator.statementToCode(block, 'ON_SUCCESS');
     const failBranch = generator.statementToCode(block, 'ON_FAIL');
 
@@ -677,11 +803,7 @@ ${failBranch}
 })();\n`;
   };
 
-  // ===== PRETTY (의미 중심, 순수 코드)
-  javascriptGeneratorPretty.forBlock['auth_login_call_fixed'] = function (
-    block,
-    generator
-  ) {
+  javascriptGeneratorPretty.forBlock['auth_login_call_fixed'] = function (block, generator) {
     const ok = generator.statementToCode(block, 'ON_SUCCESS');
     const fail = generator.statementToCode(block, 'ON_FAIL');
 

@@ -88,29 +88,29 @@ const selectTheme = (id) => {
 // 최종 저장 (모든 설정을 부모에게 전달)
 // SettingModal.vue 내부 수정
 
+// handleSave 함수 완성 버전
 const handleSave = async () => {
   try {
-    // 1. 프로젝트 이름 DB 저장 (마이페이지와 동일한 API)
-    // props.project.id가 부모로부터 정상적으로 넘어오고 있는지 확인하세요.
+    // 1. 서버 DB 저장 (작성하신 Controller와 Dao 호출) [cite: 2026-01-21, 2026-01-22]
     await api.put(`/projects/${props.project.id}/name`, { 
       name: formData.projectName 
     });
 
-    // 2. 테마 정보 찾기 (기존 로직)
+    // 2. 테마 정보 및 수정된 이름을 함께 부모에게 전달 [cite: 2026-01-22]
     const selectedTheme = themeList.find(t => t.id === formData.themeId);
     
-    // 3. 부모(IDE 메인)에게 알려서 화면의 이름과 테마를 즉시 갱신
     emit('apply', {
       theme: selectedTheme,
-      settings: { ...formData }
+      settings: { ...formData },
+      newName: formData.projectName // ✅ 이 값이 부모의 title을 바꿉니다.
     });
 
-    alert("설정이 성공적으로 저장되었습니다.");
-    emit('close'); // 모달 닫기
+    alert("설정이 저장되었습니다.");
+    emit('close');
 
   } catch (error) {
     console.error("저장 실패:", error);
-    alert("서버 저장 중 오류가 발생했습니다. (api가 정의되었는지 확인하세요)");
+    alert("서버 저장 중 오류가 발생했습니다.");
   }
 };
 </script>
