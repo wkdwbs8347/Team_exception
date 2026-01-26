@@ -110,6 +110,18 @@ public ResponseEntity<?> create(HttpSession session) {
     }
 
     // ProjectController.java 수정
+// 1. [조회] 페이지 목록 가져오기 API (F12의 GET .../pages 500 에러 해결)
+@GetMapping("/{webId}/pages") 
+public ResponseEntity<?> getPageList(@PathVariable Integer webId) {
+    try {
+        java.util.List<com.example.web_crafter_java.dto.UserWebPage> pages = projectService.getPageList(webId);
+        return ResponseEntity.ok(pages);
+    } catch (Exception e) {
+        return ResponseEntity.status(500).body("목록 조회 실패: " + e.getMessage());
+    }
+}
+
+// 2. [생성] 새 페이지 만들기 API (원래 이름에 맞는 기능)
 @PostMapping("/{webId}/pages")
 public ResponseEntity<?> createNewPage(
         @PathVariable Integer webId,
@@ -117,20 +129,15 @@ public ResponseEntity<?> createNewPage(
         HttpSession session) {
     
     Integer memberId = (Integer) session.getAttribute("loginedMemberId");
-    if (memberId == null) {
-        return ResponseEntity.status(401).body("로그인이 필요합니다.");
-    }
+    if (memberId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
 
-   try {
-            // 서비스에서 목록 가져오기 (Service, DAO, Mapper가 준비되어 있어야 함)
-            java.util.List<com.example.web_crafter_java.dto.UserWebPage> pages = projectService.getPageList(webId);
-            
-            // 목록 반환 (프론트엔드의 allPages 변수로 들어갑니다)
-            return ResponseEntity.ok(pages);
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("목록 조회 실패: " + e.getMessage());
-        }
+    try {
+        // 실제 저장 로직 수행 (Service에 구현되어 있어야 함)
+        projectService.insertNewPage(pageData); 
+        return ResponseEntity.ok("페이지 생성 성공");
+    } catch (Exception e) {
+        return ResponseEntity.status(500).body("페이지 생성 실패: " + e.getMessage());
+    }
 }
 
 }

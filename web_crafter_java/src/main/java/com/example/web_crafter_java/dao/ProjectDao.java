@@ -41,12 +41,13 @@ public interface ProjectDao {
      * webId가 일치하는 데이터만 가져오기 때문에 프로젝트별 데이터 분리가 가능해집니다.
      */
     @Select("""
-        SELECT *
-        FROM userWeb_pages
-        WHERE webId = #{webId}
-        AND pageName = #{pageName}
+        SELECT p.*, w.title
+        FROM userWeb_pages p
+        JOIN userWeb w ON p.webId = w.id
+        WHERE p.webId = #{webId}
+        AND p.pageName = #{pageName}
     """)
-    UserWebPage getPageData( @Param("webId") Integer webId, @Param("pageName") String pageName);
+    UserWebPage getPageData(@Param("webId") Integer webId, @Param("pageName") String pageName);
 
 
     // 이 방식이 '이름 변경'과 '다중 페이지' 대응에 최적화된 최종형입니다. [cite: 2026-01-21]
@@ -71,10 +72,12 @@ public interface ProjectDao {
     void deleteProject(@Param("projectId") Integer projectId);
 
 @Insert("""
-        INSERT INTO userWeb_pages (webId, pageName, layoutData, styleData, logicData)
-        VALUES (#{webId}, #{pageName}, #{layoutData}, #{styleData}, #{logicData})
+        INSERT INTO userWeb_pages 
+            (webId, pageName, layoutData, styleData, logicData, regDate, updateDate)
+        VALUES 
+            (#{webId}, #{pageName}, #{layoutData}, #{styleData}, #{logicData}, NOW(), NOW())
     """)
-    void insertNewPage(UserWebPage pageData); 
+    void insertNewPage(UserWebPage pageData);
 
 // ProjectDao.java 인터페이스 내부
 
@@ -85,7 +88,7 @@ public interface ProjectDao {
 void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String pageName);
 
 @Select("""
-        SELECT id, webId, pageName, route, status
+        SELECT id, webId, pageName
         FROM userWeb_pages
         WHERE webId = #{webId}
     """)

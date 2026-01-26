@@ -10,4 +10,5 @@ public class UserWebPage {
     private String layoutData;
     private String styleData;
     private String logicData;
+    private String title;
 }

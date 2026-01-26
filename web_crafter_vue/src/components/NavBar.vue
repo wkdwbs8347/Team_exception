@@ -61,6 +61,8 @@ onMounted(async () => {
     const response = await api.get('/member/me');
     const data = response.data; // { member: {...}, ... }
 
+    console.log("서버가 준 진짜 데이터:", data);
+
     // 💾 받아온 정보를 Pinia 스토어의 'me'에 저장합니다.
     // (NavBar 템플릿에서 auth.me를 쓰고 있으므로 여기에 넣어야 합니다)
     auth.me = data.member;
@@ -117,9 +119,16 @@ const createNewProject = async () => {
 
 
 /* ✅ 프로필 영역 표시용 (auth.me 기반) */
-const userName = computed(
-  () => auth.me?.nickname || auth.me?.name || auth.me?.email || '사용자'
-);
+const userName = computed(() => {
+  // 1. 혹시 데이터가 두 번 감싸져 있니? (auth.me.member.nickname)
+  if (auth.me?.member?.nickname) return auth.me.member.nickname;
+  
+  // 2. 아니면 정상적으로 들어있니? (auth.me.nickname)
+  if (auth.me?.nickname) return auth.me.nickname;
+
+  // 3. 다 없으면
+  return '사용자';
+});
 const userSub = computed(() => auth.me?.email || '로그인 상태');
 const userInitial = computed(() => {
   const t = (userName.value || 'U').trim();

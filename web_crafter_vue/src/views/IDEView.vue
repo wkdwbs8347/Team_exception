@@ -300,6 +300,8 @@ let workspace = null;
 
 const pages = ref([]);
 const projectTitle = ref(''); // 프로젝트 전체 제목 전용 변수
+const userInfo = ref(null); // 🚀 [추가] 사용자 정보를 담을 변수
+const isAppLoading = ref(true); // 🚀 [추가] 초기 로딩 상태 관리
 
 // 2. 초기 데이터 주입
 
@@ -424,39 +426,49 @@ const saveToServerAsJson = async () => {
     isSaving.value = true;
     const minDelay = new Promise(resolve => setTimeout(resolve, 500));
     
-    // 1. 현재 워크스페이스의 블록 상태를 JSON으로 추출 [cite: 2026-01-21]
-    const state = Blockly.serialization.workspaces.save(workspace);
-    console.log("현재 워크스페이스 상태:", state);
-    const jsonState = JSON.stringify(state);
+    // 1. 현재 워크스페이스의 블록 상태를 저장
+    // (현재 탭이 아니더라도 기존 데이터가 날아가지 않도록 처리)
+    if (workspace) {
+        const state = Blockly.serialization.workspaces.save(workspace);
+        const jsonState = JSON.stringify(state);
 
-    // 2. 현재 탭(activeMode)에 맞춰 page 객체의 해당 필드를 먼저 업데이트 [cite: 2026-01-21]
-    // 이렇게 해야 다른 탭의 기존 데이터를 유지하면서 현재 작업물만 반영됩니다.
-    if (activeMode.value === 'structure') page.layoutData = jsonState;
-    else if (activeMode.value === 'style') page.styleData = jsonState;
-    else if (activeMode.value === 'logic') page.logicData = jsonState;
+        // 현재 보고 있는 탭의 데이터는 방금 만든 최신본으로 갱신
+        if (activeMode.value === 'structure') page.layoutData = jsonState;
+        else if (activeMode.value === 'style') page.styleData = jsonState;
+        else if (activeMode.value === 'logic') page.logicData = jsonState;
+    }
 
-    // 3. 페이로드 구성: 모든 탭 데이터를 각각의 필드에 담아 보냅니다. [cite: 2026-01-21]
-    const payload = {
-      webId: props.webId,
-      pageName: page.name, // 수정될 수 있는 새 이름
-      title: projectTitle.value,
-      layoutData: page.layoutData, // 화면 구성 데이터 [cite: 2026-01-21]
-      styleData: page.styleData,   // 디자인 데이터 [cite: 2026-01-21]
-      logicData: page.logicData    // 로직 데이터 [cite: 2026-01-21]
+    // 🔥 [핵심] 무조건 문자열로 만드는 안전 변환 함수
+    const toSafeString = (val) => {
+      if (!val) return '{}'; // 값이 없으면 빈 객체 문자열
+      if (typeof val === 'string') return val; // 이미 문자열이면 그대로 통과
+      return JSON.stringify(val); // 객체면 문자열로 변환
     };
 
-    // 1. 기준이 될 이름 결정 (수정 전 이름이 있으면 쓰고, 없으면 현재 이름 사용) [cite: 2026-01-21]
-    const oldNameForQuery = page.oldName || page.name;
+    // 2. 페이로드 구성 (여기서 위 함수를 써서 완벽하게 방어)
+    const payload = {
+      webId: props.webId,
+      pageName: page.name,
+      title: projectTitle.value || '',
+      // 👇 여기가 핵심 변경점입니다.
+      layoutData: toSafeString(page.layoutData),
+      styleData: toSafeString(page.styleData),
+      logicData: toSafeString(page.logicData)
+    };
 
-    // 2. 서버 전송: 파라미터에는 oldNameForQuery를, 바디(payload)에는 새 이름이 담긴 객체를 보냄 [cite: 2026-01-21]
+    // 🔍 [디버깅용] 콘솔에서 이 로그를 확인하세요. 데이터가 주황색(문자열)이어야 합니다.
+    console.log("🚀 [서버 전송 데이터]", payload); 
+
+    // 3. 서버 전송
+    const oldNameForQuery = page.oldName || page.name;
+    
     await Promise.all([
       api.put(`/projects/${props.webId}/data?oldPageName=${encodeURIComponent(oldNameForQuery)}`, payload),
       minDelay
     ]);
     
     page.oldName = page.name;
-
-    console.log(`✅ [${page.name}] 페이지의 모든 탭 데이터 저장 완료`);
+    console.log(`✅ [${page.name}] 저장 성공`);
 
   } catch (e) {
     console.error('❌ 저장 실패:', e);
@@ -589,6 +601,7 @@ const addPage = async () => {
   try {
     // 🚀 서버 응답(response)을 변수에 담습니다. [cite: 2026-01-22]
     const response = await api.post(`/projects/${props.webId}/pages`, {
+      webId: props.webId,
       pageName: newName,
       layoutData: '{}', 
       styleData: '{}',
@@ -1614,7 +1627,7 @@ const toggleOrientation = () => {
   isLandscape.value = !isLandscape.value;
   updatePreview(); // 화면 비율 변경 시 프리뷰 갱신
 };
-const handleThemeApply = (payload) => {
+const handleThemeApply = async (payload) => {
   // payload 구조: { theme: {...}, settings: {...} }
 
   // 1. 테마 적용 (payload.theme 사용)
@@ -1639,17 +1652,47 @@ const handleThemeApply = (payload) => {
   console.log('다른 설정들:', payload.settings);
   // 예: if (payload.settings.showGrid !== workspace.getGrid().isVisible()) ...
 
+// 2. 프로젝트 이름 저장 (자바 서버 규격에 맞춤)
   if (payload.settings && payload.settings.projectName) {
-    projectTitle.value = payload.settings.projectName; // 👈 이 코드가 있어야 상단 제목이 바뀝니다.
-    savePagesToStorage();
+    try {
+      // 🚀 핵심: 자바 컨트롤러 body.get("name")에 맞춰서 키를 'name'으로 보냅니다.
+      await api.put(`/projects/${props.webId}/name`, { 
+        name: payload.settings.projectName 
+      });
+      
+      projectTitle.value = payload.settings.projectName;
+      savePagesToStorage(); // 500 에러가 나더라도 이름 저장은 위에서 이미 끝남
+      console.log("✅ 프로젝트 이름 서버 저장 완료");
+    } catch (e) {
+      console.error("❌ 이름 저장 실패:", e);
+    }
   }
 
-  // 3. 저장 및 닫기
+  // 3. 마무리
   localStorage.setItem('wc_theme_settings', JSON.stringify(currentTheme));
   isThemeModalOpen.value = false;
 };
+
 let isRestoring = false;
 onMounted(async () => {
+  try {
+    console.log("👤 [사용자 확인 시작]");
+    // 🔥 [수정 1] 주소를 /api/member/me 로 변경 (서버 @RequestMapping에 맞춤)
+    const memberRes = await api.get('/member/me'); 
+    
+    // 🔥 [수정 2] 서버 응답이 Map 형태이므로 .member 안에서 닉네임을 꺼냅니다.
+    if (memberRes.data && memberRes.data.member) {
+      const userNickname = memberRes.data.member.nickname;
+      console.log(`✅ 사용자 인식 완료: ${userNickname}`);
+      
+      // 만약 userInfo ref가 있다면 거기에 할당
+      if (userInfo.value !== undefined) {
+        userInfo.value = memberRes.data.member;
+      }
+    }
+  } catch (e) {
+    console.warn("⚠️ 로그인 정보 로드 실패 (게스트 모드)");
+  }
   // 0. 한국어 설정
   if (Ko) Blockly.setLocale(Ko);
 

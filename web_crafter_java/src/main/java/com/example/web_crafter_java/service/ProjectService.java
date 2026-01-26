@@ -92,4 +92,9 @@ public void insertNewPage(com.example.web_crafter_java.dto.UserWebPage pageData)
         return projectDao.selectPagesByWebId(webId);
     }
 
+    public void createPage(Integer webId, UserWebPage pageData) {
+    pageData.setWebId(webId); // webId 세팅해주고
+    this.insertNewPage(pageData); // 이미 있는 insertNewPage 실행!
+}
+
 }
