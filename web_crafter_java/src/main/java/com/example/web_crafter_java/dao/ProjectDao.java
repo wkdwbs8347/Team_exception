@@ -94,4 +94,84 @@ void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String p
     """)
     java.util.List<UserWebPage> selectPagesByWebId(Integer webId);
 
+/* 1. [초대 체크] 이미 멤버인지 확인 (중복 초대 방지) */
+    @Select("""
+        SELECT COUNT(*) 
+        FROM userWeb_member 
+        WHERE webId = #{webId} AND userId = #{userId}
+    """)
+    int isMember(@Param("webId") Integer webId, @Param("userId") Integer userId);
+
+    /* 2. [초대 발송] 알림 테이블에 초대장 저장 */
+    @Insert("""
+        INSERT INTO notification (receiverId, senderId, type, relId, isRead, regDate)
+        VALUES (#{targetId}, #{myId}, 'PROJECT_INVITE', #{webId}, 0, NOW())
+    """)
+    void inviteMember(@Param("myId") Integer myId, @Param("targetId") Integer targetId, @Param("webId") Integer webId);
+
+    /* 3. [초대 수락] 멤버 명단에 추가 (권한은 기본적으로 'EDITOR') */
+    @Insert("""
+        INSERT INTO userWeb_member (webId, userId, role, regDate)
+        VALUES (#{webId}, #{userId}, 'EDITOR', NOW())
+    """)
+    void addMember(@Param("webId") Integer webId, @Param("userId") Integer userId);
+
+    /* 4. [초대 완료] 처리된 알림 삭제 */
+    @Delete("DELETE FROM notification WHERE id = #{notiId}")
+    void deleteNotification(@Param("notiId") Integer notiId);
+
+    @Select("SELECT userId FROM userWeb_member WHERE webId = #{webId}")
+    java.util.List<Integer> selectMemberIds(Integer webId);
+
+    // 이미 초대를 보낸 사람(수신자) ID 조회
+    @Select("""
+        SELECT receiverId 
+        FROM notification 
+        WHERE relId = #{webId} 
+          AND type = 'PROJECT_INVITE'
+    """)
+    java.util.List<Integer> selectPendingInviteIds(Integer webId);
+
+    @Select("""
+        SELECT w.id, w.title, w.updateDate, m.role 
+        FROM userWeb w
+        JOIN userWeb_member m ON w.id = m.webId
+        WHERE m.userId = #{userId}
+        ORDER BY w.updateDate DESC
+    """)
+    java.util.List<java.util.Map<String, Object>> selectMyAllProjects(Integer userId);
+    /**
+    // ProjectDao.java
+
+    /**
+     * ✅ [탐색 페이지] 프로젝트 정보 + 'Home' 페이지의 HTML/CSS 코드까지 한 번에 조회
+     */
+    @Select("""
+        <script>
+        SELECT 
+            w.id, 
+            w.title, 
+            w.hit as views, 
+            w.updateDate, 
+            u.nickname as ownerNickname,
+            -- 👇 여기가 핵심: 페이지 테이블에서 코드(layout, style)를 가져옵니다.
+            p.layoutData as htmlContent,
+            p.styleData as cssContent
+        FROM userWeb w
+        JOIN user u ON w.userId = u.id
+        -- 👇 프로젝트마다 'Home' 페이지 하나씩만 대표로 가져옴 (LEFT JOIN: Home이 없어도 프로젝트는 뜨게)
+        LEFT JOIN userWeb_pages p ON w.id = p.webId AND p.pageName = 'Home'
+        WHERE 1=1
+        <if test='keyword != null and keyword != ""'>
+            AND (w.title LIKE CONCAT('%', #{keyword}, '%') OR u.nickname LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY w.updateDate DESC
+        LIMIT #{limit} OFFSET #{offset}
+        </script>
+    """)
+    java.util.List<com.example.web_crafter_java.dto.ProjectExploreDto> selectExploreProjects(
+        @Param("keyword") String keyword, 
+        @Param("limit") int limit, 
+        @Param("offset") int offset
+    );
 }

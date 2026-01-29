@@ -5,6 +5,8 @@ import com.example.web_crafter_java.service.ProjectService;
 
 import jakarta.servlet.http.HttpSession;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -140,4 +142,103 @@ public ResponseEntity<?> createNewPage(
     }
 }
 
+// 3. [초대 발송] 친구에게 초대장 보내기
+    @PostMapping("/invite")
+    public ResponseEntity<?> inviteUser(@RequestBody java.util.Map<String, Integer> body, HttpSession session) {
+        Integer myId = (Integer) session.getAttribute("loginedMemberId");
+        if (myId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+        Integer targetId = body.get("targetId"); // 친구 ID
+        Integer webId = body.get("webId");       // 프로젝트 ID
+
+        try {
+            projectService.inviteUser(myId, targetId, webId);
+            return ResponseEntity.ok("초대장을 보냈습니다.");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    // 4. [초대 수락] 알림을 보고 수락 버튼 누름
+    @PostMapping("/accept")
+    public ResponseEntity<?> acceptInvite(@RequestBody java.util.Map<String, Integer> body, HttpSession session) {
+        Integer myId = (Integer) session.getAttribute("loginedMemberId");
+        if (myId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+        Integer notiId = body.get("notiId"); // 알림 ID (삭제용)
+        Integer webId = body.get("webId");   // 들어갈 프로젝트 ID
+
+        try {
+            projectService.acceptInvite(myId, notiId, webId);
+            return ResponseEntity.ok("수락되었습니다. 프로젝트 멤버가 되었습니다!");
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body("수락 실패: " + e.getMessage());
+        }
+    }
+
+    // 5. [초대 거절] 알림만 삭제 (멤버 추가 X)
+    @PostMapping("/reject")
+    public ResponseEntity<?> rejectInvite(@RequestBody java.util.Map<String, Integer> body, HttpSession session) {
+        Integer myId = (Integer) session.getAttribute("loginedMemberId");
+        if (myId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+        Integer notiId = body.get("notiId"); // 알림 ID
+        
+        try {
+            projectService.rejectInvite(notiId);
+            return ResponseEntity.ok("초대를 거절했습니다.");
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body("거절 실패");
+        }
+    }
+
+    @GetMapping("/{webId}/members")
+    public ResponseEntity<?> getProjectMemberIds(@PathVariable Integer webId) {
+        try {
+            java.util.List<Integer> memberIds = projectService.getProjectMemberIds(webId);
+            return ResponseEntity.ok(memberIds);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body("멤버 조회 실패");
+        }
+    }
+
+    @GetMapping("/list")
+    public ResponseEntity<?> getMyProjects(HttpSession session) {
+        Integer myId = (Integer) session.getAttribute("loginedMemberId");
+        if (myId == null) return ResponseEntity.status(401).body("로그인 필요");
+
+        return ResponseEntity.ok(projectService.getMyAllProjects(myId));
+    }
+    // ProjectController.java 내부
+
+    // (초대 대기 멤버 조회)
+    @GetMapping("/{webId}/pending-invites")
+    public ResponseEntity<?> getPendingInviteIds(@PathVariable Integer webId) {
+        try {
+            java.util.List<Integer> pendingIds = projectService.getPendingInviteIds(webId);
+            return ResponseEntity.ok(pendingIds);
+        } catch (Exception e) {
+            // 에러가 나도 빈 리스트를 줘서 프론트가 멈추지 않게 함
+            return ResponseEntity.ok(java.util.Collections.emptyList());
+        }
+    }
+
+        // ✅ [탐색] 모든 프로젝트 조회 API
+        @GetMapping("/explore")
+        public ResponseEntity<List<com.example.web_crafter_java.dto.ProjectExploreDto>> getExploreProjects(
+                @RequestParam(required = false) String keyword, 
+                @RequestParam(defaultValue = "0") int page,     
+                @RequestParam(defaultValue = "20") int size     
+        ) {
+            try {
+                // Service 호출
+                List<com.example.web_crafter_java.dto.ProjectExploreDto> projects = 
+                    projectService.getExploreProjects(keyword, page, size);
+                
+                return ResponseEntity.ok(projects);
+            } catch (Exception e) {
+                e.printStackTrace(); // 서버 콘솔에 에러 로그 출력 (디버깅용)
+                return ResponseEntity.status(500).build();
+            }
+        }
 }

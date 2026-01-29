@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth'; // Pinia/Vuex 스토어
 import api from '@/api/axios'; // Axios 인터셉터 설정 파일
 import EditProfileModal from '@/modal/EditProfileModal.vue'; // 프로필 수정 모달
-import GlobalModal from '@/modal/GlobalModal.vue';
+
 const router = useRouter();
 const authStore = useAuthStore();
 
@@ -16,6 +16,90 @@ const myProjectCount = ref(0);    // 숫자 표시용 변수 추가
 const sharedProjectCount = ref(0);
 const unreadNotiCount = ref(0); // 읽지 않은 알림 수
 const isEditModalOpen = ref(false); // 모달 제어를 위한 상태 변수
+const notifications = ref([]); // 알림 목록 저장 변수
+
+const changeTab = async (tabName) => {
+  currentTab.value = tabName;
+
+  // 알림 탭을 눌렀을 때만 서버 요청
+  if (tabName === 'NOTI') {
+    try {
+      const res = await api.get('/friends/notifications');
+      notifications.value = res.data;
+      
+      // (선택) 확인했으니 읽지 않은 알림 수 0으로 초기화
+      // unreadNotiCount.value = 0; 
+    } catch (e) {
+      console.error("알림 목록 로드 실패:", e);
+    }
+  }
+};
+
+// [수정] 친구 요청 수락/거절 처리
+const handleFriendAction = async (action, noti) => {
+  // 1. 데이터 확인 로그 (브라우저 콘솔(F12)에 찍힙니다)
+  console.log(`[프론트] 친구 ${action} 요청 시작:`, noti);
+
+  // 2. 안전장치: 보낸 사람 ID가 없으면 멈춤!
+  if (!noti.senderId) {
+    alert("오류: 보낸 사람 정보(senderId)가 없습니다. 알림을 새로고침 해주세요.");
+    return;
+  }
+
+  try {
+    // 3. 서버로 전송 (이때 senderId가 꼭 있어야 함!)
+    await api.post(`/friends/${action}`, { 
+      senderId: noti.senderId, 
+      notiId: noti.id 
+    });
+
+    // 4. 성공 시 목록에서 즉시 제거
+    notifications.value = notifications.value.filter(n => n.id !== noti.id);
+    unreadNotiCount.value = Math.max(0, unreadNotiCount.value - 1);
+    
+    alert(action === 'accept' ? "친구 요청을 수락했습니다! 🎉" : "요청을 거절했습니다.");
+    
+    // (선택) 수락했으니 내 친구 목록 숫자 업데이트
+    if (action === 'accept') {
+       // 친구 목록 갱신 트리거가 필요할 수 있음
+    }
+
+  } catch (e) {
+    console.error(e);
+    alert("처리 중 오류가 발생했습니다.");
+  }
+};
+
+// 프로젝트 초대 수락/거절 처리
+const handleProjectAction = async (action, noti) => {
+  if (!confirm(action === 'accept' ? "프로젝트 초대를 수락하시겠습니까?" : "정말 거절하시겠습니까?")) return;
+
+  try {
+    // 1. 서버 요청 (/projects/accept 또는 /projects/reject)
+    await api.post(`/projects/${action}`, { 
+      notiId: noti.id,
+      webId: noti.relId // 알림 생성 시 저장된 프로젝트 ID
+    });
+
+    // 2. 알림 목록에서 제거
+    notifications.value = notifications.value.filter(n => n.id !== noti.id);
+    unreadNotiCount.value = Math.max(0, unreadNotiCount.value - 1);
+
+    // 3. 수락했다면? -> 내 프로젝트 목록(Collaborating) 갱신이 필요함!
+    if (action === 'accept') {
+      const res = await api.get('/member/me'); // 최신 데이터 다시 로드
+      sharedProjects.value = res.data.sharedProjects || [];
+      sharedProjectCount.value = res.data.member.sharedProjectCount || 0;
+      alert("프로젝트에 참여했습니다! 워크스페이스를 확인해보세요. 🎉");
+    } else {
+      alert("초대를 거절했습니다.");
+    }
+
+  } catch (e) {
+    console.error(e);
+    alert(e.response?.data?.message || "처리 중 오류가 발생했습니다.");
+  }
+};
 
 // 2. 초기 데이터 로드 (백엔드 API 연동)
 onMounted(async () => {
@@ -161,7 +245,7 @@ onMounted(() => {
 const confirmDelete = async (webId) => {
   activeMenuId.value = null; // 메뉴를 먼저 닫음
 
-  if (!confirm("정말로 이 프로젝트를 삭제하시겠습니까?")) return;
+  // if (!confirm("정말로 이 프로젝트를 삭제하시겠습니까?")) return;
 
   try {
     // 서버에 삭제 요청 (설계하신 /projects/:id 경로 사용)
@@ -173,13 +257,44 @@ const confirmDelete = async (webId) => {
     // 상단 통계 숫자 1 감소
     myProjectCount.value = Math.max(0, myProjectCount.value - 1);
     
-    alert("삭제되었습니다.");
   } catch (error) {
     console.error("삭제 실패:", error);
     const msg = error.response?.data?.message || "삭제 권한이 없거나 오류가 발생했습니다.";
     alert(msg);
   }
 };
+</script>
+
+<script>
+import { useAuthStore } from '@/stores/auth';
+
+export default {
+  // 컴포넌트가 생성되기 전에 실행되는 네비게이션 가드
+  async beforeRouteEnter(to, from, next) {
+    const authStore = useAuthStore();
+
+    // 1. 이미 로그인 된 상태라면 바로 통과
+    if (authStore.isAuthed) {
+      next();
+      return;
+    }
+
+    // 2. 로그인 상태가 아니라면 (새로고침 등), 서버에 쿠키 체크(bootstrap) 요청
+    try {
+      const isSuccess = await authStore.bootstrap(); // 서버에 "나 로그인 유지 중이야?" 물어봄
+      
+      if (isSuccess) {
+        next(); // "어, 너 로그인 맞아" -> 통과
+      } else {
+        throw new Error('인증 실패');
+      }
+    } catch (e) {
+      // 3. 인증 실패 시 로그인 페이지로 보냄
+      alert('로그인이 필요한 서비스입니다.');
+      next('/login');
+    }
+  }
+}
 </script>
 
 <template>
@@ -234,8 +349,8 @@ const confirmDelete = async (webId) => {
         </div>
 
         <div class="stat-card" 
-            :class="{ active: currentTab === 'ALL' }" 
-            @click="currentTab = 'ALL'" 
+            :class="{ active: currentTab === 'NOTI' }" 
+            @click="changeTab('NOTI')" 
             style="cursor:pointer">
           <div class="stat-number">{{ unreadNotiCount }}</div>
           <div class="stat-label">New Alerts</div>
@@ -244,51 +359,88 @@ const confirmDelete = async (webId) => {
 
       <section class="activity-section">
         <h2 class="activity-title" @click="currentTab = 'ALL'" style="cursor:pointer">
-          Your Workspaces <small v-if="currentTab !== 'ALL'">(Filtering: {{ currentTab }})</small>
+          {{ currentTab === 'NOTI' ? 'Notifications' : 'Your Workspaces' }}
+          <small v-if="currentTab !== 'ALL' && currentTab !== 'NOTI'">(Filtering: {{ currentTab }})</small>
         </h2>
         
-        <div class="project-grid">
+        <div v-if="currentTab === 'NOTI'" class="notification-list">
+          <div v-if="notifications.length > 0" class="noti-wrapper">
+            <div v-for="noti in notifications" :key="noti.id" class="noti-item">
+              
+            <div v-if="noti.type === 'FRIEND_REQ'" class="noti-content">
+              <span class="icon">💌</span>
+              <div class="text">
+                <span class="sender">{{ noti.senderName }}</span>님이 친구 요청을 보냈습니다.
+              </div>
+              
+              <div class="noti-actions">
+                <button class="btn-xs accept" @click="handleFriendAction('accept', noti)">수락</button>
+                <button class="btn-xs reject" @click="handleFriendAction('reject', noti)">거절</button>
+              </div>
+              
+              <span class="date">{{ formatDate(noti.regDate) }}</span>
+            </div>
+
+              <div v-else-if="noti.type === 'PROJECT_INVITE'" class="noti-content">
+                <span class="icon">📁</span>
+                <div class="text">
+                  <span class="sender">{{ noti.senderName }}</span>님이 프로젝트에 초대했습니다.
+                </div>
+                
+                <div class="noti-actions">
+                  <button class="btn-xs accept" @click="handleProjectAction('accept', noti)">수락</button>
+                  <button class="btn-xs reject" @click="handleProjectAction('reject', noti)">거절</button>
+                </div>
+
+                <span class="date">{{ formatDate(noti.regDate) }}</span>
+              </div>
+
+            </div>
+          </div>
+
+          <div v-else class="empty-msg">
+            🔔 현재 확인된 새로운 알림이 없습니다.
+          </div>
+        </div>
+
+        <div v-else class="project-grid">
           <div v-for="web in filteredProjects" 
-              :key="web.id" 
-              class="activity-item project-card"
-              :class="{ shared: web.role !== 'OWNER' }">
+                :key="web.id" 
+                class="activity-item project-card"
+                :class="{ shared: web.role !== 'OWNER' }">
             
             <div class="project-info">
-<div class="activity-text">
-  {{ web.role === 'OWNER' ? '📁' : '🤝' }}
-  
-  <span v-if="!web.isEditing" @dblclick="startRename(web)" class="editable-title">
-    {{ web.title }}
-  </span>
-  
-  <input v-else 
-         v-model="web.tempTitle" 
-         @blur="saveNewName(web)" 
-         @keyup.enter="saveNewName(web)"
-         class="inline-edit-input" 
-         autofocus />
-</div>
-              
+              <div class="activity-text">
+                {{ web.role === 'OWNER' ? '📁' : '🤝' }}
+                <span v-if="!web.isEditing" @dblclick="startRename(web)" class="editable-title">
+                  {{ web.title }}
+                </span>
+                <input v-else 
+                        v-model="web.tempTitle" 
+                        @blur="saveNewName(web)" 
+                        @keyup.enter="saveNewName(web)"
+                        class="inline-edit-input" 
+                        autofocus />
+              </div>
               <div class="activity-time">
                 {{ web.role }} | Last updated: {{ formatDate(web.updateDate) }}
                 <span v-if="web.ownerNickname">| From @{{ web.ownerNickname }}</span>
               </div>
             </div>
 
-            <div class="menu-container" style="position: relative; display: inline-block; margin-right: 12px;">
+            <div class="menu-container">
               <button class="btn-more" @click.stop="toggleMenu(web.id)">⋮</button>
-              
               <div v-if="activeMenuId === web.id" class="dropdown-menu">
                   <button v-if="web.role === 'OWNER'" class="delete-opt" @click="confirmDelete(web.id)">
                     Delete
                   </button>
               </div>
-          </div>
+            </div>
             
             <button class="btn-sm" @click="enterIDE(web.id)">
               {{ web.role === 'OWNER' ? 'Open' : 'Join' }}
             </button>
-          </div>
+            </div>
 
           <div v-if="filteredProjects.length === 0" class="empty-msg">
             표시할 프로젝트가 없습니다.
@@ -365,7 +517,36 @@ header {
   color: #0a1628;
   font-weight: 900;
 }
+/* 7. 워크스페이스(카드) 섹션 수정 */
+.project-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  
+  /* 높이 및 스크롤 설정 */
+  height: 150px;       /* 요청하신 고정 높이 */
+  overflow-y: auto;    /* 세로 내용이 넘치면 스크롤바 생성 */
+  padding-right: 10px; /* 스크롤바와 카드 사이의 여유 공간 */
+}
 
+/* (선택) 스크롤바 디자인을 더 깔끔하게 만들고 싶다면 추가하세요 */
+.project-grid::-webkit-scrollbar {
+  width: 6px;
+}
+
+.project-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+
+.project-grid::-webkit-scrollbar-thumb {
+  background: rgba(0, 217, 255, 0.3);
+  border-radius: 10px;
+}
+
+.project-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 217, 255, 0.5);
+}
 nav a {
   color: #b0b8c1;
   text-decoration: none;
@@ -639,5 +820,86 @@ main {
   align-items: center;
   justify-content: center;
 }
+
+/* [추가] 알림 리스트 스타일 */
+.noti-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.noti-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(0, 217, 255, 0.1);
+  padding: 1rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  transition: all 0.3s ease;
+}
+
+.noti-item:hover {
+  background: rgba(0, 217, 255, 0.05);
+  border-color: rgba(0, 217, 255, 0.3);
+}
+
+.noti-content {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+}
+
+.noti-content .icon {
+  font-size: 1.2rem;
+}
+
+.noti-content .text {
+  flex-grow: 1;
+  font-size: 0.95rem;
+  color: #e2e8f0;
+}
+
+.noti-content .sender {
+  color: #00d9ff;
+  font-weight: 700;
+}
+
+.noti-content .date {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-left: auto; /* 날짜를 오른쪽 끝으로 */
+}
+
+/* 버튼 스타일 */
+.noti-actions {
+  display: flex;
+  gap: 8px;
+  margin-right: 15px; /* 날짜와의 간격 */
+}
+
+.btn-xs {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: 0.2s;
+}
+
+.btn-xs.accept {
+  background: rgba(0, 217, 255, 0.15);
+  color: #00d9ff;
+  border-color: rgba(0, 217, 255, 0.3);
+}
+.btn-xs.accept:hover { background: #00d9ff; color: #0a1628; }
+
+.btn-xs.reject {
+  background: rgba(255, 77, 77, 0.15);
+  color: #ff4d4d;
+  border-color: rgba(255, 77, 77, 0.3);
+}
+.btn-xs.reject:hover { background: #ff4d4d; color: white; }
 
 </style>

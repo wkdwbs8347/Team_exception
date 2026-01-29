@@ -79,7 +79,7 @@ public interface MemberDao {
 void updatePassword(@Param("id") int id, @Param("newPassword") String newPassword);
 
 @Select("""
-    SELECT id, loginPw, nickname, bio
+    SELECT id, email ,loginPw, nickname, bio
     FROM `user`
     WHERE id = #{id}
 """)
@@ -105,5 +105,8 @@ List<Map<String, Object>> getMyProjects(@Param("userId") Integer userId);
     ORDER BY w.updateDate DESC
 """)
 List<Map<String, Object>> getSharedProjects(@Param("userId") Integer userId);
+
+@Update("UPDATE `user` SET is_login = #{status} WHERE id = #{id}")
+void updateLoginStatus(@Param("id") Integer id, @Param("status") int status);
 
 }

@@ -18,6 +18,8 @@ public class Member {
 	private String regDate; // 가입일 
 	private String authPath; // 회원가입 종류 / ? 일반회원가입 : 소셜로그인
 	private Integer status; // 회원유지 / 탈퇴유예 상태
+	private Integer isLogin; // status: 1=온라인, 0=오프라인
+	private String connectStatus; // 친구 목록에서 보여줄 상태
 	private int myProjectCount;    // My Projects 숫자
     private int sharedProjectCount;// Collaborating 숫자
     private int unreadNotiCount;   // New Alerts 숫자

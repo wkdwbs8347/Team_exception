@@ -15,6 +15,7 @@ CREATE TABLE `user` (
     , authPath VARCHAR(100) NOT NULL DEFAULT 'local' COMMENT '인증 경로 (local, 소셜 등)'
     , regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '가입일'
     , `status` TINYINT NOT NULL DEFAULT 1 COMMENT '1: 정상 0: 탈퇴유예'
+    , `is_login` TINYINT(1) DEFAULT 0 COMMENT '로그인 상태 (1:온라인, 0:오프라인)'
 );
 
 /* [자동로그인 토큰 관리] 
@@ -126,3 +127,4 @@ CREATE TABLE wc_user (
   UNIQUE KEY uq_email (email),
   UNIQUE KEY uq_nickname (nickname)
 );
+

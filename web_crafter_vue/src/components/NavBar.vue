@@ -1,16 +1,29 @@
 <script setup>
 import api from '@/api/axios';
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue';
 import { useAuthStore } from '@/stores/auth';
-import { Blocks } from 'lucide-vue-next';
+import { Blocks, Users, Bell, UserPlus } from 'lucide-vue-next'; // 👈 [수정] Users 아이콘 추가
+import FriendListModal from '@/modal/FriendListModal.vue'; // 👈 [추가] 모달 불러오기
 
 
 defineProps({ scrollY: Number });
 
+const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const isFriendListOpen = ref(false);
+const isMenuOpen = ref(false);
+const notificationCount = ref(0);
+
+watch(
+  () => route.path,
+  () => {
+    isFriendListOpen.value = false; // 친구 목록 닫기
+    isMenuOpen.value = false;       // 사이드 메뉴 닫기
+  }
+);
 
 /* ✅ 프로필 카드 클릭 → 마이페이지 이동 */
 const handleProfileCardClick = () => {
@@ -23,7 +36,7 @@ const handleProfileCardClick = () => {
   router.push('/mypage');
 };
 
-const isMenuOpen = ref(false);
+
 const toggleMenu = () => (isMenuOpen.value = !isMenuOpen.value);
 
 // 전역모달
@@ -53,30 +66,31 @@ const handleKeydown = (e) => {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
 
-  // 이미 정보가 있다면 API 호출 스킵 (선택 사항)
-  // if (auth.me) return; 
-
+  // 1. 내 정보 불러오기 (로그인 유지 확인용)
   try {
-    // 📡 서버에 "나 누구야?" 라고 물어봅니다.
     const response = await api.get('/member/me');
-    const data = response.data; // { member: {...}, ... }
-
-    console.log("서버가 준 진짜 데이터:", data);
-
-    // 💾 받아온 정보를 Pinia 스토어의 'me'에 저장합니다.
-    // (NavBar 템플릿에서 auth.me를 쓰고 있으므로 여기에 넣어야 합니다)
-    auth.me = data.member;
-    
-    // 로그인 상태 true로 변경 (스토어 로직에 따라 다를 수 있음)
-    auth.isAuthed = true; 
-
-    console.log("NavBar: 사용자 정보 로드 완료", auth.me);
+    // 순수한 유저 정보만 auth 스토어에 저장
+    auth.me = response.data.member;
+    auth.isAuthed = true;
   } catch (error) {
-    // 401 에러(비로그인)는 자연스러운 현상이므로 조용히 넘어갑니다.
-    // 로그인 안 한 사람은 guest 상태로 남습니다.
+    // 로그인 안 된 상태면 여기서 중단 (알림 로드 안 함)
     if (error.response?.status !== 401) {
-        console.error("사용자 정보 로드 실패:", error);
+       console.error("사용자 정보 로드 실패:", error);
     }
+    return; 
+  }
+
+  // 2. [수정] 알림 개수 따로 불러오기 (로그인 성공 시에만 실행됨)
+  try {
+    const notiRes = await api.get('/friends/notifications');
+    
+    // ✅ auth.me를 건드리지 않고, 내 전용 변수에 저장!
+    notificationCount.value = notiRes.data.length; 
+    
+    console.log("알림 개수 로드 완료:", notificationCount.value);
+  } catch (notiError) {
+    console.warn("알림 로드 실패:", notiError);
+    notificationCount.value = 0;
   }
 });
 
@@ -88,19 +102,75 @@ const handleLogout = async () => {
   try {
     await auth.logout();
     isMenuOpen.value = false;
+    isFriendListOpen.value = false;
     openModal('로그아웃 되었습니다.', 'success', () => router.push('/'));
   } catch (e) {
     openModal(e?.response?.data?.message || '로그아웃 실패', 'error');
   }
 };
 
+/* ✅ [추가] 읽지 않은 알림 개수 계산 */
+const unreadCount = computed(() => {
+  // auth.me가 덮어씌워져도 이 변수는 안전합니다.
+  return notificationCount.value;
+});
+
+/* ✅ [추가] 알림 버튼 클릭 시 마이페이지 이동 */
+const goToNotificationTab = () => {
+  if (!auth.isAuthed) {
+    openModal('로그인이 필요합니다.', 'warning');
+    return;
+  }
+  // 마이페이지 알림 탭으로 이동
+  router.push({ path: '/mypage', query: { tab: 'NOTI' } });
+  closeMenu(); // 혹시 메뉴가 열려있으면 닫기
+};
+
+/* ✅ [추가] 현재 페이지가 IDE(작업실)인지 확인하는 변수 */
+const isIdePage = computed(() => {
+  return route.path.startsWith('/ide/');
+});
+
+/* ✅ [추가] 초대 모달 열기 (나중에 실제 모달과 연결) */
+const friendModalMode = ref('manage'); 
+
+// [추가] 현재 프로젝트 ID (URL 파라미터에서 추출)
+const currentWebId = computed(() => route.params.webId);
+
+// ✅ [추가] 사이드바 '친구 목록' 클릭 시 실행할 함수 (이게 없어서 안 눌렸던 겁니다!)
+const openFriendManage = () => {
+  friendModalMode.value = 'manage'; // 관리 모드로 설정
+  isFriendListOpen.value = true;    // 모달 열기
+  closeMenu();                      // 사이드바 닫기
+};
+
+// ✅ [수정] 'Invite' 버튼 클릭 시 실행할 함수
+const openInviteModal = () => {
+  friendModalMode.value = 'invite'; // 초대 모드로 설정
+  isFriendListOpen.value = true;    // 모달 열기
+};
+
+// NavBar.vue의 createNewProject 함수 교체
 const createNewProject = async () => {
   try {
+    // [핵심 수정] 버튼 누른 시점에 내 정보(auth.me)가 없으면 서버에 다시 요청해서 채워넣음
+    if (!auth.me) {
+       try {
+         const res = await api.get('/member/me');
+         auth.me = res.data.member;
+         auth.isAuthed = true;
+       } catch (e) {
+         // 진짜 비로그인 상태라면 여기서 catch로 빠짐
+         console.log("비로그인 상태입니다.");
+       }
+    }
+
+    // 프로젝트 생성 요청
     const response = await api.post('/projects/create'); 
     const newWebId = response.data;
 
-    // 2. ✅ 닉네임 가져오기 수정 (auth.user -> auth.me)
-    // 위 onMounted에서 auth.me에 데이터를 넣었으므로 여기서도 me를 써야 합니다.
+    // 이제 auth.me가 확실히 있으므로 닉네임이 들어갑니다.
+    // 만약 여전히 없다면 진짜 비로그인이므로 guest가 맞습니다.
     const nickname = auth.me?.nickname || 'guest';
 
     router.push(`/ide/${nickname}/${newWebId}`);
@@ -149,6 +219,25 @@ const closeMenu = () => (isMenuOpen.value = false);
         </span>
       </div>
 
+      <div class="navbar-actions" v-if="auth.isAuthed">
+        
+        <button 
+          v-if="isIdePage" 
+          class="invite-btn" 
+          @click="openInviteModal"
+        >
+          <UserPlus :size="16" />
+          <span>Invite</span>
+        </button>
+
+        <button class="noti-btn" @click="goToNotificationTab" title="알림">
+          <Bell :size="24" />
+          <span v-if="unreadCount > 0" class="noti-badge">
+            {{ unreadCount > 99 ? '99+' : unreadCount }}
+          </span>
+        </button>
+      </div>
+
       <button
         class="menu-toggle"
         @click="toggleMenu"
@@ -157,108 +246,51 @@ const closeMenu = () => (isMenuOpen.value = false);
         <span></span><span></span><span></span>
       </button>
 
-      <!-- ✅ Service-grade Drawer -->
       <ul class="nav-menu" :class="{ active: isMenuOpen }">
-        <!-- 헤더: 왼쪽 브랜드 + 오른쪽 회원가입(비로그인만) -->
-        <li class="drawer-head">
-          <div class="drawer-brand">
-            <span class="drawer-title">Web Crafter</span>
-            <span class="drawer-sub">Workspace</span>
-          </div>
-
-          <RouterLink
-            v-if="!auth.isAuthed"
-            class="head-action"
-            to="/register"
-            @click="closeMenu"
-          >
-            회원가입
-          </RouterLink>
-        </li>
-
-        <!-- 메뉴 섹션 -->
-        <li class="drawer-section">
-          <button
-            class="drawer-item"
-            @click.prevent="createNewProject"
-          >
-            <span class="drawer-dot"></span>
-            <span class="drawer-text">웹 만들기</span>
-            <span class="drawer-chevron">›</span>
-          </button>
-        </li>
-
-        <li class="drawer-divider"></li>
-
-        <!-- 하단 프로필 + 오른쪽 로그인/로그아웃 버튼만 -->
-        <li class="drawer-footer">
-          <div class="profile-card" @click="handleProfileCardClick">
-            <div class="profile-left">
-              <!-- ✅ 프로필 이미지 영역 -->
-              <div class="avatar">
-                <!-- 로그인 상태 + 이미지 있을 때 -->
-                <img
-                  v-if="auth.isAuthed && auth.me?.profileImage"
-                  :src="auth.me.profileImage"
-                  alt="profile"
-                />
-
-                <!-- 로그인 상태 + 이미지 없을 때 -->
-                <span v-else-if="auth.isAuthed">
-                  {{ userInitial }}
-                </span>
-
-                <!-- 비로그인 상태 -->
-                <svg v-else class="avatar-icon" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5zM4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </div>
-
-              <!-- ✅ 텍스트 영역 -->
-              <div class="profile-meta" v-if="auth.isAuthed">
-                <div class="profile-name" :title="userName">{{ userName }}</div>
-                <div class="profile-sub" :title="userSub">{{ userSub }}</div>
-              </div>
-
-              <!-- ❌ 비로그인 상태는 ellipsis 없는 안내 문구 -->
-              <div class="profile-meta guest" v-else>
-                <div class="profile-guest-title">로그아웃 상태</div>
-                <div class="profile-guest-desc">
-                  로그인을 진행해주세요
-                </div>
-              </div>
+         <li class="drawer-head">
+            <div class="drawer-brand">
+              <span class="drawer-title">Web Crafter</span>
+              <span class="drawer-sub">Workspace</span>
             </div>
-
-            <div class="profile-actions">
-              <button
-                v-if="!auth.isAuthed"
-                class="profile-btn"
-                type="button"
-                @click.stop="
-                  closeMenu();
-                  router.push('/login');
-                "
-              >
-                로그인
-              </button>
-
-              <button
-                v-else
-                class="profile-btn danger"
-                type.stop="button"
-                @click="handleLogout"
-              >
-                로그아웃
-              </button>
+            <RouterLink v-if="!auth.isAuthed" class="head-action" to="/register" @click="closeMenu">
+              회원가입
+            </RouterLink>
+         </li>
+         <li class="drawer-section">
+            <button class="drawer-item" @click.prevent="createNewProject">
+              <span class="drawer-dot"></span><span class="drawer-text">웹 만들기</span><span class="drawer-chevron">›</span>
+            </button>
+            <button class="drawer-item" @click="openFriendManage">
+               <span style="display:flex; align-items:center; justify-content:center; margin-right:6px;">
+                 <Users :size="18" color="#00d4ff"/>
+               </span>
+               <span class="drawer-text">친구 목록</span><span class="drawer-chevron">›</span>
+            </button>
+         </li>
+         <li class="drawer-divider"></li>
+         <li class="drawer-footer">
+            <div class="profile-card" @click="handleProfileCardClick">
+               <div class="profile-left">
+                  <div class="avatar">
+                    <img v-if="auth.isAuthed && auth.me?.profileImage" :src="auth.me.profileImage" alt="profile" />
+                    <span v-else-if="auth.isAuthed">{{ userInitial }}</span>
+                    <svg v-else class="avatar-icon" viewBox="0 0 24 24" fill="none"><path d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5zM4 20c0-3.314 3.582-6 8-6s8 2.686 8 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </div>
+                  <div class="profile-meta" v-if="auth.isAuthed">
+                    <div class="profile-name" :title="userName">{{ userName }}</div>
+                    <div class="profile-sub" :title="userSub">{{ userSub }}</div>
+                  </div>
+                  <div class="profile-meta guest" v-else>
+                    <div class="profile-guest-title">로그아웃 상태</div>
+                    <div class="profile-guest-desc">로그인을 진행해주세요</div>
+                  </div>
+               </div>
+               <div class="profile-actions">
+                  <button v-if="!auth.isAuthed" class="profile-btn" type="button" @click.stop="closeMenu(); router.push('/login');">로그인</button>
+                  <button v-else class="profile-btn danger" type.stop="button" @click="handleLogout">로그아웃</button>
+               </div>
             </div>
-          </div>
-        </li>
+         </li>
       </ul>
     </div>
   </nav>
@@ -268,6 +300,14 @@ const closeMenu = () => (isMenuOpen.value = false);
     :message="modal.message"
     :type="modal.type"
     @confirm="closeModal"
+  />
+
+  <FriendListModal
+    :isOpen="isFriendListOpen"
+    :currentUser="auth.me"
+    :mode="friendModalMode"
+    :webId="currentWebId"
+    @close="isFriendListOpen = false"
   />
 </template>
 
@@ -916,4 +956,107 @@ const closeMenu = () => (isMenuOpen.value = false);
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
+/* ... 기존 스타일 끝나는 곳 바로 아래에 추가 👇 ... */
+
+/* =========================
+   ✅ [추가] 알림 벨(Bell) 스타일
+========================= */
+
+/* 로고와 햄버거 버튼 사이 공간을 밀어내서 오른쪽으로 붙임 */
+.navbar-actions {
+  margin-left: auto; /* 핵심: 왼쪽 여백을 다 차지해서 오른쪽으로 밀어버림 */
+  margin-right: 12px; /* 햄버거 버튼과의 간격 */
+  display: flex;
+  align-items: center;
+}
+
+.noti-btn {
+  position: relative;
+  background: transparent;
+  border: none;
+  color: #b0b8c1;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+/* 마우스 올렸을 때 네온 효과 */
+.noti-btn:hover {
+  color: #00d4ff;
+  background: rgba(0, 212, 255, 0.1);
+  transform: translateY(-1px);
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+}
+
+.noti-btn:active {
+  transform: scale(0.95);
+}
+
+/* 빨간색 숫자 뱃지 */
+.noti-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #ef4444; /* Alert Red */
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #1a1a2e; /* 배경색과 맞춰서 분리감 줌 */
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  from { transform: scale(0); }
+  to { transform: scale(1); }
+}
+
+/* ... 기존 스타일 맨 아래에 추가 ... */
+
+/* 초대 버튼 스타일 */
+.invite-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  
+  /* 알림 종과 간격 */
+  margin-right: 12px; 
+  
+  padding: 6px 14px;
+  height: 36px;
+  border-radius: 8px;
+  border: none;
+  
+  /* 눈에 띄는 네온 컬러 배경 */
+  background: rgba(0, 212, 255, 0.15); 
+  border: 1px solid rgba(0, 212, 255, 0.4);
+  color: #00d4ff;
+  
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.invite-btn:hover {
+  background: #00d4ff;
+  color: #0a1628; /* 글자색을 어둡게 반전 */
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.4);
+  transform: translateY(-1px);
+}
+
+.invite-btn:active {
+  transform: scale(0.96);
+}
 </style>

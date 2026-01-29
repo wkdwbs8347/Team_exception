@@ -3,10 +3,14 @@ package com.example.web_crafter_java.service;
 import com.example.web_crafter_java.dao.ProjectDao;
 import com.example.web_crafter_java.dto.UserWeb;
 import com.example.web_crafter_java.dto.UserWebPage;
+
+import java.util.Collections;
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import com.example.web_crafter_java.dto.ProjectExploreDto;
 @Service
 public class ProjectService {
     @Autowired
@@ -97,4 +101,79 @@ public void insertNewPage(com.example.web_crafter_java.dto.UserWebPage pageData)
     this.insertNewPage(pageData); // 이미 있는 insertNewPage 실행!
 }
 
+public void inviteUser(Integer myId, Integer targetId, Integer webId) {
+        // 1. 유효성 검사: 본인을 초대할 순 없음
+        if (myId.equals(targetId)) {
+            throw new RuntimeException("본인은 초대할 수 없습니다.");
+        }
+
+        // 2. 이미 멤버인지 확인 (DAO 호출)
+        // (만약 DAO에 isMember가 없다면 추가해야 합니다)
+        if (projectDao.isMember(webId, targetId) > 0) {
+            throw new RuntimeException("이미 이 프로젝트의 멤버입니다.");
+        }
+
+        // 3. 초대장(알림) 발송
+        projectDao.inviteMember(myId, targetId, webId);
+    }
+
+    /**
+     * [초대 수락] 알림을 통해 프로젝트 멤버로 정식 등록합니다.
+     * 트랜잭션 필수: 멤버 추가와 알림 삭제가 동시에 이루어져야 함
+     */
+    @Transactional
+    public void acceptInvite(Integer myId, Integer notiId, Integer webId) {
+        // 1. 멤버 테이블에 추가 (권한: EDITOR)
+        projectDao.addMember(webId, myId);
+
+        // 2. 처리된 알림 삭제 (더 이상 알림창에 안 뜨게)
+        projectDao.deleteNotification(notiId);
+    }
+
+    public java.util.List<Integer> getProjectMemberIds(Integer webId) {
+        return projectDao.selectMemberIds(webId);
+    }
+
+    // 초대 대기 중인 ID 목록
+    public java.util.List<Integer> getPendingInviteIds(Integer webId) {
+        return projectDao.selectPendingInviteIds(webId);
+    }
+    
+    
+    // =========================================================
+    // 🔥 [핵심 수정] 탐색 페이지 로직 (MyBatis 버전으로 완벽 교체)
+    // =========================================================
+    @Transactional(readOnly = true)
+    public List<ProjectExploreDto> getExploreProjects(String keyword, int page, int size) {
+        
+        // 1. MyBatis용 페이징 계산 (Offset = 페이지번호 * 개수)
+        int offset = page * size;
+
+        // 2. DAO 호출 (JPA Repository 아님!)
+        List<ProjectExploreDto> projects = projectDao.selectExploreProjects(keyword, size, offset);
+
+        // 3. 데이터 후처리 (Null 방지)
+        if (projects != null) {
+            for (ProjectExploreDto p : projects) {
+                // DB에 태그가 없으므로 빈 리스트로 설정 (안 하면 프론트에서 에러남)
+                if (p.getTechTags() == null) {
+                    p.setTechTags(Collections.emptyList());
+                }
+            }
+        } else {
+            return Collections.emptyList();
+        }
+
+        return projects;
+    }
+
+    // 1. 내 프로젝트 전체 목록 조회 (대시보드용)
+    public java.util.List<java.util.Map<String, Object>> getMyAllProjects(Integer userId) {
+        return projectDao.selectMyAllProjects(userId);
+    }
+
+    // 2. 초대 거절 (알림 삭제)
+    public void rejectInvite(Integer notiId) {
+        projectDao.deleteNotification(notiId);
+    }
 }

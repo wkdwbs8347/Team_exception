@@ -1,13 +1,5 @@
 <!-- =========================
-✅ ContentAttr.vue (컨텐츠속성)
-- ✅ "속성 적용 대상" 블록(컨테이너) + 아래로 속성 블록을 쌓는 구조
-- ✅ 속성 블록은 WC_ATTR statement 체인으로 무한 연결
-- ✅ HTML에 직접 style="" 박지 않음 / data-wc-attrs 로만 전달 → iframe에서 selector로 적용
-- ✅ 대상 입력 규칙:
-    1) "이름:클래스"  -> ".클래스"
-    2) "클래스"       -> ".클래스"
-    3) "#id"          -> "#id"
-    4) "[...]"        -> 그대로 selector
+✅ ContentAttr.vue (컨텐츠속성) - "속성은 코드 생성 X, HTML에 병합만"
 ========================= -->
 <script>
 import * as Blockly from 'blockly'
@@ -39,64 +31,138 @@ const DUPLICATE_FIELDS = [
   ['닉네임(nickname)', 'nickname'],
 ]
 
-// ===== 툴박스 =====
+// ===== 툴박스 (간격 통일) =====
 export const toolbox = `
 <xml>
-  <block type="wc_attr_apply"></block>
+  <block type="wc_attr_apply" gap="10"></block>
 
-  <sep></sep>
-  <block type="wc_attr_id"></block>
-  <block type="wc_attr_class_add"></block>
-  <block type="wc_attr_data"></block>
-  <block type="wc_attr_aria"></block>
+  <sep gap="18"></sep>
+  <block type="wc_attr_id" gap="10"></block>
+  <block type="wc_attr_class_add" gap="10"></block>
+  <block type="wc_attr_data" gap="10"></block>
+  <block type="wc_attr_aria" gap="10"></block>
 
-  <sep></sep>
-  <block type="wc_attr_style"></block>
-  <block type="wc_attr_placeholder"></block>
-  <block type="wc_attr_value"></block>
+  <sep gap="18"></sep>
+  <block type="wc_attr_style" gap="10"></block>
+  <block type="wc_attr_placeholder" gap="10"></block>
+  <block type="wc_attr_value" gap="10"></block>
 
-  <sep></sep>
-  <block type="wc_attr_required"></block>
-  <block type="wc_attr_disabled"></block>
-  <block type="wc_attr_readonly"></block>
+  <sep gap="18"></sep>
+  <block type="wc_attr_required" gap="10"></block>
+  <block type="wc_attr_disabled" gap="10"></block>
+  <block type="wc_attr_readonly" gap="10"></block>
 
-  <sep></sep>
-  <block type="wc_attr_target_blank"></block>
-  <block type="wc_attr_rel_noopener"></block>
-  <block type="wc_attr_for"></block>
+  <sep gap="18"></sep>
+  <block type="wc_attr_target_blank" gap="10"></block>
+  <block type="wc_attr_rel_noopener" gap="10"></block>
+  <block type="wc_attr_for" gap="10"></block>
 
-  <sep></sep>
-  <block type="wc_attr_server_field"></block>
-  <block type="wc_attr_duplicate_target"></block>
+  <sep gap="18"></sep>
+  <block type="wc_attr_server_field" gap="10"></block>
+  <block type="wc_attr_duplicate_target" gap="10"></block>
+
+  <sep gap="18"></sep>
+  <block type="wc_attr_text_segment" gap="10"></block>
 </xml>
 `
 
 // ============================================================
-// ✅ 블록 정의
+// ✅ 대상 문자열 → selector 변환 (IDE/프리뷰에서도 재사용 가능)
 // ============================================================
-export const defineBlocks = () => {
-  // ---------------------------
-  // 공통 UI helper
-  // ---------------------------
-  const title = (block, label) => {
-    block.appendDummyInput('T').appendField(label)
+export const parseTargetToSelector = (raw) => {
+  const s = (raw || '').trim()
+  if (!s) return ''
+  if (s.startsWith('[') && s.endsWith(']')) return s
+  if (s.startsWith('#')) return s
+  const parts = s.split(':')
+  if (parts.length === 2) return '.' + (parts[1] || '').trim()
+  return '.' + s
+}
+
+// ============================================================
+// ✅ workspace에서 "속성 적용 대상" 블록들을 수집 (코드 생성 X)
+// - 반환: [{ target: '...', ops:[...]}]
+// ============================================================
+export const collectContentAttrsFromWorkspace = (workspace) => {
+  if (!workspace) return []
+
+  const bundles = []
+  const blocks = workspace.getAllBlocks(false)
+
+  for (const b of blocks) {
+    if (b.type !== 'wc_attr_apply') continue
+
+    const target = (b.getFieldValue('TARGET') || '').trim()
+    if (!target) continue
+
+    const ops = []
+    let cur = b.getInputTargetBlock('ATTRS')
+
+    while (cur) {
+      const t = cur.type
+
+      if (t === 'wc_attr_id') ops.push({ t: 'id', v: (cur.getFieldValue('ID') || '').trim() })
+      else if (t === 'wc_attr_class_add') ops.push({ t: 'class_add', v: (cur.getFieldValue('CLS') || '').trim() })
+      else if (t === 'wc_attr_data')
+        ops.push({ t: 'data', k: (cur.getFieldValue('KEY') || '').trim(), v: (cur.getFieldValue('VAL') || '').trim() })
+      else if (t === 'wc_attr_aria')
+        ops.push({ t: 'aria', k: (cur.getFieldValue('KEY') || '').trim(), v: (cur.getFieldValue('VAL') || '').trim() })
+      else if (t === 'wc_attr_style') ops.push({ t: 'style', v: (cur.getFieldValue('CSS') || '').trim() })
+      else if (t === 'wc_attr_placeholder') ops.push({ t: 'placeholder', v: (cur.getFieldValue('VAL') || '').trim() })
+      else if (t === 'wc_attr_value') ops.push({ t: 'value', v: (cur.getFieldValue('VAL') || '').trim() })
+      else if (t === 'wc_attr_required') ops.push({ t: 'required' })
+      else if (t === 'wc_attr_disabled') ops.push({ t: 'disabled' })
+      else if (t === 'wc_attr_readonly') ops.push({ t: 'readonly' })
+      else if (t === 'wc_attr_target_blank') ops.push({ t: 'target_blank' })
+      else if (t === 'wc_attr_rel_noopener') ops.push({ t: 'rel_noopener' })
+      else if (t === 'wc_attr_for') ops.push({ t: 'for', v: (cur.getFieldValue('VAL') || '').trim() })
+      else if (t === 'wc_attr_server_field') ops.push({ t: 'server_field', v: (cur.getFieldValue('KEY') || '').trim() })
+      else if (t === 'wc_attr_duplicate_target') ops.push({ t: 'dup_target', v: (cur.getFieldValue('KEY') || '').trim() })
+      else if (t === 'wc_attr_text_segment')
+        ops.push({
+          t: 'text_segment',
+          base: (cur.getFieldValue('BASE') || '').trim(),
+          text: (cur.getFieldValue('TEXT') || '').trim(),
+          cls: (cur.getFieldValue('CLS') || '').trim(),
+          mode: cur.getFieldValue('MODE') || 'after',
+        })
+
+      cur = cur.getNextBlock()
+    }
+
+    if (ops.length === 0) continue
+    bundles.push({ target, ops })
   }
 
-  // ✅ 여기로 "속성 블록"만 들어오게 제한
+  return bundles
+}
+
+// ============================================================
+// ✅ 블록 정의 (⚠️ 기능은 그대로, “보이는 라벨만” 초보자용으로 변경)
+// ============================================================
+export const defineBlocks = () => {
   const ATTR_CHECK = 'WC_ATTR'
+
+  // ✅ 공통: 한 줄 DummyInput
+  const makeRow = (block, label) => {
+    const row = block.appendDummyInput('ROW')
+    row.appendField(label)
+    return row
+  }
 
   // =========================================================
   // 1) ✅ 속성 적용 대상(컨테이너)
   // =========================================================
   Blockly.Blocks['wc_attr_apply'] = {
     init() {
-      title(this, '🏷️ 속성 적용 대상')
+      this.appendDummyInput('HEAD').appendField('🏷️ 속성 적용 대상')
 
+      // ✅ TARGET 필드 키는 유지
       this.appendDummyInput('ROW')
         .appendField('대상')
-        .appendField(new Blockly.FieldTextInput('예) 제목:titleClass'), 'TARGET')
+        .appendField(new Blockly.FieldTextInput('이름'), 'TARGET')
 
-      this.appendStatementInput('ATTRS').setCheck(ATTR_CHECK).appendField('속성들')
+      this.appendStatementInput('ATTRS').setCheck(ATTR_CHECK).appendField('속성')
 
       this.setPreviousStatement(true, 'ELEMENT')
       this.setNextStatement(true, 'ELEMENT')
@@ -106,16 +172,13 @@ export const defineBlocks = () => {
   }
 
   // =========================================================
-  // 2) ✅ 속성 블록들 (모두 statement)
+  // 2) ✅ 속성 블록들 (statement)
   // =========================================================
 
-  // (a) id
   Blockly.Blocks['wc_attr_id'] = {
     init() {
-      title(this, '🆔 아이디(id)')
-      this.appendDummyInput('ROW')
-        .appendField('값')
-        .appendField(new Blockly.FieldTextInput(''), 'ID')
+      const row = makeRow(this, '🆔 요소에 ID 붙이기')
+      row.appendField('ID 값').appendField(new Blockly.FieldTextInput(''), 'ID')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -123,13 +186,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (b) class+ (추가)
   Blockly.Blocks['wc_attr_class_add'] = {
     init() {
-      title(this, '🏷️ 클래스 추가')
-      this.appendDummyInput('ROW')
-        .appendField('값')
-        .appendField(new Blockly.FieldTextInput('extra-class'), 'CLS')
+      const row = makeRow(this, '🏷️ 클래스 추가하기')
+      row.appendField('클래스명').appendField(new Blockly.FieldTextInput('extra-class'), 'CLS')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -137,12 +197,11 @@ export const defineBlocks = () => {
     },
   }
 
-  // (c) data-*
   Blockly.Blocks['wc_attr_data'] = {
     init() {
-      title(this, '📦 data-*')
-      this.appendDummyInput('ROW')
-        .appendField('키')
+      const row = makeRow(this, '📦 데이터(data-*) 저장하기')
+      row
+        .appendField('이름')
         .appendField(new Blockly.FieldTextInput('foo'), 'KEY')
         .appendField('값')
         .appendField(new Blockly.FieldTextInput('bar'), 'VAL')
@@ -153,12 +212,11 @@ export const defineBlocks = () => {
     },
   }
 
-  // (d) aria-*
   Blockly.Blocks['wc_attr_aria'] = {
     init() {
-      title(this, '♿ aria-*')
-      this.appendDummyInput('ROW')
-        .appendField('키')
+      const row = makeRow(this, '♿ 접근성(aria-*) 설정')
+      row
+        .appendField('이름')
         .appendField(new Blockly.FieldTextInput('label'), 'KEY')
         .appendField('값')
         .appendField(new Blockly.FieldTextInput(''), 'VAL')
@@ -169,13 +227,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (e) style (data-wc-style에 누적)
   Blockly.Blocks['wc_attr_style'] = {
     init() {
-      title(this, '🎨 스타일')
-      this.appendDummyInput('ROW')
-        .appendField('CSS')
-        .appendField(new Blockly.FieldTextInput(''), 'CSS')
+      const row = makeRow(this, '🎨 스타일(CSS) 추가')
+      row.appendField('CSS').appendField(new Blockly.FieldTextInput(''), 'CSS')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -183,13 +238,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (f) placeholder
   Blockly.Blocks['wc_attr_placeholder'] = {
     init() {
-      title(this, '💬 안내문(placeholder)')
-      this.appendDummyInput('ROW')
-        .appendField('값')
-        .appendField(new Blockly.FieldTextInput(''), 'VAL')
+      const row = makeRow(this, '💬 입력 안내문(placeholder)')
+      row.appendField('안내문').appendField(new Blockly.FieldTextInput(''), 'VAL')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -197,13 +249,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (g) value
   Blockly.Blocks['wc_attr_value'] = {
     init() {
-      title(this, '✍️ 기본값(value)')
-      this.appendDummyInput('ROW')
-        .appendField('값')
-        .appendField(new Blockly.FieldTextInput(''), 'VAL')
+      const row = makeRow(this, '✍️ 기본 입력값(value) 넣기')
+      row.appendField('기본값').appendField(new Blockly.FieldTextInput(''), 'VAL')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -211,10 +260,9 @@ export const defineBlocks = () => {
     },
   }
 
-  // (h) required
   Blockly.Blocks['wc_attr_required'] = {
     init() {
-      title(this, '✅ 필수(required)')
+      makeRow(this, '✅ 꼭 입력해야 함(필수)')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -222,10 +270,9 @@ export const defineBlocks = () => {
     },
   }
 
-  // (i) disabled
   Blockly.Blocks['wc_attr_disabled'] = {
     init() {
-      title(this, '⛔ 비활성(disabled)')
+      makeRow(this, '⛔ 사용 못하게 막기(비활성)')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -233,10 +280,9 @@ export const defineBlocks = () => {
     },
   }
 
-  // (j) readonly
   Blockly.Blocks['wc_attr_readonly'] = {
     init() {
-      title(this, '👀 읽기전용(readonly)')
+      makeRow(this, '👀 읽기만 가능(수정 불가)')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -244,10 +290,9 @@ export const defineBlocks = () => {
     },
   }
 
-  // (k) target _blank
   Blockly.Blocks['wc_attr_target_blank'] = {
     init() {
-      title(this, '🔗 새탭(target=_blank)')
+      makeRow(this, '🔗 링크를 새 탭에서 열기')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -255,10 +300,9 @@ export const defineBlocks = () => {
     },
   }
 
-  // (l) rel noopener
   Blockly.Blocks['wc_attr_rel_noopener'] = {
     init() {
-      title(this, '🛡️ rel(noopener)')
+      makeRow(this, '🛡️ 새 탭 보안 설정(noopener)')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -266,13 +310,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (m) label for
   Blockly.Blocks['wc_attr_for'] = {
     init() {
-      title(this, '🏷️ for(라벨 연결)')
-      this.appendDummyInput('ROW')
-        .appendField('값')
-        .appendField(new Blockly.FieldTextInput(''), 'VAL')
+      const row = makeRow(this, '🏷️ 라벨과 입력칸 연결(for)')
+      row.appendField('연결할 ID').appendField(new Blockly.FieldTextInput(''), 'VAL')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -280,13 +321,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (n) 서버필드(name + data-wc-field)
   Blockly.Blocks['wc_attr_server_field'] = {
     init() {
-      title(this, '🔗 서버필드')
-      this.appendDummyInput('ROW')
-        .appendField('선택')
-        .appendField(new Blockly.FieldDropdown(SERVER_FIELDS), 'KEY')
+      const row = makeRow(this, '🔗 서버로 보낼 이름(name) 지정')
+      row.appendField('필드 선택').appendField(new Blockly.FieldDropdown(SERVER_FIELDS), 'KEY')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -294,13 +332,10 @@ export const defineBlocks = () => {
     },
   }
 
-  // (o) 중복확인 target (data-wc-action/target)
   Blockly.Blocks['wc_attr_duplicate_target'] = {
     init() {
-      title(this, '✅ 중복확인 target')
-      this.appendDummyInput('ROW')
-        .appendField('대상')
-        .appendField(new Blockly.FieldDropdown(DUPLICATE_FIELDS), 'KEY')
+      const row = makeRow(this, '✅ 중복확인 대상 지정')
+      row.appendField('무엇을?').appendField(new Blockly.FieldDropdown(DUPLICATE_FIELDS), 'KEY')
       this.setPreviousStatement(true, ATTR_CHECK)
       this.setNextStatement(true, ATTR_CHECK)
       this.setColour('#607d8b')
@@ -308,68 +343,44 @@ export const defineBlocks = () => {
     },
   }
 
-  // =========================================================
-  // ✅ Generator
-  // - wc_attr_apply만 HTML에 "숨김 데이터"를 출력
-  // - 나머지 속성 블록은 단독 출력 금지(빈 문자열)
-  // =========================================================
+  Blockly.Blocks['wc_attr_text_segment'] = {
+    init() {
+      this.appendDummyInput('HEAD').appendField('✏️ 텍스트 옆에 문구 추가')
 
-  const safeAttr = (v) => (v ?? '').toString().replace(/"/g, '&quot;').trim()
+      // ✅ BASE/TEXT/CLS/MODE 필드 키 유지
+      this.appendDummyInput('ROW1')
+        .appendField('기준 문구')
+        .appendField(new Blockly.FieldTextInput('텍스트'), 'BASE')
 
-  const collectOps = (applyBlock) => {
-    const ops = []
-    let b = applyBlock.getInputTargetBlock('ATTRS')
-    while (b) {
-      const t = b.type
-      if (t === 'wc_attr_id') ops.push({ t: 'id', v: (b.getFieldValue('ID') || '').trim() })
-      else if (t === 'wc_attr_class_add')
-        ops.push({ t: 'class_add', v: (b.getFieldValue('CLS') || '').trim() })
-      else if (t === 'wc_attr_data')
-        ops.push({
-          t: 'data',
-          k: (b.getFieldValue('KEY') || '').trim(),
-          v: (b.getFieldValue('VAL') || '').trim(),
-        })
-      else if (t === 'wc_attr_aria')
-        ops.push({
-          t: 'aria',
-          k: (b.getFieldValue('KEY') || '').trim(),
-          v: (b.getFieldValue('VAL') || '').trim(),
-        })
-      else if (t === 'wc_attr_style') ops.push({ t: 'style', v: (b.getFieldValue('CSS') || '').trim() })
-      else if (t === 'wc_attr_placeholder')
-        ops.push({ t: 'placeholder', v: (b.getFieldValue('VAL') || '').trim() })
-      else if (t === 'wc_attr_value') ops.push({ t: 'value', v: (b.getFieldValue('VAL') || '').trim() })
-      else if (t === 'wc_attr_required') ops.push({ t: 'required' })
-      else if (t === 'wc_attr_disabled') ops.push({ t: 'disabled' })
-      else if (t === 'wc_attr_readonly') ops.push({ t: 'readonly' })
-      else if (t === 'wc_attr_target_blank') ops.push({ t: 'target_blank' })
-      else if (t === 'wc_attr_rel_noopener') ops.push({ t: 'rel_noopener' })
-      else if (t === 'wc_attr_for') ops.push({ t: 'for', v: (b.getFieldValue('VAL') || '').trim() })
-      else if (t === 'wc_attr_server_field') ops.push({ t: 'server_field', v: (b.getFieldValue('KEY') || '').trim() })
-      else if (t === 'wc_attr_duplicate_target')
-        ops.push({ t: 'dup_target', v: (b.getFieldValue('KEY') || '').trim() })
+      this.appendDummyInput('ROW2')
+        .appendField('추가할 문구')
+        .appendField(new Blockly.FieldTextInput(''), 'TEXT')
+        .appendField('추가문구 이름')
+        .appendField(new Blockly.FieldTextInput(''), 'CLS')
 
-      b = b.getNextBlock()
-    }
-    return ops
+      this.appendDummyInput('ROW3')
+        .appendField('추가 위치')
+        .appendField(
+          new Blockly.FieldDropdown([
+            ['기준 앞', 'before'],
+            ['기준 뒤', 'after'],
+            ['기준을 바꾸기', 'replace'],
+          ]),
+          'MODE'
+        )
+
+      this.setPreviousStatement(true, ATTR_CHECK)
+      this.setNextStatement(true, ATTR_CHECK)
+      this.setColour('#607d8b')
+      this.setInputsInline(false)
+    },
   }
 
-  javascriptGenerator.forBlock['wc_attr_apply'] = (block) => {
-    const target = (block.getFieldValue('TARGET') || '').trim()
-    const ops = collectOps(block)
+  // =========================================================
+  // ✅ Generator: 전부 빈 문자열 유지
+  // =========================================================
+  javascriptGenerator.forBlock['wc_attr_apply'] = () => ''
 
-    // ✅ 아무 속성 없으면 데이터도 안 만든다
-    if (!target || ops.length === 0) return ''
-
-    const payload = { target, ops }
-    const json = safeAttr(JSON.stringify(payload))
-
-    // ✅ script 안 쓰고 숨김 div로 전달(디자인 모드에서도 안전)
-    return `<div data-wc-block="wc_attrs" data-wc-attrs="${json}" style="display:none"></div>\n`
-  }
-
-  // ✅ 속성 블록 단독 출력 방지
   const EMPTY = () => ''
   ;[
     'wc_attr_id',
@@ -387,6 +398,7 @@ export const defineBlocks = () => {
     'wc_attr_for',
     'wc_attr_server_field',
     'wc_attr_duplicate_target',
+    'wc_attr_text_segment',
   ].forEach((k) => (javascriptGenerator.forBlock[k] = EMPTY))
 }
 
