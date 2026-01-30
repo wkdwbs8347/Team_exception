@@ -63,6 +63,8 @@ import { Settings } from 'lucide-vue-next';
 import AiChatBot from '@/modal/AiChatBot.vue';
 import ThemeSettingsModal from '@/modal/ThemeSettingsModal.vue';
 import { applyContentAttrsToHtml } from '@/utils/applyContentAttrsToHtml';
+
+const currentClientId = 'client_' + Math.random().toString(36).substr(2, 9);
 //기본 테마 설정
 const isThemeModalOpen = ref(false);
 const currentTheme = reactive({
@@ -427,6 +429,51 @@ const currentSubItems = computed(() => {
 
   return group ? group.items : [];
 });
+
+function forceBlocklyMetrics(reason = '') {
+  if (!workspace) return;
+
+  // 1) 다음 프레임에 1차 갱신
+  requestAnimationFrame(() => {
+    try {
+      workspace.resize?.();
+    } catch (_) {}
+    try {
+      Blockly.svgResize(workspace);
+    } catch (_) {}
+
+    const flyout = workspace.getFlyout?.();
+    if (flyout) {
+      try {
+        flyout.reflow?.();
+      } catch (_) {}
+      try {
+        flyout.position?.();
+      } catch (_) {}
+    }
+  });
+
+  // 2) transition/레이아웃 확정 이후 2차 갱신(중요)
+  setTimeout(() => {
+    if (!workspace) return;
+    try {
+      workspace.resize?.();
+    } catch (_) {}
+    try {
+      Blockly.svgResize(workspace);
+    } catch (_) {}
+
+    const flyout = workspace.getFlyout?.();
+    if (flyout) {
+      try {
+        flyout.reflow?.();
+      } catch (_) {}
+      try {
+        flyout.position?.();
+      } catch (_) {}
+    }
+  }, 350); // 너 코드에서 사이드바 애니메이션이 300~350ms라 이 값이 맞음
+}
 
 /* ============================================================
 
@@ -1184,6 +1231,10 @@ const updatePreview = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
+  const baseWidth = 1920;
+  const currentW = wrapperWidth.value || 800;
+  const scaleRatio = isPhone.value ? 1 : currentW / baseWidth;
+
   // 헬퍼: CSS 태그만 추출
   const extractStyleTagsOnly = (raw) => {
     if (!raw) return '';
@@ -1335,7 +1386,7 @@ const updatePreview = () => {
     finalLogicScript,
 
     '<script>',
-    `const WC_POSITIONS = ${positionsJSON}; const isRunning = ${isRunning.value}; const PAGE_ID = "${PAGE_ID}"; const PAGE_ROUTE = "${PAGE_ROUTE}";`,
+    `const WC_POSITIONS = ${positionsJSON}; const isRunning = ${isRunning.value}; const WC_SCALE = ${scaleRatio}; const PAGE_ID = "${PAGE_ID}"; const PAGE_ROUTE = "${PAGE_ROUTE}";`,
 
     // 기본 헬퍼 함수들
     'function navigateToPage(targetId) { window.parent.postMessage({ type: "NAVIGATE", pageId: targetId }, "*"); }',
@@ -1382,8 +1433,8 @@ const updatePreview = () => {
     '    if(e.data.type === "update_free_position_remote") {',
     '      const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
     '      if(t) {',
-    '         t.style.left = e.data.x + "px";',
-    '         t.style.top = e.data.y + "px";',
+    '         t.style.setProperty("left", e.data.x + "px", "important");',
+    '         t.style.setProperty("top", e.data.y + "px", "important");',
     '      }',
     '    }',
     '    if(e.data.type === "update_free_position") { setTimeout(updateWrapperHeight, 100); }',
@@ -1392,92 +1443,98 @@ const updatePreview = () => {
     '  const wrap=document.getElementById("wrapper");',
     '  if(!wrap) return;',
     '  let dragging=null;',
-    '  wrap.addEventListener("pointerdown",(ev)=>{',
-    '    if(isRunning) return;', // 안전장치 (원하면 빼도 됨)',
-    '    const t=ev.target.closest("#wrapper > [data-draggable=\\\'true\\\'][data-block-id]");',
-    '    if(!t) return;',
+    // 👇 [1] 드래그 시작 (오차 제거됨)
+    '   wrap.addEventListener("pointerdown",(ev)=>{',
+    '     if(isRunning) return;',
+    '     const t=ev.target.closest("#wrapper > [data-draggable=\\\'true\\\'][data-block-id]");',
+    '     if(!t) return;',
     '',
-    '    window.__WC_DRAGGING__ = true;',
-    '    const r=t.getBoundingClientRect(),wr=wrap.getBoundingClientRect();',
-    '    const baseLeft=r.left-wr.left, baseTop=r.top-wr.top;',
+    '     window.__WC_DRAGGING__ = true;',
+    '     // ⚡ [핵심 변경] getBoundingClientRect 대신 offsetLeft 사용 (테두리/마진 오차 해결)',
+    '     const baseLeft = t.offsetLeft;',
+    '     const baseTop = t.offsetTop;',
     '',
-    '    // bounds 계산 (wrapper의 실제 스크롤 높이 기준)',
-    '    const wrapW = wrap.clientWidth || 0;',
-    '    const wrapH = wrap.scrollHeight || wrap.clientHeight || 0;',
-    '    const elW = t.offsetWidth || r.width || 0;',
-    '    const elH = t.offsetHeight || r.height || 0;',
+    '     const wrapW = wrap.clientWidth || 0;',
+    '     const wrapH = wrap.scrollHeight || wrap.clientHeight || 0;',
+    '     const elW = t.offsetWidth || 0;',
+    '     const elH = t.offsetHeight || 0;',
     '',
-    '    dragging={',
-    '      el:t,',
-    '      baseLeft:baseLeft,',
-    '      baseTop:baseTop,',
-    '      startX:ev.clientX,',
-    '      startY:ev.clientY,',
-    '      guides:collectGuides(t),',
-    '      pointerId:ev.pointerId,',
-    '      bounds:{ wrapW:wrapW, wrapH:wrapH, elW:elW, elH:elH }',
-    '    };',
+    '     dragging={',
+    '       el:t,',
+    '       baseLeft:baseLeft,',
+    '       baseTop:baseTop,',
+    '       startX:ev.clientX,',
+    '       startY:ev.clientY,',
+    '       guides:collectGuides(t),',
+    '       pointerId:ev.pointerId,',
+    '       bounds:{ wrapW:wrapW, wrapH:wrapH, elW:elW, elH:elH }',
+    '     };',
     '',
-    '    t.classList.add("wc-dragging");',
-    '    try{ t.setPointerCapture(ev.pointerId); }catch(e){}',
-    '    window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*");',
-    '  });',
-    '  wrap.addEventListener("pointermove",(ev)=>{',
-    '    ev.preventDefault();',
-    '    if(!dragging)return;',
+    '     t.classList.add("wc-dragging");',
+    '     try{ t.setPointerCapture(ev.pointerId); }catch(e){}',
+    '     window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*");',
+    '   });',
+
+    // 👇 [2] 드래그 중 (important 강제 적용)
+    '   wrap.addEventListener("pointermove",(ev)=>{',
+    '     ev.preventDefault();',
+    '     if(!dragging)return;',
     '',
-    '    const dx=ev.clientX-dragging.startX,dy=ev.clientY-dragging.startY;',
-    '    let nextL=dragging.baseLeft+dx,nextT=dragging.baseTop+dy;',
+    '     const dx=ev.clientX-dragging.startX;',
+    '     const dy=ev.clientY-dragging.startY;',
+    '     let nextL=dragging.baseLeft+dx;',
+    '     let nextT=dragging.baseTop+dy;',
     '',
-    '    const b = dragging.bounds || {wrapW:0, wrapH:0, elW:0, elH:0};',
-    '    const maxL = Math.max(0, (b.wrapW||0) - (b.elW||0));',
+    '     const b = dragging.bounds || {wrapW:0, wrapH:0, elW:0, elH:0};',
+    '     const maxL = Math.max(0, (b.wrapW||0) - (b.elW||0));',
     '',
-    '    // ✅ 1차 clamp (가로만 제한, 세로는 0 이상만)',
-    '    if(nextL<0)nextL=0;',
-    '    if(nextT<0)nextT=0;',
-    '    if(nextL>maxL)nextL=maxL;',
+    '     if(nextL<0)nextL=0;',
+    '     if(nextT<0)nextT=0;',
+    '     if(nextL>maxL)nextL=maxL;',
     '',
-    '    const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:(b.elW||0),height:(b.elH||0),guides:dragging.guides});',
-    '    hideGuides();',
-    '    snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);',
-    '    snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);',
+    '     const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:(b.elW||0),height:(b.elH||0),guides:dragging.guides});',
+    '     hideGuides();',
+    '     snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);',
+    '     snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);',
     '',
-    '    // ✅ 스냅 적용 후 2차 clamp (가로만 제한)',
-    '    let finalL = nextL + (snap.dx||0);',
-    '    let finalT = nextT + (snap.dy||0);',
-    '    if(finalL<0)finalL=0;',
-    '    if(finalT<0)finalT=0;',
-    '    if(finalL>maxL)finalL=maxL;',
+    '     let finalL = nextL + (snap.dx||0);',
+    '     let finalT = nextT + (snap.dy||0);',
+    '     if(finalL<0)finalL=0;',
+    '     if(finalT<0)finalT=0;',
+    '     if(finalL>maxL)finalL=maxL;',
     '',
-    '    // ✅ (옵션) 자동 스크롤: 마우스가 화면 가장자리로 가면 스크롤 따라감',
-    '    const edge = 40;',
-    '    const speed = 18;',
-    '    if(ev.clientY > window.innerHeight - edge) window.scrollBy(0, speed);',
-    '    else if(ev.clientY < edge) window.scrollBy(0, -speed);',
+    '     const edge = 40; const speed = 18;',
+    '     if(ev.clientY > window.innerHeight - edge) window.scrollBy(0, speed);',
+    '     else if(ev.clientY < edge) window.scrollBy(0, -speed);',
     '',
-    '    dragging.el.style.left=finalL+"px";',
-    '    dragging.el.style.top=finalT+"px";',
-    '  });',
-    '  wrap.addEventListener("pointerup",(ev)=>{',
-    '    if(!dragging)return;',
-    '    const t=dragging.el;',
-    '    hideGuides();',
-    '    t.classList.remove("wc-dragging");',
+    '     // ⚡ [핵심 변경] important를 붙여서 CSS 우선순위 확보',
+    '     dragging.el.style.setProperty("left", finalL+"px", "important");',
+    '     dragging.el.style.setProperty("top", finalT+"px", "important");',
+    '   });',
+
+    // 👇 [3] 드래그 끝 (좌표 반올림)
+    '   wrap.addEventListener("pointerup",(ev)=>{',
+    '     if(!dragging)return;',
+    '     const t=dragging.el;',
+    '     hideGuides();',
+    '     t.classList.remove("wc-dragging");',
+    '     window.__WC_DRAGGING__ = false;',
+    '     try{ t.releasePointerCapture(dragging.pointerId); }catch(e){}',
     '',
-    '    // ✅ 드래그 종료 플래그',
-    '    window.__WC_DRAGGING__ = false;',
+    '     // ⚡ [핵심 변경] 소수점 오차 방지를 위해 Math.round 사용',
+    '     const finalX = Math.round(parseFloat(t.style.left || "0"));',
+    '     const finalY = Math.round(parseFloat(t.style.top || "0"));',
     '',
-    '    // ✅ 캡처 해제 (튐/끊김 방지)',
-    '    try{ t.releasePointerCapture(dragging.pointerId); }catch(e){}',
+    '     window.parent.postMessage({',
+    '       type:"update_free_position",',
+    '       blockId:t.getAttribute("data-block-id"),',
+    '       x: finalX,',
+    '       y: finalY',
+    '     },"*");',
     '',
-    '    // ✅ 최종 좌표 확정 전송',
-    '    window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left||"0"),y:parseInt(t.style.top||"0")},"*");',
-    '',
-    '    // ✅ 높이 갱신은 끝나고 1번만',
-    '    setTimeout(updateWrapperHeight, 0);',
-    '',
-    '    dragging=null;',
-    '  });',
+    '     setTimeout(updateWrapperHeight, 0);',
+    '     dragging=null;',
+    '   });',
     '}',
     'window.onload = init;',
     '<\/script>',
@@ -1786,7 +1843,7 @@ const selectPage = async (pageId) => {
   await loadPageById(pageId);
 };
 // ✅ [Final Fix] 탭 전환 시 'data' 속성의 좌표를 강제로 적용하여 0,0 초기화 방지
-const selectParent = (modeId) => {
+const selectParent = async (modeId) => {
   if (activeMode.value === modeId) return;
 
   // 1. 현재 탭 저장
@@ -1796,9 +1853,15 @@ const selectParent = (modeId) => {
   activeParent.value = modeId;
   activeTab.value = null;
 
+  // ✅ DOM(레이아웃) 변경이 끝난 다음 Blockly가 metrics를 다시 계산할 수 있게
+  await nextTick();
+
   if (!workspace) return;
 
-  workspace.clear(); // 기존 블록 클리어
+  // ✅ 탭 전환 직후 먼저 한번 갱신(드롭 좌표 튐 방지)
+  forceBlocklyMetrics('before-load');
+
+  workspace.clear();
 
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   const rawData = page?.workspaces?.[modeId];
@@ -1806,46 +1869,52 @@ const selectParent = (modeId) => {
   // 2. 데이터 로드
   if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
     try {
-      // JSON 로드
       if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
-        const state = JSON.parse(rawData);
-        Blockly.serialization.workspaces.load(state, workspace);
-      }
-      // XML 로드
-      else if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
-        const dom = Blockly.utils.xml.textToDom(rawData);
-        Blockly.Xml.domToWorkspace(dom, workspace);
+        Blockly.serialization.workspaces.load(JSON.parse(rawData), workspace);
+      } else if (
+        typeof rawData === 'string' &&
+        rawData.trim().startsWith('<')
+      ) {
+        Blockly.Xml.domToWorkspace(
+          Blockly.utils.xml.textToDom(rawData),
+          workspace
+        );
       }
     } catch (e) {
       console.error('탭 전환 로드 실패:', e);
     }
   }
 
-  // 🚀 [핵심 추가] 로드 직후, 모든 블록을 검사해서 'data'에 저장된 진짜 좌표로 강제 이동!
-  // (Blockly가 가끔 0,0으로 렌더링하는 버그를 100% 막아줍니다)
+  // 3. 좌표 강제 이동(네 로직 유지)
   const blocks = workspace.getAllBlocks(false);
   blocks.forEach((block) => {
     if (block.data) {
       try {
         const pos = JSON.parse(block.data);
-        // data 안에 유효한 x, y가 있다면 그 위치로 강제 이동
         if (typeof pos.x === 'number' && typeof pos.y === 'number') {
           block.moveTo(new Blockly.utils.Coordinate(pos.x, pos.y));
         }
-      } catch (e) {
-        /* 파싱 에러 무시 */
-      }
+      } catch (_) {}
     }
   });
 
-  // 4. 툴박스 및 UI 갱신
+  // 4. 툴박스/UI 갱신
   setToolbox(toolboxXMLs.empty);
+
+  // ✅ 여기서도 한번 더 metrics 갱신 (로드/클리어로 내부 크기가 또 바뀜)
+  forceBlocklyMetrics('after-load');
+
   const group = categoryGroups.find((g) => g.id === modeId);
   if (group && group.items.length > 0) {
+    // ✅ flyout 열기 전에 한번 더 안전하게
+    forceBlocklyMetrics('before-open-flyout');
     selectCategory(group.items[0]);
   }
 
   refreshCodeAndPreview();
+
+  // ✅ 마지막 마무리(transition 끝나고 드롭할 때 안튐)
+  forceBlocklyMetrics('end');
 };
 
 // ✅ 드래그 중 삭제 드롭존(엔트리 스타일)
@@ -1902,7 +1971,7 @@ function endTrashDrag() {
 }
 
 function getTrashRect() {
-  // 1) 네가 만든 고정 300px 패널이 있으면 그걸 1순위로 사용 (가장 안정적)
+  // 1) 고정 300px 패널이 있으면 그걸 1순위로 사용 (가장 안정적)
   const panel = document.querySelector('#workspace-area .flyout-bg-panel.open');
   if (panel) {
     const r = panel.getBoundingClientRect();
@@ -1941,6 +2010,8 @@ function isPointerInTrashZone(x, y) {
  * @param {string} key - 선택된 카테고리 키 (layout, style, data 등)
  */
 const selectCategory = (key) => {
+  forceBlocklyMetrics('selectCategory-before-show');
+
   if (!workspace) return;
 
   // 이미 열린 탭을 다시 누르면 닫기만 수행
@@ -2284,14 +2355,23 @@ onMounted(async () => {
 
   // 5. UI 레이아웃 보정
   const metricsManager = workspace.getMetricsManager();
+
+  const getViewRect = () => {
+    const area = document.getElementById('workspace-area');
+    const r = area?.getBoundingClientRect();
+    return r || { width: 0, height: 0 };
+  };
+
+  // ✅ 핵심: 왼쪽 패널이 열려있으면 flyout width=300 으로 알려주기
   metricsManager.getToolboxMetrics = () => ({
     width: 0,
-    height: 0,
+    height: getViewRect().height,
     position: Blockly.TOOLBOX_AT_LEFT,
   });
+
   metricsManager.getFlyoutMetrics = () => ({
-    width: 0,
-    height: 0,
+    width: activeTab.value ? 300 : 0, // ✅ 여기!
+    height: getViewRect().height,
     position: Blockly.TOOLBOX_AT_LEFT,
   });
 
@@ -2342,72 +2422,80 @@ onMounted(async () => {
 
       if (block) {
         // 🚀 블록이 결합되거나 '분리'될 때 감지
+        // ✅ 블록이 붙거나 떨어질 때 실행되는 로직 (전체 교체)
         if (e.oldParentId !== e.newParentId) {
+          console.log('🧩 블록 변경 감지됨!');
+
           let d = {};
           try {
             d = block.data ? JSON.parse(block.data) : {};
           } catch (err) {}
 
-          if (e.newParentId) {
-            // 1. [결합]
-            delete d.uiX;
-            delete d.uiY;
+          // 🔥 [핵심] 소켓 전송 중 에러가 나도 프리뷰는 죽지 않게 try-catch로 감쌉니다.
+          try {
+            if (e.newParentId) {
+              // 1. [결합] 부모가 생겼으므로 자유 좌표(uiX, uiY) 삭제
+              delete d.uiX;
+              delete d.uiY;
 
-            // 🚨 [수정] getParentInput() 에러 해결을 위한 안전한 탐색 로직
-            let inputName = null;
-            const parentBlock = workspace.getBlockById(e.newParentId);
-
-            if (parentBlock) {
-              // 부모의 모든 구멍(Input)을 검사해서 내가 어디 연결됐는지 찾음
-              for (const input of parentBlock.inputList) {
-                // 구멍의 연결 타겟이 '나(block)'라면?
-                if (
-                  input.connection &&
-                  input.connection.targetBlock() === block
-                ) {
-                  inputName = input.name; // 구멍 이름(예: '내용') 발견!
-                  break;
+              // 부모 블록의 어느 구멍(Input)에 끼워졌는지 찾기
+              let inputName = null;
+              const parentBlock = workspace.getBlockById(e.newParentId);
+              if (parentBlock) {
+                for (const input of parentBlock.inputList) {
+                  if (
+                    input.connection &&
+                    input.connection.targetBlock() === block
+                  ) {
+                    inputName = input.name;
+                    break;
+                  }
                 }
               }
-            }
-            // 루프를 돌았는데 inputName이 없으면? -> 구멍이 아니라 "밑(Next)"에 붙은 것임 (null 유지)
 
-            if (stompClient?.connected) {
-              stompClient.send(
-                `/app/project/${props.webId}/block-move`,
-                {},
-                JSON.stringify({
-                  type: 'BLOCK_CONNECTION',
-                  blockId: e.blockId,
-                  newParentId: e.newParentId,
-                  inputName: inputName, // ✅ 이제 안전하게 전송됨
-                  senderId: props.nickname,
-                  clientId: currentClientId,
-                })
-              );
-            }
-          } else {
-            // 2. [분리]
-            const xy = block.getRelativeToSurfaceXY();
-            d.uiX = Math.round(xy.x);
-            d.uiY = Math.round(xy.y);
+              // 서버로 전송 (에러가 나도 무시하고 넘어감)
+              if (stompClient?.connected) {
+                stompClient.send(
+                  `/app/project/${props.webId}/block-move`,
+                  {},
+                  JSON.stringify({
+                    type: 'BLOCK_CONNECTION',
+                    blockId: e.blockId,
+                    newParentId: e.newParentId,
+                    inputName: inputName,
+                    senderId: props.nickname,
+                    // clientId: currentClientId, // ❌ 삭제됨 (이제 안전함)
+                  })
+                );
+              }
+            } else {
+              // 2. [분리] 부모가 없어졌으므로 현재 위치를 좌표로 저장
+              const xy = block.getRelativeToSurfaceXY();
+              d.uiX = Math.round(xy.x);
+              d.uiY = Math.round(xy.y);
 
-            if (stompClient?.connected) {
-              stompClient.send(
-                `/app/project/${props.webId}/block-move`,
-                {},
-                JSON.stringify({
-                  type: 'BLOCK_CONNECTION',
-                  blockId: e.blockId,
-                  newParentId: null,
-                  senderId: props.nickname,
-                })
-              );
+              if (stompClient?.connected) {
+                stompClient.send(
+                  `/app/project/${props.webId}/block-move`,
+                  {},
+                  JSON.stringify({
+                    type: 'BLOCK_CONNECTION',
+                    blockId: e.blockId,
+                    newParentId: null,
+                    senderId: props.nickname,
+                  })
+                );
+              }
             }
+          } catch (socketErr) {
+            console.warn('⚠️ 서버 전송 실패(프리뷰는 계속됨):', socketErr);
           }
+
+          // ✅ [중요] 여기가 실행되어야 프리뷰가 바뀝니다.
           block.data = JSON.stringify(d);
           saveCurrentWorkspaceToPage();
           refreshCodeAndPreview();
+          console.log('🔥 프리뷰 갱신 완료!');
         }
 
         // 🚀 단순 이동 (결합 아님)
@@ -2415,13 +2503,20 @@ onMounted(async () => {
           // 부모가 없을 때(둥둥 떠다닐 때)만 좌표 전송
           if (!block.getParent()) {
             const xy = block.getRelativeToSurfaceXY();
+
+            // ✅ [추가됨] 워크스페이스 스크롤(원점) 보정값 가져오기
+            // (getOrigin 함수가 없으면 기본값 0 사용)
+            const originX = workspace.scrollX || 0;
+            const originY = workspace.scrollY || 0;
+
             stompClient.send(
               `/app/project/${props.webId}/block-move`,
               {},
               JSON.stringify({
                 blockId: e.blockId,
-                x: Math.round(xy.x),
-                y: Math.round(xy.y),
+                // ✅ [수정됨] 내 스크롤 위치만큼 빼서 '순수 좌표'만 보냄
+                x: Math.round(xy.x - originX),
+                y: Math.round(xy.y - originY),
                 senderId: props.nickname,
               })
             );
@@ -2473,6 +2568,7 @@ onMounted(async () => {
       Blockly.Events.BLOCK_CREATE,
       Blockly.Events.BLOCK_DELETE,
       Blockly.Events.BLOCK_CHANGE,
+      Blockly.Events.BLOCK_MOVE,
     ];
 
     if (saveEvents.includes(e.type)) {
@@ -2532,6 +2628,7 @@ onMounted(async () => {
       // 🔥 [핵심 순서] 변수 업데이트 먼저 -> 그 다음 서버 저장
       saveCurrentWorkspaceToPage();
       saveToServerAsJson();
+      refreshCodeAndPreview();
     }
 
     // 2. 선택 동기화
@@ -2596,9 +2693,7 @@ onMounted(async () => {
           (res) => {
             const data = JSON.parse(res.body);
 
-            // -----------------------------------------------------------
             // [로직 1] 일반 블록 이동 (최상위 블록만)
-            // -----------------------------------------------------------
             if (
               !data.type &&
               data.blockId &&
@@ -2610,8 +2705,17 @@ onMounted(async () => {
               // 부모가 없는(최상위) 블록만 이동
               if (block && !block.getParent()) {
                 Blockly.Events.disable();
+
+                // ✅ [추가됨] 내 워크스페이스 스크롤(원점) 값 가져오기
+                const myOriginX = targetWorkspace.scrollX || 0;
+                const myOriginY = targetWorkspace.scrollY || 0;
+
                 block.moveTo(
-                  new Blockly.utils.Coordinate(Number(data.x), Number(data.y))
+                  new Blockly.utils.Coordinate(
+                    // ✅ [수정됨] 받은 순수 좌표에 내 스크롤 값을 더해서 배치
+                    Number(data.x) + myOriginX,
+                    Number(data.y) + myOriginY
+                  )
                 );
                 Blockly.Events.enable();
                 refreshCodeAndPreview();
