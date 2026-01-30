@@ -1,6 +1,10 @@
 package com.example.web_crafter_java.dao;
 
+import java.util.List;
+
 import org.apache.ibatis.annotations.*;
+
+import com.example.web_crafter_java.dto.ProjectExploreDto;
 import com.example.web_crafter_java.dto.UserWeb;
 import com.example.web_crafter_java.dto.UserWebPage;
 
@@ -62,7 +66,15 @@ public interface ProjectDao {
     """)
     void updatePageData(
         @Param("webId") Integer webId, @Param("oldPageName") String oldPageName, @Param("pageData") UserWebPage pageData);
-
+    // ✅ 2. [추가] 미리보기 HTML 저장 (대표 이미지용 - userWeb 테이블)
+    // 페이지 저장할 때 같이 호출해주면 됩니다.
+    @Update("""
+        UPDATE userWeb
+        SET preview_html = #{previewHtml},
+            updateDate = NOW()
+        WHERE id = #{webId}
+    """)
+    void updateProjectPreview(@Param("webId") Integer webId, @Param("previewHtml") String previewHtml);
     /**
      * 3. 프로젝트 삭제
      * userWeb 테이블에서 삭제하면 DB의 외래키 설정(ON DELETE CASCADE)에 의해
@@ -71,7 +83,7 @@ public interface ProjectDao {
     @Delete("DELETE FROM userWeb WHERE id = #{projectId}")
     void deleteProject(@Param("projectId") Integer projectId);
 
-@Insert("""
+    @Insert("""
         INSERT INTO userWeb_pages 
             (webId, pageName, layoutData, styleData, logicData, regDate, updateDate)
         VALUES 
@@ -79,20 +91,20 @@ public interface ProjectDao {
     """)
     void insertNewPage(UserWebPage pageData);
 
-// ProjectDao.java 인터페이스 내부
+    // ProjectDao.java 인터페이스 내부
 
-@Delete("""
-    DELETE FROM userWeb_pages 
-    WHERE webId = #{webId} AND pageName = #{pageName}
-""")
-void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String pageName);
-
-@Select("""
-        SELECT id, webId, pageName
-        FROM userWeb_pages
-        WHERE webId = #{webId}
+    @Delete("""
+        DELETE FROM userWeb_pages 
+        WHERE webId = #{webId} AND pageName = #{pageName}
     """)
-    java.util.List<UserWebPage> selectPagesByWebId(Integer webId);
+    void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String pageName);
+
+    @Select("""
+            SELECT id, webId, pageName
+            FROM userWeb_pages
+            WHERE webId = #{webId}
+        """)
+        java.util.List<UserWebPage> selectPagesByWebId(Integer webId);
 
 /* 1. [초대 체크] 이미 멤버인지 확인 (중복 초대 방지) */
     @Select("""
@@ -146,6 +158,9 @@ void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String p
     /**
      * ✅ [탐색 페이지] 프로젝트 정보 + 'Home' 페이지의 HTML/CSS 코드까지 한 번에 조회
      */
+/**
+     * ✅ [탐색 페이지] 프로젝트 목록 조회 (최적화 + 정렬 고정)
+     */
     @Select("""
         <script>
         SELECT 
@@ -154,24 +169,59 @@ void deletePageByName(@Param("webId") Integer webId, @Param("pageName") String p
             w.hit as views, 
             w.updateDate, 
             u.nickname as ownerNickname,
-            -- 👇 여기가 핵심: 페이지 테이블에서 코드(layout, style)를 가져옵니다.
-            p.layoutData as htmlContent,
-            p.styleData as cssContent
+            w.preview_html as previewHtml 
         FROM userWeb w
         JOIN user u ON w.userId = u.id
-        -- 👇 프로젝트마다 'Home' 페이지 하나씩만 대표로 가져옴 (LEFT JOIN: Home이 없어도 프로젝트는 뜨게)
-        LEFT JOIN userWeb_pages p ON w.id = p.webId AND p.pageName = 'Home'
         WHERE 1=1
         <if test='keyword != null and keyword != ""'>
             AND (w.title LIKE CONCAT('%', #{keyword}, '%') OR u.nickname LIKE CONCAT('%', #{keyword}, '%'))
         </if>
-        ORDER BY w.updateDate DESC
+        
+        -- 🔥 [핵심 수정] 정렬 기준 강화
+        -- 1순위: 최근 수정된 순서 (updateDate DESC)
+        -- 2순위: (시간이 같을 경우) 최신 글 ID 순서 (id DESC) -> 이걸 넣어야 순서가 안 바뀜!
+        ORDER BY w.updateDate DESC, w.id DESC
+        
         LIMIT #{limit} OFFSET #{offset}
         </script>
     """)
-    java.util.List<com.example.web_crafter_java.dto.ProjectExploreDto> selectExploreProjects(
+    List<ProjectExploreDto> selectExploreProjects(
         @Param("keyword") String keyword, 
         @Param("limit") int limit, 
         @Param("offset") int offset
     );
+
+    // 1. 현재 멤버 수 세기
+    @Select("SELECT COUNT(*) FROM userWeb_member WHERE webId = #{webId}")
+    int countMembers(Integer webId);
+
+    // 2. 아직 수락 안 한(대기 중인) 초대장 개수 세기
+    @Select("""
+        SELECT COUNT(*) 
+        FROM notification 
+        WHERE relId = #{webId} 
+          AND type = 'PROJECT_INVITE'
+    """)
+    int countPendingInvites(Integer webId);
+
+    // [추방] 멤버 삭제 쿼리
+    @Delete("DELETE FROM userWeb_member WHERE webId = #{webId} AND userId = #{targetId}")
+    void deleteMember(@Param("webId") Integer webId, @Param("targetId") Integer targetId);
+
+    // [권한 확인] 특정 유저의 역할(Role) 조회
+    @Select("SELECT role FROM userWeb_member WHERE webId = #{webId} AND userId = #{userId}")
+    String getMemberRole(@Param("webId") Integer webId, @Param("userId") Integer userId);
+    // ProjectDao.java 인터페이스 내부에 추가
+
+    // 1. 프로젝트 제목만 가져오기
+    @Select("SELECT title FROM userWeb WHERE id = #{webId}")
+    String getProjectTitle(Integer webId);
+
+    // 2. 미리보기 HTML만 가져오기 (복사 용도)
+    @Select("SELECT preview_html FROM userWeb WHERE id = #{webId}")
+    String getPreviewHtml(Integer webId);
+
+    // ProjectDao.java
+    @Update("UPDATE `userWeb` SET `hit` = `hit` + 1 WHERE `id` = #{webId}")
+    void increaseHit(@Param("webId") Integer webId);
 }

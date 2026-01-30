@@ -12,6 +12,9 @@
  * ============================================================
 
  */
+
+import SockJS from 'sockjs-client';
+import Stomp from 'stompjs';
 import JSZip from 'jszip';
 import {
   ref,
@@ -309,6 +312,7 @@ const isRunning = ref(false);
 const isPhone = ref(false);
 const isLandscape = ref(false);
 let workspace = null;
+let draggingBlockIdForRealtime = null;
 
 // ✨ [핵심 수정] pages 선언과 초기값 주입 분리 (순환 참조 방지)
 
@@ -316,8 +320,11 @@ let workspace = null;
 
 const pages = ref([]);
 const projectTitle = ref(''); // 프로젝트 전체 제목 전용 변수
-const userInfo = ref(null); // 🚀 [추가] 사용자 정보를 담을 변수
-const isAppLoading = ref(true); // 🚀 [추가] 초기 로딩 상태 관리
+const userInfo = ref(null); // 사용자 정보를 담을 변수
+const isAppLoading = ref(true); // 초기 로딩 상태 관리
+// 실시간 공유를 위한 변수 추가
+let stompClient = null;
+let isRemoteUpdate = false;
 
 // 2. 초기 데이터 주입
 
@@ -429,9 +436,9 @@ const currentSubItems = computed(() => {
 
 // IDEView.vue 내 수정
 
-// ✅ 수정: 로드 실패 상태(isLoadFailed)면 아예 저장을 막아버림 (DB 보호)
-// ✅ [Final Fix] 저장 시 현재 블록 위치를 'data' 속성에 강제 동기화 (위치 초기화 방지)
+// ✅ [Final Fix] 백엔드 규격(Map)에 맞춰 데이터 포장 및 미리보기 HTML 생성 전송
 const saveToServerAsJson = async () => {
+  // 1. 방어 로직
   if (isSaving.value) return;
   if (isLoadFailed.value) {
     console.warn('⛔ 데이터 로드에 실패한 상태이므로 저장을 차단합니다.');
@@ -444,22 +451,67 @@ const saveToServerAsJson = async () => {
   try {
     isSaving.value = true;
 
+    // 데이터 안전 변환 헬퍼
     const toSafeString = (val) => {
       if (!val) return '{}';
       if (typeof val === 'string') return val;
       return JSON.stringify(val);
     };
 
-    // ✅ 여기서 workspace.save()로 page 데이터를 다시 만들지 말 것!
+    // 2. 현재 페이지의 최신 데이터 확보 (XML/JSON 형태)
+    // (현재 탭의 내용은 workspace에서 최신화되어 page에 들어가 있어야 함)
+    const layoutRaw = toSafeString(
+      page.layoutData || page.workspaces?.structure
+    );
+    const styleRaw = toSafeString(page.styleData || page.workspaces?.style);
+    const logicRaw = toSafeString(page.logicData || page.workspaces?.logic);
+
+    // ---------------------------------------------------------
+    // 🔥 [핵심 1] 미리보기용 HTML 생성 (Preview Column용)
+    // ---------------------------------------------------------
+    // 저장된 블록 데이터(XML/JSON)를 실제 코드로 변환해야 iframe에서 보입니다.
+    // 기존에 정의된 generateCodeFromXML 함수를 재사용합니다.
+
+    const genHtml = generateCodeFromXML(layoutRaw); // HTML 코드 생성
+    const genCss = generateCodeFromXML(styleRaw); // CSS 코드 생성
+
+    // 🔥 [수정] style 태그 중첩 문제 해결!
+    // genCss 변수 안에 이미 <style>...</style> 태그가 포함되어 있으므로,
+    // 겉을 감싸던 <style> 태그를 제거하고 분리했습니다.
+    const previewHtmlString = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { margin: 0; padding: 0; overflow: hidden; background-color: #fff; }
+          </style>
+          ${genCss}
+        </head>
+        <body>
+          ${cleanCodeForView(genHtml)} 
+        </body>
+      </html>
+    `;
+
+    // ---------------------------------------------------------
+    // 🔥 [핵심 2] 백엔드가 원하는 구조(Map)로 포장
+    // ---------------------------------------------------------
     const payload = {
-      webId: props.webId,
-      pageName: page.name,
-      title: projectTitle.value || '',
-      layoutData: toSafeString(page.layoutData || page.workspaces?.structure),
-      styleData: toSafeString(page.styleData || page.workspaces?.style),
-      logicData: toSafeString(page.logicData || page.workspaces?.logic),
+      // ① pageData: 편집용 데이터 (JSON/XML) -> userWeb_pages 테이블용
+      pageData: {
+        webId: props.webId,
+        pageName: page.name,
+        layoutData: layoutRaw,
+        styleData: styleRaw,
+        logicData: logicRaw,
+      },
+      // ② previewHtml: 미리보기용 데이터 (HTML String) -> userWeb 테이블용
+      previewHtml: previewHtmlString,
     };
 
+    // ---------------------------------------------------------
+    // 🚀 [전송]
+    // ---------------------------------------------------------
     const oldNameForQuery = page.oldName || page.name;
 
     await api.put(
@@ -467,15 +519,21 @@ const saveToServerAsJson = async () => {
       payload
     );
 
+    // 성공 처리
     page.oldName = page.name;
-    console.log(`✅ [${page.name}] 저장 성공`);
+    // 타이틀 업데이트가 있었다면 반영
+    if (projectTitle.value) {
+      // 필요하다면 별도 처리, 이미 pageData 저장 흐름이라면 OK
+    }
+
+    console.log(`✅ [${page.name}] 저장 및 미리보기 갱신 성공`);
   } catch (e) {
     console.error('❌ 저장 실패:', e);
+    // alert("저장에 실패했습니다."); // 필요 시 주석 해제
   } finally {
     isSaving.value = false;
   }
 };
-
 // ✅ [Final Fix] 페이지 첫 로드 시에도 좌표 강제 적용
 const loadWorkspaceState = (pageId) => {
   const page = pages.value.find((p) => p.id === pageId);
@@ -736,6 +794,9 @@ const cleanCodeForView = (code) => {
 };
 
 // ✅ [Fix] 프리뷰 좌표는 항상 '저장된 structure 데이터'에서만 뽑는다 (탭/워크스페이스 무관)
+// [IDEView.vue] getPositionsMap 함수 전체 교체
+
+// ✅ [수정] uiX가 없으면 절대로 블록 좌표(x,y)를 가져다 쓰지 않음
 const getPositionsMap = () => {
   const map = {};
   const page = pages.value.find((p) => p.id === selectedPageId.value);
@@ -744,50 +805,28 @@ const getPositionsMap = () => {
   const rawData = page.workspaces?.structure || page.layoutData;
   if (!rawData || rawData === '<xml></xml>' || rawData === '{}') return map;
 
-  const extractFromState = (state) => {
-    const traverse = (node) => {
-      if (!node) return;
-      if (Array.isArray(node)) return node.forEach(traverse);
-
-      if (typeof node === 'object') {
-        if (node.id && node.data) {
-          try {
-            const p = JSON.parse(node.data);
-            if (p && p.x !== undefined && p.y !== undefined) {
-              map[node.id] = { x: Number(p.x), y: Number(p.y) };
-            }
-          } catch (e) {}
-        }
-        Object.values(node).forEach(traverse);
+  const extractUI = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(extractUI);
+    if (typeof node === 'object') {
+      if (node.id && node.data) {
+        try {
+          const d = JSON.parse(node.data);
+          // 🚀 핵심: uiX가 있을 때만! 없으면 그냥 무시!
+          if (d.uiX !== undefined && d.uiY !== undefined) {
+            map[node.id] = { x: Number(d.uiX), y: Number(d.uiY) };
+          }
+        } catch (e) {}
       }
-    };
-    traverse(state);
+      Object.values(node).forEach(extractUI);
+    }
   };
 
   try {
-    // JSON
     if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
-      extractFromState(JSON.parse(rawData));
+      extractUI(JSON.parse(rawData));
     }
-    // XML(구버전)도 data 우선으로만
-    else if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(rawData, 'text/xml');
-      xmlDoc.querySelectorAll('block').forEach((b) => {
-        const id = b.getAttribute('id');
-        const data = b.getAttribute('data');
-        if (!id || !data) return;
-        try {
-          const p = JSON.parse(data);
-          if (p && p.x != null && p.y != null) {
-            map[id] = { x: Number(p.x), y: Number(p.y) };
-          }
-        } catch (e) {}
-      });
-    }
-  } catch (e) {
-    console.warn('위치 정보 파싱 실패:', e);
-  }
+  } catch (e) {}
 
   return map;
 };
@@ -973,32 +1012,29 @@ const updateObjectListFromWorkspace = () => {
   if (tempWorkspace) tempWorkspace.dispose();
 };
 
+// ✅ [수정 1] 로딩 중(isRestoring)일 땐 저장을 막아서 0,0 덮어쓰기 방지
 const refreshCodeAndPreview = () => {
   if (!workspace) return;
 
   try {
-    saveCurrentWorkspaceToPage();
+    // 🚀 [핵심] "복원 중이 아닐 때만" 현재 상태를 메모리에 저장함
+    if (!isRestoring) {
+      saveCurrentWorkspaceToPage(false); 
+    }
 
     javascriptGenerator.init(workspace);
-
     const raw = javascriptGenerator.workspaceToCode(workspace);
-
     codeCache.value[activeMode.value] = raw;
 
     const page = pages.value.find((p) => p.id === selectedPageId.value);
-
     if (page) {
       const currentXml = page.workspaces[activeMode.value];
-
       const rawCode = generateCodeFromXML(currentXml);
-
-      generatedCode.value =
-        activeMode.value === 'structure' ? cleanCodeForView(rawCode) : rawCode;
+      generatedCode.value = activeMode.value === 'structure' ? cleanCodeForView(rawCode) : rawCode;
     }
-
     updatePreview();
-
     updateObjectListFromWorkspace();
+
   } catch (e) {
     console.error(e);
   }
@@ -1238,6 +1274,27 @@ const updatePreview = () => {
     isPhone.value && isLandscape.value ? 'is-landscape' : '';
   const finalBodyClass = `${isRunning.value ? 'is-running' : 'is-design'} ${deviceClass} ${orientationClass}`;
 
+let fixedPositionCss = '';
+  const posMap = getPositionsMap(); // ✅ 핵심: 저장된 데이터에서 좌표를 가져옴 (안전함)
+
+  if (posMap) {
+    Object.keys(posMap).forEach(blockId => {
+      const pos = posMap[blockId];
+      // 좌표(uiX, uiY)가 있는 요소만 골라서 본드칠(CSS)
+      if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+         fixedPositionCss += `
+           [data-block-id="${blockId}"] { 
+              position: absolute !important; 
+              left: ${pos.x}px !important; 
+              top: ${pos.y}px !important; 
+              transform: none !important;
+              z-index: 100;
+           }
+         `;
+      }
+    });
+  }
+
   const htmlParts = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
 
@@ -1256,6 +1313,7 @@ const updatePreview = () => {
     '.wc-guide-h { height:0; border-top-width:1px; }',
     '[data-wc-block] { position: relative; min-width: 50px; min-height: 50px; }',
     '[data-wc-block]:not(:has(*))::after { content: "📦"; color: #aaa; display: flex; align-items: center; justify-content: center; position: absolute; inset: 0; pointer-events: none; opacity: 0.5; }',
+    fixedPositionCss,
     '</style>',
 
     `<style id="anim-defs">${Animation.Animation.ANIMATION_KEYFRAMES}</style>`,
@@ -1320,6 +1378,13 @@ const updatePreview = () => {
     '      document.querySelectorAll(".wc-highlight").forEach(el=>el.classList.remove("wc-highlight"));',
     '      const t=document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
     '      t&&t.classList.add("wc-highlight");',
+    '    }',
+    '    if(e.data.type === "update_free_position_remote") {',
+    '      const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
+    '      if(t) {',
+    '         t.style.left = e.data.x + "px";',
+    '         t.style.top = e.data.y + "px";',
+    '      }',
     '    }',
     '    if(e.data.type === "update_free_position") { setTimeout(updateWrapperHeight, 100); }',
     '  });',
@@ -1554,7 +1619,7 @@ const setToolbox = (xmlText) => {
   }
 };
 
-// ✅ state(JSON) 안의 모든 블록 노드를 재귀로 돌며 posMap을 주입
+// ✅ [수정 완료] 기존 데이터(uiX, uiY)를 보호하면서 저장하는 로직
 const injectPositionsIntoState = (state, posMap) => {
   const walk = (node) => {
     if (!node) return;
@@ -1564,10 +1629,25 @@ const injectPositionsIntoState = (state, posMap) => {
       if (node.id && posMap[node.id]) {
         const p = posMap[node.id];
 
-        // 1) 프리뷰 좌표는 data에 "항상" 저장 (가장 안전)
-        node.data = JSON.stringify({ x: Number(p.x), y: Number(p.y) });
+        // 1. 기존에 있던 data를 먼저 읽어옴 (여기에 uiX, uiY가 들어있음)
+        let existingData = {};
+        try { 
+          existingData = node.data ? JSON.parse(node.data) : {}; 
+        } catch (e) {}
 
-        // 2) 너는 x,y도 pos로 쓰고 있으니 같이 맞춰줌 (선택이지만 지금 구조에선 권장)
+        if (existingData.uiX !== undefined) {
+            console.log(`💾 [데이터 병합] 블록(${node.id})에 uiX:${existingData.uiX} 포함됨!`);
+        }
+
+        // 2. 기존 데이터에 워크스페이스 좌표(x, y)만 추가 (덮어쓰기 X, 병합 O)
+        const newData = {
+          ...existingData, 
+          x: Number(p.x), 
+          y: Number(p.y)
+        };
+
+        // 3. 병합된 데이터 저장
+        node.data = JSON.stringify(newData);
         node.x = Number(p.x);
         node.y = Number(p.y);
       }
@@ -1579,130 +1659,79 @@ const injectPositionsIntoState = (state, posMap) => {
   return state;
 };
 
-// ✅ [Critical Fix] 저장 중 좌표 업데이트 시 이벤트 발생을 차단하여 '무한 저장 루프' 방지
-const saveCurrentWorkspaceToPage = () => {
-  if (!workspace || !selectedPageId.value) return;
+// ✅ [수정 2] 저장 함수: 로딩 중이면 강제 종료 + data에 좌표 박기
+// ✅ [수정] 저장할 때 uiX, uiY를 지우지 않고 '병합(Merge)'하도록 수정함!
+const saveCurrentWorkspaceToPage = (saveToDb = true) => {
+  if (isRestoring || !workspace || !selectedPageId.value) return;
 
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
-  if (!page.workspaces) {
-    page.workspaces = { structure: '{}', style: '{}', logic: '{}' };
-  }
-
   try {
     Blockly.Events.disable();
 
-    // ✅ (중요) 구조 탭 저장일 때: 기존 저장된 structure에서 좌표맵을 먼저 확보
-    // - 이렇게 해야 workspace 직렬화가 덮어써도 프리뷰 좌표가 살아남음
-    const oldPosMap =
-      activeMode.value === 'structure' ? getPositionsMap() : null;
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((block) => {
+      const xy = block.getRelativeToSurfaceXY();
+      let existingData = {};
+      try { 
+        existingData = block.data ? JSON.parse(block.data) : {}; 
+      } catch (e) {}
 
-    // 1) 현재 workspace state 저장
+      // 🚨 [여기가 핵심] 부모가 있는 블록(끼워진 블록)은 uiX 좌표를 절대 갖지 못하게 함
+      if (block.getParent()) {
+        delete existingData.uiX;
+        delete existingData.uiY;
+      }
+
+      // 블록리 내부용 x, y는 최신화하고, uiX가 살아있는 놈만 자유 배치로 인식됨
+      const mergedData = {
+        ...existingData,
+        x: Math.round(xy.x),
+        y: Math.round(xy.y)
+      };
+
+      block.data = JSON.stringify(mergedData);
+    });
+
     const state = Blockly.serialization.workspaces.save(workspace);
-
-    // ✅ (중요) 구조 탭이면: 새 state에 기존 좌표를 다시 주입
-    if (activeMode.value === 'structure' && oldPosMap) {
-      injectPositionsIntoState(state, oldPosMap);
-    }
-
     const jsonText = JSON.stringify(state);
 
-    // 2) 해당 모드에 저장
     page.workspaces[activeMode.value] = jsonText;
-
     if (activeMode.value === 'structure') page.layoutData = jsonText;
     else if (activeMode.value === 'style') page.styleData = jsonText;
     else if (activeMode.value === 'logic') page.logicData = jsonText;
+
+  } catch (e) {
+    console.error("저장 중 오류:", e);
   } finally {
     Blockly.Events.enable();
   }
-
-  savePagesToStorage();
+  
+  if (saveToDb) {
+    savePagesToStorage();
+  }
 };
 
-// ✅ [수정] 데이터가 없으면 서버에서 가져오는 Lazy Loading 적용 (모드별 기준으로 개선)
+// ✅ [수정 3] 로드 함수: data 확인해서 강제 이동
 const loadPageById = async (pageId) => {
   if (!workspace) return;
-
-  // 1. 페이지 객체 찾기
-  let page = pages.value.find((p) => p.id === pageId);
+  const page = pages.value.find((p) => p.id === pageId);
   if (!page) return;
 
-  // 🔒 [잠금] 작업 중 중복 실행 방지
+  // 🔒 잠금 (이게 true인 동안은 저장이 안 됨)
   isRestoring = true;
-
-  // ✅ 서버값/기존값을 "무조건 string"으로 정규화
-  const toWorkspaceText = (data) => {
-    if (data === null || data === undefined) return '{}';
-    if (typeof data === 'string') {
-      const t = data.trim();
-      return t ? data : '{}';
-    }
-    try {
-      return JSON.stringify(data);
-    } catch (e) {
-      return '{}';
-    }
-  };
-
-  // ✅ 현재 모드에 맞는 데이터 getter
-  const getModeData = (p, mode) => {
-    if (!p) return '';
-    if (mode === 'structure') return p.layoutData || p.workspaces?.structure;
-    if (mode === 'style') return p.styleData || p.workspaces?.style;
-    return p.logicData || p.workspaces?.logic;
-  };
-
-  // ✅ 모드 기준 빈 값 판단
-  const isEmptyByMode = (val) => {
-    if (!val) return true;
-    if (typeof val === 'string') {
-      const t = val.trim();
-      return t === '' || t === '{}' || t === '<xml></xml>';
-    }
-    // 정규화 덕분에 여기 오는 케이스는 거의 없지만 안전하게
-    return false;
-  };
+  if (debounceTimer) clearTimeout(debounceTimer); // 대기 중인 자동저장 취소
 
   try {
-    // 🚀 [핵심] 현재 탭 데이터가 비어있으면 서버에서 가져오기
-    const modeData = getModeData(page, activeMode.value);
-    const needFetch = isEmptyByMode(modeData);
-
-    if (needFetch) {
-      console.log(
-        `📥 [Lazy Load] '${page.name}'(${activeMode.value}) 데이터를 서버에서 불러옵니다...`
-      );
-
-      const res = await api.get(
-        `/projects/${props.webId}/data?pageName=${encodeURIComponent(page.name)}`
-      );
-
-      if (res.data) {
-        page.layoutData = toWorkspaceText(res.data.layoutData);
-        page.styleData = toWorkspaceText(res.data.styleData);
-        page.logicData = toWorkspaceText(res.data.logicData);
-
-        if (!page.workspaces) page.workspaces = {};
-        page.workspaces.structure = page.layoutData;
-        page.workspaces.style = page.styleData;
-        page.workspaces.logic = page.logicData;
-
-        if (res.data.title) projectTitle.value = res.data.title;
-
-        console.log('✅ 데이터 로드 성공');
-      }
-    }
-
-    // 2. 화면 초기화 및 선택
     selectedPageId.value = page.id;
     workspace.clear();
 
-    // 3. 현재 모드에 맞는 데이터 선택
-    let rawData = getModeData(page, activeMode.value) || '';
+    let rawData = '';
+    if (activeMode.value === 'structure') rawData = page.layoutData || page.workspaces.structure;
+    else if (activeMode.value === 'style') rawData = page.styleData || page.workspaces.style;
+    else rawData = page.logicData || page.workspaces.logic;
 
-    // 4. 블록 그리기 (JSON / XML 호환)
     if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
       if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
         const dom = Blockly.utils.xml.textToDom(rawData);
@@ -1710,25 +1739,36 @@ const loadPageById = async (pageId) => {
       } else {
         let state = rawData;
         if (typeof state === 'string') {
-          try {
-            state = JSON.parse(state);
-          } catch (e) {}
+          try { state = JSON.parse(state); } catch (e) {}
         }
         Blockly.serialization.workspaces.load(state, workspace);
       }
     }
+
+    // 🚀 좌표 강제 이동
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((block) => {
+      if (block.data) {
+        try {
+          const pos = JSON.parse(block.data);
+          if (pos.x !== undefined && pos.y !== undefined) {
+            block.moveTo(new Blockly.utils.Coordinate(pos.x, pos.y));
+          }
+        } catch (e) {}
+      }
+    });
+
   } catch (e) {
-    console.error('❌ 페이지 로드 실패:', e);
+    console.error('로드 실패:', e);
   } finally {
-    // 🔓 [잠금 해제]
+    // 🔓 잠금 해제 (0.2초 뒤에 풀어서 안전하게)
     setTimeout(() => {
       isRestoring = false;
       refreshCodeAndPreview();
-      handleSelection(null);
-    }, 100);
+      Blockly.svgResize(workspace);
+    }, 200);
   }
 };
-
 // ✅ [수정] 비동기 로드 대기 (async/await 추가)
 const selectPage = async (pageId) => {
   // 1. 현재 페이지 저장
@@ -1811,19 +1851,26 @@ let draggingBlockId = null;
 
 let __trashRaf = 0;
 let __trashEndBound = null; // ✅ pointerup fallback 핸들러
+let __trashLastX = 0;
+let __trashLastY = 0;
+let __trashMoveBound = null;
 
 function endTrashDrag() {
-  // raf 끊기
   if (__trashRaf) cancelAnimationFrame(__trashRaf);
   __trashRaf = 0;
-
-  // ✅ 최종 판정 + 삭제
+  // ✅ 최종 판정 + 삭제 (좌표 기반)
   const bid = draggingBlockId;
-  const shouldDelete = bid && isBlockOverTrashZone(bid);
+  const shouldDelete = bid && isPointerInTrashZone(__trashLastX, __trashLastY);
 
   isTrashZoneOpen.value = false;
   isOverTrash.value = false;
   draggingBlockId = null;
+
+  // ✅ pointermove 리스너 해제 (필수)
+  if (__trashMoveBound) {
+    window.removeEventListener('pointermove', __trashMoveBound, true);
+    __trashMoveBound = null;
+  }
 
   // pointerup 리스너 해제
   if (__trashEndBound) {
@@ -1835,40 +1882,32 @@ function endTrashDrag() {
   if (shouldDelete) {
     const b = workspace?.getBlockById(bid);
     if (b) {
-      try { Blockly.Events.disable(); } catch (_) {}
-      try { b.dispose(true); } catch (_) {}
-      try { Blockly.Events.enable(); } catch (_) {}
+      Blockly.Events.setGroup(true);
+      try {
+        b.dispose(true);
+      } finally {
+        Blockly.Events.setGroup(false);
+      }
+
+      // ✅ 삭제 후 동기화
+      updateObjectListFromWorkspace();
+      saveCurrentWorkspaceToPage();
+      refreshCodeAndPreview();
     }
   }
 }
 
-// 드롭존 위에 블록이 올라갔는지 판정
-const isBlockOverTrashZone = (blockId) => {
-  try {
-    const zone = document.querySelector('.wc-trash-zone');
-    if (!zone || !blockId) return false;
+function isPointerInTrashZone(x, y) {
+  // ✅ 휴지통 판정은 "진짜 오버레이 요소"의 rect로만 한다
+  const hit =
+    document.querySelector('.wc-trash-zone.active .wc-trash-hit') ||
+    document.querySelector('.wc-trash-hit');
 
-    const block = workspace?.getBlockById(blockId);
-    if (!block) return false;
+  if (!hit) return false;
 
-    // ✅ 드래그 중엔 svgRoot가 없을 수 있어서 fallback
-    const svgRoot = block.getSvgRoot?.() || block.svgGroup_ || null;
-    if (!svgRoot || !svgRoot.getBoundingClientRect) return false;
-
-    const zr = zone.getBoundingClientRect();
-    const br = svgRoot.getBoundingClientRect();
-
-    const cx = br.left + br.width / 2;
-    const cy = br.top + br.height / 2;
-
-    return cx >= zr.left && cx <= zr.right && cy >= zr.top && cy <= zr.bottom;
-  } catch (e) {
-    return false;
-  }
-};
-
-// [상수 추가] 스크립트 맨 위에 추가해두세요
-const FLYOUT_WIDTH = 300;
+  const r = hit.getBoundingClientRect();
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
 
 /**
  * 카테고리 선택 및 블록 목록(Flyout) 표시 함수
@@ -1881,6 +1920,7 @@ const selectCategory = (key) => {
   if (activeTab.value === key) {
     activeTab.value = null;
     workspace.getFlyout().hide();
+    endTrashDrag();
     setTimeout(() => Blockly.svgResize(workspace), 310);
     return;
   }
@@ -1966,7 +2006,7 @@ const handleThemeApply = async (payload) => {
   localStorage.setItem('wc_theme_settings', JSON.stringify(currentTheme));
   isThemeModalOpen.value = false;
 };
-// ✅ 서버에서 프로젝트 데이터를 불러와 초기화하는 함수 (Fix Ver.)
+
 const initProjectData = async () => {
   const toWorkspaceText = (data) => {
     if (data === null || data === undefined) return '{}';
@@ -2123,8 +2163,9 @@ watch(
     }, 500);
   }
 );
+let debounceTimer = null;
 onMounted(async () => {
-  // 1. 사용자 정보 확인 (서버 통신)
+  // 1. 사용자 정보 확인
   try {
     console.log('👤 [사용자 확인 시작]');
     const memberRes = await api.get('/member/me');
@@ -2145,21 +2186,20 @@ onMounted(async () => {
   patchPrettyGenerator();
   await nextTick();
 
-  // 3. Blockly 워크스페이스 주입 (Inject)
-  workspace = Blockly.inject('blocklyDiv', {
+  // 3. Blockly 워크스페이스 주입
+  const blocklyDiv = document.getElementById('blocklyDiv');
+  if (!blocklyDiv) return;
+
+  workspace = Blockly.inject(blocklyDiv, {
     renderer: 'zelos',
     toolbox: toolboxXMLs.empty,
     move: { scrollbars: true, drag: true, wheel: true },
-    zoom: {
-      controls: true,
-      wheel: false,
-      startScale: 0.8,
-    },
+    zoom: { controls: true, wheel: false, startScale: 0.8 },
     grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
     trashcan: true,
   });
 
-  // 4. 테마 적용 (테마만 로컬 스토리지 사용, 페이지 데이터는 사용 안 함)
+  // 4. 테마 적용
   let savedTheme = currentTheme;
   try {
     const loaded = localStorage.getItem('wc_theme_settings');
@@ -2174,250 +2214,228 @@ onMounted(async () => {
   const wsBg = document.querySelector('.blocklyMainBackground');
   if (wsBg) wsBg.style.fill = savedTheme.workspaceColor;
 
-  // 5. UI 레이아웃 보정 (Toolbox 숨김 처리 등)
+  // 5. UI 레이아웃 보정
   const metricsManager = workspace.getMetricsManager();
-  metricsManager.getToolboxMetrics = () => ({
-    width: 0,
-    height: 0,
-    position: Blockly.TOOLBOX_AT_LEFT,
-  });
-  metricsManager.getFlyoutMetrics = () => ({
-    width: 0,
-    height: 0,
-    position: Blockly.TOOLBOX_AT_LEFT,
-  });
+  metricsManager.getToolboxMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
+  metricsManager.getFlyoutMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
 
   const flyout = workspace.getFlyout();
-  if (flyout) flyout.autoClose = false;
+  if (flyout) {
+  flyout.autoClose = false;
+
+  // ✅ Flyout/Toolbox 영역 "삭제판정"만 OFF (trashcan은 그대로)
+  if (typeof flyout.isDeleteArea === "function") {
+    flyout.isDeleteArea = () => false;
+  }
+  if (flyout.workspace_ && typeof flyout.workspace_.isDeleteArea === "function") {
+    flyout.workspace_.isDeleteArea = () => false;
+  }
+  }
   workspace.resize();
 
-  // 6. 줌 컨트롤 (Ctrl + Wheel)
-  const blocklyDiv = document.getElementById('blocklyDiv');
-  blocklyDiv.addEventListener(
-    'wheel',
-    (e) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        const direction = e.deltaY > 0 ? -1 : 1;
-        workspace.zoom(e.offsetX, e.offsetY, direction);
-      }
-    },
-    { passive: false }
-  );
+  // 6. 줌 컨트롤
+  blocklyDiv.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const direction = e.deltaY > 0 ? -1 : 1;
+      workspace.zoom(e.offsetX, e.offsetY, direction);
+    }
+  }, { passive: false });
 
-  // 7. Blockly 이벤트 리스너 (변경 감지 및 저장)
-  let debounceTimer = null;
+  // ------------------------------------------------------------
+  // 🔥 7. [통합] Blockly 이벤트 리스너 (웹소켓 + 자동저장 + 휴지통)
+  // ------------------------------------------------------------
+  // ------------------------------------------------------------
+  // 🔥 7. [통합] Blockly 이벤트 리스너 (웹소켓 + 자동저장 + 휴지통)
+  // ------------------------------------------------------------
   workspace.addChangeListener((e) => {
-    // ✅ 엔트리식 드롭존: 드래그 시작/중/끝 처리
-    if (e.type === Blockly.Events.BLOCK_DRAG) {
-      // --- 드래그 시작(또는 드래그 감지) ---
-      // 어떤 버전은 isStart/isEnd가 없을 수 있어서, blockId 잡히면 일단 start로 간주
-      const maybeStart =
-        e.isStart === true || (e.isStart === undefined && !!e.blockId);
+    // (1) 실시간 동기화 (블록 이동 및 조립)
+    if (e.type === Blockly.Events.BLOCK_MOVE && !e.isUiEvent && !isRemoteUpdate) {
+      const block = workspace.getBlockById(e.blockId);
 
-      if (maybeStart && !isTrashZoneOpen.value) {
-        isTrashZoneOpen.value = true;
-        draggingBlockId = e.blockId || draggingBlockId;
-        isOverTrash.value = false;
+      if (block) {
+        // 🚀 블록이 결합되거나 '분리'될 때 감지
+        if (e.oldParentId !== e.newParentId) {
+          let d = {};
+          try { d = block.data ? JSON.parse(block.data) : {}; } catch (err) {}
 
-        // ✅ 드래그 중 판정 루프
-        if (__trashRaf) cancelAnimationFrame(__trashRaf);
-        const tick = () => {
-          if (!draggingBlockId) return;
-          isOverTrash.value = isBlockOverTrashZone(draggingBlockId);
-          __trashRaf = requestAnimationFrame(tick);
-        };
-        __trashRaf = requestAnimationFrame(tick);
+          if (e.newParentId) {
+            // 1. [결합]
+            delete d.uiX; delete d.uiY;
 
-        // ✅ Blockly가 isEnd를 안 주는 경우가 있어서 "마우스 떼기"로 강제 종료
-        if (!__trashEndBound) {
-          __trashEndBound = () => endTrashDrag();
-          window.addEventListener('pointerup', __trashEndBound, true);
-          window.addEventListener('pointercancel', __trashEndBound, true);
+            // 🚨 [수정] getParentInput() 에러 해결을 위한 안전한 탐색 로직
+            let inputName = null;
+            const parentBlock = workspace.getBlockById(e.newParentId);
+
+            if (parentBlock) {
+              // 부모의 모든 구멍(Input)을 검사해서 내가 어디 연결됐는지 찾음
+              for (const input of parentBlock.inputList) {
+                // 구멍의 연결 타겟이 '나(block)'라면?
+                if (input.connection && input.connection.targetBlock() === block) {
+                  inputName = input.name; // 구멍 이름(예: '내용') 발견!
+                  break;
+                }
+              }
+            }
+            // 루프를 돌았는데 inputName이 없으면? -> 구멍이 아니라 "밑(Next)"에 붙은 것임 (null 유지)
+
+            if (stompClient?.connected) {
+              stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+                type: 'BLOCK_CONNECTION',
+                blockId: e.blockId,
+                newParentId: e.newParentId,
+                inputName: inputName, // ✅ 이제 안전하게 전송됨
+                senderId: props.nickname,
+                clientId: currentClientId
+              }));
+            }
+          } else {
+            // 2. [분리]
+            const xy = block.getRelativeToSurfaceXY();
+            d.uiX = Math.round(xy.x); d.uiY = Math.round(xy.y);
+            
+            if (stompClient?.connected) {
+              stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+                type: 'BLOCK_CONNECTION',
+                blockId: e.blockId,
+                newParentId: null,
+                senderId: props.nickname
+              }));
+            }
+          }
+          block.data = JSON.stringify(d);
+          saveCurrentWorkspaceToPage();
+          refreshCodeAndPreview();
+        }
+        
+        // 🚀 단순 이동 (결합 아님)
+        else if (stompClient && stompClient.connected) {
+           // 부모가 없을 때(둥둥 떠다닐 때)만 좌표 전송
+           if (!block.getParent()) {
+             const xy = block.getRelativeToSurfaceXY();
+             stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+                 blockId: e.blockId,
+                 x: Math.round(xy.x),
+                 y: Math.round(xy.y),
+                 senderId: props.nickname
+             }));
+           }
         }
       }
-
-      // --- 드래그 종료가 정상적으로 오는 버전이면 여기서도 종료 ---
-      if (e.isEnd === true) {
-        endTrashDrag();
-      }
-
-      return;
     }
-    // 1. 로딩 중이거나, UI 이벤트(클릭 등)는 무시
-    if (isRestoring || e.isUiEvent) return;
 
-    // 2. [추가] 변수 생성/삭제 등 불필요한 이벤트 무시
+    // (2) UI 로직: 드래그 및 휴지통 처리
+    if (e.type === Blockly.Events.BLOCK_DRAG) {
+      const flyoutSvg = document.querySelector('.blocklyFlyout');
+      if (e.isEnd) {
+        if (flyoutSvg) flyoutSvg.style.pointerEvents = 'auto';
+        endTrashDrag();
+      } else if (e.isStart) {
+        if (flyoutSvg) flyoutSvg.style.pointerEvents = 'none';
+        if (!isTrashZoneOpen.value && activeTab.value) {
+          isTrashZoneOpen.value = true;
+          draggingBlockId = e.blockId || draggingBlockId;
+          
+          if (!__trashMoveBound) {
+            __trashMoveBound = (ev) => {
+              __trashLastX = ev.clientX;
+              __trashLastY = ev.clientY;
+              isOverTrash.value = isPointerInTrashZone(__trashLastX, __trashLastY);
+            };
+            window.addEventListener('pointermove', __trashMoveBound, true);
+          }
+          if (!__trashEndBound) {
+            __trashEndBound = () => {
+              if (flyoutSvg) flyoutSvg.style.pointerEvents = 'auto';
+              endTrashDrag();
+            };
+            window.addEventListener('pointerup', __trashEndBound, true);
+            window.addEventListener('pointercancel', __trashEndBound, true);
+          }
+        }
+      }
+    }
+
+    // (3) 데이터 자동 저장 (생성/삭제/변경 시)
+    if (isRestoring || e.isUiEvent) return;
     if (e.type === Blockly.Events.FINISHED_LOADING) return;
 
-    if (
-      e.type === Blockly.Events.BLOCK_CREATE ||
-      e.type === Blockly.Events.BLOCK_DELETE ||
-      e.type === Blockly.Events.BLOCK_CHANGE ||
-      e.type === Blockly.Events.BLOCK_MOVE
-    ) {
-      if (debounceTimer) clearTimeout(debounceTimer);
+    const saveEvents = [
+      Blockly.Events.BLOCK_CREATE,
+      Blockly.Events.BLOCK_DELETE,
+      Blockly.Events.BLOCK_CHANGE,
+    ];
 
-      // 3. 디바운스 시간 1초로 증가 (너무 잦은 저장 방지)
+    if (saveEvents.includes(e.type)) {
+      if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        // 이미 저장 중이면 스킵
         if (!isSaving.value) {
           updateObjectListFromWorkspace();
           saveCurrentWorkspaceToPage();
           refreshCodeAndPreview();
-          console.log(`📝 상태 업데이트 트리거 (${e.type})`);
+          console.log(`📝 DB 자동 저장 완료 (${e.type})`);
         }
       }, 1000);
     }
-
-    if (e.type === Blockly.Events.SELECTED) {
-      if (!isSelectingProgrammatically) {
-        handleSelection(e.newElementId, 'blockly');
-      }
-    }
   });
 
-  // 8. Iframe 통신 리스너 (좌표 동기화 핵심)
+  // ------------------------------------------------------------
+  // 🔥 8. [복구] Iframe 통신 리스너 (미리보기 좌표 동기화)
+  // ------------------------------------------------------------
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data) return;
 
-    // 🚀 [좌표 동기화 핵심 수정]
+    // 1. 드래그 끝 -> 저장 로직
     if (data.type === 'update_free_position') {
       const { blockId, x, y } = data;
-      const page = pages.value.find((p) => p.id === selectedPageId.value);
+      if (workspace) {
+        const liveBlock = workspace.getBlockById(blockId);
+        if (liveBlock) {
+          let currentData = {};
+          try { currentData = liveBlock.data ? JSON.parse(liveBlock.data) : {}; } catch (e) {}
 
-      // 2. (데이터 저장) 백그라운드 데이터(JSON/XML) 수정
-      // page.layoutData 또는 page.workspaces.structure를 수정해야 함
-      let targetData = page.layoutData || page.workspaces.structure;
+          // 데이터 업데이트
+          currentData.uiX = Number(x);
+          currentData.uiY = Number(y);
+          liveBlock.data = JSON.stringify(currentData);
+          
+          console.log(`📌 [드래그 감지] ${blockId} -> uiX:${x} 설정완료`);
 
-      if (targetData) {
-        try {
-          // 🅰️ JSON 형식일 때 (현재 방식)
-          if (
-            typeof targetData === 'string' &&
-            targetData.trim().startsWith('{')
-          ) {
-            const jsonObj = JSON.parse(targetData);
-
-            // 재귀 함수: JSON 트리 전체를 뒤져서 해당 ID의 블록을 찾아 좌표 수정
-            const updateJsonNode = (node) => {
-              if (!node) return false;
-              // 배열이면 내부 순회
-              if (Array.isArray(node)) return node.some(updateJsonNode);
-              // 객체이고 ID가 일치하면 좌표 업데이트!
-              if (typeof node === 'object') {
-                if (node.id === blockId) {
-                  node.x = Number(x);
-                  node.y = Number(y);
-                  // data 필드도 업데이트 (이중 안전장치)
-                  node.data = JSON.stringify({ x: Number(x), y: Number(y) });
-                  return true; // 찾았으니 종료
-                }
-                // 하위 속성 탐색 (blocks, next, statement 등)
-                return Object.values(node).some(updateJsonNode);
-              }
-              return false;
-            };
-
-            // 업데이트 실행
-            updateJsonNode(jsonObj);
-
-            // 변경된 JSON을 다시 문자열로 저장
-            const newJsonStr = JSON.stringify(jsonObj);
-            page.layoutData = newJsonStr;
-            page.workspaces.structure = newJsonStr;
+          // 서버 전송 (실시간 공유)
+          if (stompClient && stompClient.connected) {
+             stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+               type: 'UI_MOVE', 
+               blockId: blockId,
+               x: Number(x),
+               y: Number(y),
+               senderId: props.nickname
+             }));
           }
-          // 🅱️ XML 형식일 때 (구버전 호환)
-          else if (
-            typeof targetData === 'string' &&
-            targetData.trim().startsWith('<')
-          ) {
-            const parser = new DOMParser();
-            const xmlDoc = parser.parseFromString(targetData, 'text/xml');
-            const targetBlock = xmlDoc.querySelector(`block[id="${blockId}"]`);
-
-            if (targetBlock) {
-              targetBlock.setAttribute('x', x);
-              targetBlock.setAttribute('y', y);
-              targetBlock.setAttribute(
-                'data',
-                JSON.stringify({ x: Number(x), y: Number(y) })
-              );
-
-              const serializer = new XMLSerializer();
-              const newXmlStr = serializer.serializeToString(xmlDoc);
-              page.workspaces.structure = newXmlStr;
-              // XML 모드일 땐 layoutData 업데이트 안 함 (구분)
-            }
-          }
-
-          // 3. 즉시 서버 저장 트리거
-          saveToServerAsJson();
-        } catch (e) {
-          console.error('좌표 업데이트 실패:', e);
         }
       }
+      // 🔥 [핵심 순서] 변수 업데이트 먼저 -> 그 다음 서버 저장
+      saveCurrentWorkspaceToPage(); 
+      saveToServerAsJson(); 
     }
-
-    // ... (나머지 이벤트 리스너는 그대로 유지)
-    if (
-      data.type === 'NAVIGATE' ||
-      data.type === 'REDIRECT' ||
-      data.type === 'change_page_request'
-    ) {
-      const targetId = data.pageId;
-      const targetPage = pages.value.find(
-        (p) => p.id === targetId || p.route === targetId || p.name === targetId
-      );
-      if (targetPage) {
-        lockPage(targetPage.id);
-        selectPage(targetPage.id);
-      } else {
-        alert('이동할 페이지를 찾을 수 없습니다: ' + targetId);
-      }
+    
+    // 2. 선택 동기화
+    if (data.type === 'select_block') {
+      handleSelection(data.blockId, 'preview');
     }
-
-    if (data.type === 'select_block') handleSelection(data.blockId, 'iframe');
-    if (data.type === 'deselect_block') handleSelection(null, 'iframe');
   });
 
-  // 9. 전역 함수 (Blockly 드롭다운용)
-  window.WC_GET_PAGES = () => {
-    if (!pages.value || pages.value.length === 0) return [['페이지 없음', '']];
-    return pages.value.map((p) => [p.name, String(p.id)]);
-  };
-
-  // =========================================================
-  // 🚀 [핵심] 프로젝트 데이터 로드 및 초기화
-  // =========================================================
-
-  // 서버에서 데이터 로드 시도
+  // 9. 프로젝트 데이터 로드
   await initProjectData();
 
-  // 성공적으로 로드했으나 페이지가 0개인 경우 (신규 프로젝트) -> 초기화 진행
   if (!isLoadFailed.value && pages.value.length === 0) {
     console.log('🆕 신규 프로젝트 감지: 기본 페이지 생성 시작');
-    await setupInitialPages(); // DB 생성
-    pages.value = [createPage('Home'), createPage('Login')]; // 메모리 생성
-
-    // 생성 후 다시 로드하여 싱크 맞춤
+    await setupInitialPages();
     await initProjectData();
-
-    // 첫 페이지 로드
-    if (pages.value[0]?.id) {
-      await loadPageById(pages.value[0].id);
-    }
-  }
-  // 로드에 실패한 경우 (500 에러 등) -> 안전 모드 진입
-  else if (isLoadFailed.value) {
-    console.error(
-      '⛔ [안전 모드 발동] 서버 데이터 로드 실패. 초기화 및 자동 저장을 중단합니다.'
-    );
-    // alert("서버에서 데이터를 불러오지 못했습니다. 새로고침 하거나 잠시 후 다시 시도해주세요.");
+    if (pages.value[0]?.id) await loadPageById(pages.value[0].id);
   }
 
-  // 10. 리사이즈 감지 (Iframe 반응형)
+  // 10. 리사이즈 감지
   new ResizeObserver(() => {
     if (workspace) Blockly.svgResize(workspace);
   }).observe(document.getElementById('workspace-area'));
@@ -2436,23 +2454,162 @@ onMounted(async () => {
     if (e.key === 'Escape' && isRunning.value) toggleRun();
   });
 
-  // 12. 자동 저장 타이머 (에러 상태일 땐 동작 안 함!)
-  autoSaveTimer = setInterval(
-    () => {
-      if (!isLoadFailed.value) {
-        console.log('🕒 자동 저장 실행 중...');
-        saveToServerAsJson();
-      } else {
-        console.warn('🕒 자동 저장 건너뜀 (로드 실패 상태)');
+  // 12. 자동 저장 타이머
+  autoSaveTimer = setInterval(() => {
+    if (!isLoadFailed.value) saveToServerAsJson();
+  }, 10 * 60 * 1000);
+
+  // 13. 웹소켓 연결
+  // ✅ [Final Fix] 웹소켓 연결 및 구독 함수 전체 (괄호 오류 수정됨)
+  const connectWebSocket = () => {
+    const socket = new SockJS('http://localhost:8080/wsproject');
+    stompClient = Stomp.over(socket);
+    stompClient.debug = null;
+
+  // 1. 서버 연결 시도
+  stompClient.connect({}, (frame) => {
+    console.log('🚀 [협업 서버 연결 성공]');
+
+    // 2. 구독 설정 (connect 성공 콜백 내부여야 함)
+    stompClient.subscribe(`/topic/project/${props.webId}/block-updates`, (res) => {
+      const data = JSON.parse(res.body);
+
+      // -----------------------------------------------------------
+      // [로직 1] 일반 블록 이동 (최상위 블록만)
+      // -----------------------------------------------------------
+      if (!data.type && data.blockId && data.senderId !== props.nickname) {
+        const targetWorkspace = Blockly.getMainWorkspace();
+        const block = targetWorkspace.getBlockById(data.blockId);
+        
+        // 부모가 없는(최상위) 블록만 이동
+        if (block && !block.getParent()) {
+          Blockly.Events.disable();
+          block.moveTo(new Blockly.utils.Coordinate(Number(data.x), Number(data.y)));
+          Blockly.Events.enable();
+          refreshCodeAndPreview();
+        }
       }
-    },
-    10 * 60 * 1000 // 10분
-  );
+
+      // -----------------------------------------------------------
+      // [로직 2] 블록 조립/분리 (스마트 연결 적용)
+      // -----------------------------------------------------------
+      if (data.type === 'BLOCK_CONNECTION' && data.senderId !== props.nickname) {
+        const targetWs = Blockly.getMainWorkspace();
+        const block = targetWs.getBlockById(data.blockId);
+
+        if (block) {
+          Blockly.Events.disable(); // 이벤트 루프 방지
+          try {
+            // 1. 안전장치: 일단 기존 연결 해제
+            if (block.getParent()) {
+              block.unplug(true);
+            }
+
+            if (data.newParentId) {
+              // [결합 시도]
+              const parent = targetWs.getBlockById(data.newParentId);
+              if (parent) {
+                let targetConnection = null;
+                let sourceConnection = null;
+
+                // A. 구멍(Input)에 끼우는 경우
+                if (data.inputName) {
+                  const input = parent.getInput(data.inputName);
+                  if (input) {
+                    targetConnection = input.connection;
+
+                    // 구멍이 '값(Value)'을 원하면 -> 내 Output 사용
+                    if (targetConnection && targetConnection.type === Blockly.INPUT_VALUE) {
+                      sourceConnection = block.outputConnection;
+                    }
+                    // 구멍이 '문장(Statement)'을 원하면 -> 내 Previous 사용
+                    else if (targetConnection && targetConnection.type === Blockly.NEXT_STATEMENT) {
+                      sourceConnection = block.previousConnection;
+                    }
+                  }
+                }
+                // B. 밑에 쌓는 경우 (Stacking)
+                else {
+                  targetConnection = parent.nextConnection;
+                  sourceConnection = block.previousConnection;
+                }
+
+                // 찾은 연결 부위끼리 강제 결합
+                if (targetConnection && sourceConnection) {
+                  sourceConnection.connect(targetConnection);
+                }
+              }
+            } else {
+              // [분리] (위에서 unplug 했으므로 처리됨)
+            }
+          } catch (err) {
+            console.error("조립 동기화 에러:", err);
+          }
+          Blockly.Events.enable();
+          refreshCodeAndPreview();
+        }
+      }
+
+      // -----------------------------------------------------------
+      // [로직 3] UI 드래그 실시간 반영
+      // -----------------------------------------------------------
+      if (data.type === 'UI_MOVE' && data.senderId !== props.nickname) {
+        const targetWorkspace = Blockly.getMainWorkspace();
+        const block = targetWorkspace.getBlockById(data.blockId);
+        if (block) {
+          let d = {};
+          try { d = block.data ? JSON.parse(block.data) : {}; } catch (e) {}
+          d.uiX = data.x;
+          d.uiY = data.y;
+          block.data = JSON.stringify(d);
+        }
+
+        const iframe = document.getElementById('previewFrame');
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage({
+            type: 'update_free_position_remote',
+            blockId: data.blockId,
+            x: data.x,
+            y: data.y
+          }, '*');
+        }
+        saveCurrentWorkspaceToPage();
+        saveToServerAsJson();
+      }
+    });
+
+  }, (error) => {
+    // 3. 연결 실패 시 재시도 로직
+    console.error('❌ [웹소켓 연결 실패]:', error);
+    setTimeout(connectWebSocket, 5000);
+  });
+  };
+
+  // 함수 실행
+  connectWebSocket();
+
+  // ---------------------------------------------------------
+  // ✅ 14. [최종 추가] 프로젝트 조회수 증가 (s 붙인 버전)
+  // ---------------------------------------------------------
+  try {
+    const currentWebId = props.webId;
+    if (currentWebId) {
+      await api.patch(`/projects/hit/${currentWebId}`);
+      console.log(`📈 프로젝트(${currentWebId}) 조회수 증가 완료`);
+    }
+  } catch (err) {
+    console.warn("조회수 업데이트 중 오류 발생:", err);
+  }
+  
 });
 onUnmounted(() => {
   if (autoSaveTimer) clearInterval(autoSaveTimer);
   if (__trashRaf) cancelAnimationFrame(__trashRaf);
   __trashRaf = 0;
+  if (__trashMoveBound) {
+    window.removeEventListener('pointermove', __trashMoveBound, true);
+    __trashMoveBound = null;
+  }
 });
 // PC 모드일 때는 강제로 넓게 잡고 축소해서 보여줌
 // ✅ [Final] 컴퓨터 표준 16:9 비율(1920x1080)로 강제 고정
@@ -3019,9 +3176,12 @@ const applyManualXml = () => {
           <!-- 엔트리식 휴지통 드롭존 -->
           <div
             class="wc-trash-zone"
-            :class="{ active: isTrashZoneOpen, over: isOverTrash }"
+            :class="{
+              active: isTrashZoneOpen && !!activeTab,
+              over: isOverTrash,
+            }"
           >
-            <div class="wc-trash-zone__overlay">
+            <div class="wc-trash-zone__overlay wc-trash-hit">
               <div class="wc-trash-zone__content">
                 <div class="wc-trash-zone__icon">🗑️</div>
                 <div class="wc-trash-zone__text">여기로 옮겨 버리기</div>
@@ -3731,6 +3891,9 @@ iframe {
   position: absolute !important;
 }
 
+
+
+
 /* 배경 투명도 및 클릭 관통 방지 */
 
 /* 기존 코드 수정: Blockly의 SVG 배경을 투명하게 만듦 */
@@ -3934,6 +4097,7 @@ iframe {
   y: 0 !important;
   /* stroke(테두리선) 때문에 1px 이격이 보일 수 있으므로 제거 */
   stroke: none !important;
+  pointer-events: none !important;
 }
 /* 새로 만든 300px 배경 패널 */
 .flyout-bg-panel {
@@ -4205,7 +4369,8 @@ iframe {
 
 /* 노란 반투명 오버레이 */
 .wc-trash-zone__overlay {
-  width: 100%;
+  width: 300px;
+  max-width: 300px;
   height: 100%;
   background: rgba(255, 244, 200, 0.85); /* 엔트리 느낌 노랑 */
   border: 2px dashed rgba(255, 180, 0, 0.9);
@@ -4214,6 +4379,11 @@ iframe {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.wc-trash-zone__overlay.wc-trash-hit {
+  width: 300px; /* ✅ 판정 폭 고정 */
+  max-width: 300px; /* ✅ flyoutBackground 영향 차단 */
 }
 
 /* 중앙 콘텐츠 */

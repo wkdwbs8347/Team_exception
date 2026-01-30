@@ -12,8 +12,19 @@
  * ============================================================
 
  */
+
+import SockJS from 'sockjs-client';
+import Stomp from 'stompjs';
 import JSZip from 'jszip';
-import { ref, onMounted, nextTick, watch, computed, reactive, onUnmounted } from 'vue';
+import {
+  ref,
+  onMounted,
+  nextTick,
+  watch,
+  computed,
+  reactive,
+  onUnmounted,
+} from 'vue';
 
 import * as Blockly from 'blockly';
 
@@ -51,6 +62,7 @@ import { Settings } from 'lucide-vue-next';
 // 1. 컴포넌트 임포트
 import AiChatBot from '@/modal/AiChatBot.vue';
 import ThemeSettingsModal from '@/modal/ThemeSettingsModal.vue';
+import { applyContentAttrsToHtml } from '@/utils/applyContentAttrsToHtml';
 //기본 테마 설정
 const isThemeModalOpen = ref(false);
 const currentTheme = reactive({
@@ -62,137 +74,153 @@ const currentTheme = reactive({
 const props = defineProps({
   nickname: {
     type: String,
-    default: 'lde_tester',
+    default: '',
   },
   webId: {
     type: [String, Number],
-    default: '9999', // 👈 빈 값('') 대신 본인만의 테스트 ID를 넣으세요 [cite: 2026-01-21]
+    default: '',
   },
 });
-// ✅ [Fix] 블록 위치와 데이터 좌표 분리
-const mergeBlockXmlByCategory = (existingXml, newDom, category) => {
-  if (!existingXml || existingXml === '<xml></xml>') {
-    return Blockly.Xml.domToText(newDom);
-  }
 
-  const existingDom = Blockly.utils.xml.textToDom(existingXml);
-  const blocks = Array.from(existingDom.childNodes).filter(
-    (n) => n.nodeName === 'block'
-  );
-
-  let startX = 50;
-  let startY = 50;
-
-  blocks.forEach((b) => {
-    const y = parseInt(b.getAttribute('y') || '0');
-    if (y > startY) startY = y;
-  });
-
-  const newBlocks = Array.from(newDom.children).filter(
-    (n) => n.nodeName === 'block'
-  );
-
-  newBlocks.forEach((block, idx) => {
-    let newX, newY;
-
-    if (category === 'style') {
-      const col = idx % 2;
-      const row = Math.floor(idx / 2);
-      newX = startX + col * 450;
-      newY = startY + 200 + row * 300;
-    } else {
-      newX = startX;
-      newY = startY + 150 + idx * 200;
-    }
-
-    // 1. 블록의 '에디터 상 위치'는 자동 정렬해 줍니다.
-    block.setAttribute('x', newX.toString());
-    block.setAttribute('y', newY.toString());
-
-    // 🔥 [핵심 수정] 여기서 data 속성을 덮어쓰지 않습니다!
-    // 기존에 iframe에서 저장한 좌표(data)가 있다면 유지하고, 없을 때만 초기화하거나 놔둡니다.
-    // block.setAttribute('data', ...);  <-- 이 줄을 삭제함
-
-    existingDom.appendChild(block);
-  });
-
-  return Blockly.Xml.domToText(existingDom);
-};
 const wrapperWidth = ref(600);
 const wrapperHeight = ref(800);
 const isSaving = ref(false);
+const isLoadFailed = ref(false);
+let isRestoring = false;
 let autoSaveTimer = null; // 타이머 ID 저장용
+// ✅ [AI Fix] AI 블록을 종류별로 분류하여 각각의 탭(데이터)에 분산 저장하는 함수
 const handleAiBlockGeneration = (xmlText, isEditMode = false) => {
   if (!workspace || !xmlText) return;
 
+  const page = pages.value.find((p) => p.id === selectedPageId.value);
+  if (!page) return;
+
   try {
-    const xmlDom = Blockly.utils.xml.textToDom(xmlText);
-    const categoryBuckets = {
-      structure: document.createElement('xml'),
-      style: document.createElement('xml'),
-      logic: document.createElement('xml'),
+    // 1. AI가 준 XML 파싱
+    const dom = Blockly.utils.xml.textToDom(xmlText);
+    const newBlocks = Array.from(dom.children).filter(
+      (n) => n.tagName === 'BLOCK' || n.tagName === 'block'
+    );
+
+    // 2. 블록 분류 (바구니 준비)
+    const buckets = {
+      structure: [],
+      style: [],
+      logic: [],
     };
 
-    // 1. 블록 분류
-    Array.from(xmlDom.children).forEach((blockNode) => {
-      if (blockNode.nodeName.toLowerCase() !== 'block') return;
-      const type = blockNode.getAttribute('type') || '';
+    // 3. 하나씩 검사해서 바구니에 담기
+    newBlocks.forEach((block) => {
+      const type = block.getAttribute('type') || '';
       if (
         type.startsWith('layout_') ||
         type.startsWith('content_') ||
         type.startsWith('form_') ||
         type.startsWith('component_')
       ) {
-        categoryBuckets.structure.appendChild(blockNode);
+        buckets.structure.push(block);
       } else if (
         type.startsWith('style_') ||
-        type.startsWith('effect_') ||
+        type.startsWith('color_') ||
+        type.startsWith('flex_') ||
         type.startsWith('anim_')
       ) {
-        categoryBuckets.style.appendChild(blockNode);
+        buckets.style.push(block);
       } else {
-        categoryBuckets.logic.appendChild(blockNode);
+        buckets.logic.push(block); // 나머지는 로직
       }
     });
 
-    const page = pages.value.find((p) => p.id === selectedPageId.value);
-    if (!page) return;
+    // 4. 각 바구니를 해당 탭(데이터)에 저장 처리
+    ['structure', 'style', 'logic'].forEach((mode) => {
+      const blockNodes = buckets[mode];
+      if (blockNodes.length === 0) return; // 내용 없으면 패스
 
-    // 🔥 [에러 해결 핵심] page.workspaces가 없으면 초기화해줍니다.
-    if (!page.workspaces) {
-      page.workspaces = {
-        structure: '<xml></xml>',
-        style: '<xml></xml>',
-        logic: '<xml></xml>',
-      };
-    }
+      // (A) 현재 보고 있는 탭이라면? -> 라이브 워크스페이스에 직접 추가
+      if (activeMode.value === mode) {
+        if (isEditMode) workspace.clear(); // 수정 모드면 초기화
 
-    // 2. 각 카테고리별로 독립적으로 병합 및 저장
-    Object.keys(categoryBuckets).forEach((key) => {
-      const bucket = categoryBuckets[key];
-      if (bucket.children.length > 0) {
-        if (isEditMode) {
-          page.workspaces[key] = Blockly.Xml.domToText(bucket);
-        } else {
-          // 기존 XML 데이터가 유효한지 한 번 더 확인 후 병합
-          const existingXml = page.workspaces[key] || '<xml></xml>';
-          page.workspaces[key] = mergeBlockXmlByCategory(
-            existingXml,
-            bucket,
-            key
-          );
-        }
+        // 위치 계산 (기존 블록들 아래에)
+        let startY = 50;
+        workspace.getAllBlocks(false).forEach((b) => {
+          const xy = b.getRelativeToSurfaceXY();
+          const h = b.getHeightWidth().height;
+          if (xy.y + h > startY) startY = xy.y + h + 50;
+        });
+
+        // 블록 주입
+        const tempXml = document.createElement('xml');
+        blockNodes.forEach((b, i) => {
+          b.setAttribute('x', '50');
+          b.setAttribute('y', String(startY + i * 200));
+          tempXml.appendChild(b);
+        });
+        Blockly.Xml.domToWorkspace(tempXml, workspace);
+
+        // 즉시 저장 (동기화)
+        saveCurrentWorkspaceToPage();
+      }
+
+      // (B) 안 보이는 다른 탭이라면? -> 임시 워크스페이스 열어서 처리 (백그라운드 저장)
+      else {
+        const tempWs = new Blockly.Workspace(); // 1. 임시 작업대 생성
+        const rawData = page.workspaces[mode];
+
+        // 2. 기존 데이터 로드 (JSON/XML)
+        try {
+          if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
+            if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
+              Blockly.serialization.workspaces.load(
+                JSON.parse(rawData),
+                tempWs
+              );
+            } else if (typeof rawData === 'string' && rawData.startsWith('<')) {
+              const prevDom = Blockly.utils.xml.textToDom(rawData);
+              Blockly.Xml.domToWorkspace(prevDom, tempWs);
+            }
+          }
+        } catch (e) {}
+
+        if (isEditMode) tempWs.clear();
+
+        // 3. 위치 계산
+        let startY = 50;
+        tempWs.getAllBlocks(false).forEach((b) => {
+          const xy = b.getRelativeToSurfaceXY();
+          const h = b.getHeightWidth().height;
+          if (xy.y + h > startY) startY = xy.y + h + 50;
+        });
+
+        // 4. 블록 주입
+        const tempXml = document.createElement('xml');
+        blockNodes.forEach((b, i) => {
+          b.setAttribute('x', '50');
+          b.setAttribute('y', String(startY + i * 200));
+          tempXml.appendChild(b);
+        });
+        Blockly.Xml.domToWorkspace(tempXml, tempWs);
+
+        // 5. 저장 (JSON으로 변환하여 DB 데이터 갱신)
+        const state = Blockly.serialization.workspaces.save(tempWs);
+        const jsonText = JSON.stringify(state);
+
+        page.workspaces[mode] = jsonText;
+        if (mode === 'structure') page.layoutData = jsonText;
+        else if (mode === 'style') page.styleData = jsonText;
+        else if (mode === 'logic') page.logicData = jsonText;
+
+        tempWs.dispose(); // 6. 작업대 정리
+
+        // 중요: 서버 저장 트리거
+        saveToServerAsJson();
       }
     });
 
-    savePagesToStorage();
-
-    // 3. UI 갱신 (지우지 않고 필요한 데이터만 다시 로드)
-    nextTick(() => {
-      loadPageById(page.id);
-    });
+    console.log(
+      `✅ AI 블록 분류 완료 (구조:${buckets.structure.length}, 스타일:${buckets.style.length}, 로직:${buckets.logic.length})`
+    );
   } catch (e) {
-    console.error('분류 중 오류:', e);
+    console.error('AI 분류 중 오류:', e);
   }
 };
 /* ============================================================
@@ -284,6 +312,7 @@ const isRunning = ref(false);
 const isPhone = ref(false);
 const isLandscape = ref(false);
 let workspace = null;
+let draggingBlockIdForRealtime = null;
 
 // ✨ [핵심 수정] pages 선언과 초기값 주입 분리 (순환 참조 방지)
 
@@ -291,6 +320,11 @@ let workspace = null;
 
 const pages = ref([]);
 const projectTitle = ref(''); // 프로젝트 전체 제목 전용 변수
+const userInfo = ref(null); // 사용자 정보를 담을 변수
+const isAppLoading = ref(true); // 초기 로딩 상태 관리
+// 실시간 공유를 위한 변수 추가
+let stompClient = null;
+let isRemoteUpdate = false;
 
 // 2. 초기 데이터 주입
 
@@ -402,132 +436,157 @@ const currentSubItems = computed(() => {
 
 // IDEView.vue 내 수정
 
-
-
-// IDEView.vue -> saveToServerAsJson 함수
-
+// ✅ [Final Fix] 백엔드 규격(Map)에 맞춰 데이터 포장 및 미리보기 HTML 생성 전송
 const saveToServerAsJson = async () => {
-  if (isSaving.value || !workspace) return;
-  const page = pages.value.find(p => p.id === selectedPageId.value);
+  // 1. 방어 로직
+  if (isSaving.value) return;
+  if (isLoadFailed.value) {
+    console.warn('⛔ 데이터 로드에 실패한 상태이므로 저장을 차단합니다.');
+    return;
+  }
+
+  const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
   try {
     isSaving.value = true;
-    
-    // 🚀 수정: JSON 추출 후, 만약 비어있다면(기본값) XML로 강제 전환
-    const state = Blockly.serialization.workspaces.save(workspace);
-    let jsonState = JSON.stringify(state);
-    
-    // 블록이 있는데 JSON이 비어있다고 판단되면 XML 사용 (안전장치) [cite: 2026-01-21]
-    if (jsonState.length < 50) { 
-      const xmlDom = Blockly.Xml.workspaceToDom(workspace);
-      jsonState = Blockly.Xml.domToText(xmlDom);
-    }
 
-    if (activeMode.value === 'structure') page.layoutData = jsonState;
-    else if (activeMode.value === 'style') page.styleData = jsonState;
-    else if (activeMode.value === 'logic') page.logicData = jsonState;
-
-    const payload = {
-      webId: props.webId,
-      pageName: page.name,
-      title: projectTitle.value,
-      layoutData: page.layoutData, // 👈 실제 DB로 날아가는 알맹이
-      styleData: page.styleData || '{}',
-      logicData: page.logicData || '{}'
+    // 데이터 안전 변환 헬퍼
+    const toSafeString = (val) => {
+      if (!val) return '{}';
+      if (typeof val === 'string') return val;
+      return JSON.stringify(val);
     };
 
-    // 로그를 찍어 서버로 진짜 데이터가 가는지 직접 눈으로 확인하세요! [cite: 2026-01-21]
-    console.log("📤 서버로 보낼 데이터:", payload.layoutData);
+    // 2. 현재 페이지의 최신 데이터 확보 (XML/JSON 형태)
+    // (현재 탭의 내용은 workspace에서 최신화되어 page에 들어가 있어야 함)
+    const layoutRaw = toSafeString(
+      page.layoutData || page.workspaces?.structure
+    );
+    const styleRaw = toSafeString(page.styleData || page.workspaces?.style);
+    const logicRaw = toSafeString(page.logicData || page.workspaces?.logic);
 
+    // ---------------------------------------------------------
+    // 🔥 [핵심 1] 미리보기용 HTML 생성 (Preview Column용)
+    // ---------------------------------------------------------
+    // 저장된 블록 데이터(XML/JSON)를 실제 코드로 변환해야 iframe에서 보입니다.
+    // 기존에 정의된 generateCodeFromXML 함수를 재사용합니다.
+
+    const genHtml = generateCodeFromXML(layoutRaw); // HTML 코드 생성
+    const genCss = generateCodeFromXML(styleRaw); // CSS 코드 생성
+
+    // 🔥 [수정] style 태그 중첩 문제 해결!
+    // genCss 변수 안에 이미 <style>...</style> 태그가 포함되어 있으므로,
+    // 겉을 감싸던 <style> 태그를 제거하고 분리했습니다.
+    const previewHtmlString = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            body { margin: 0; padding: 0; overflow: hidden; background-color: #fff; }
+          </style>
+          ${genCss}
+        </head>
+        <body>
+          ${cleanCodeForView(genHtml)} 
+        </body>
+      </html>
+    `;
+
+    // ---------------------------------------------------------
+    // 🔥 [핵심 2] 백엔드가 원하는 구조(Map)로 포장
+    // ---------------------------------------------------------
+    const payload = {
+      // ① pageData: 편집용 데이터 (JSON/XML) -> userWeb_pages 테이블용
+      pageData: {
+        webId: props.webId,
+        pageName: page.name,
+        layoutData: layoutRaw,
+        styleData: styleRaw,
+        logicData: logicRaw,
+      },
+      // ② previewHtml: 미리보기용 데이터 (HTML String) -> userWeb 테이블용
+      previewHtml: previewHtmlString,
+    };
+
+    // ---------------------------------------------------------
+    // 🚀 [전송]
+    // ---------------------------------------------------------
     const oldNameForQuery = page.oldName || page.name;
-    await api.put(`/projects/${props.webId}/data?oldPageName=${encodeURIComponent(oldNameForQuery)}`, payload);
-    
-    page.oldName = page.name;
-    console.log(`✅ [${page.name}] 서버 저장 성공!`);
 
+    await api.put(
+      `/projects/${props.webId}/data?oldPageName=${encodeURIComponent(oldNameForQuery)}`,
+      payload
+    );
+
+    // 성공 처리
+    page.oldName = page.name;
+    // 타이틀 업데이트가 있었다면 반영
+    if (projectTitle.value) {
+      // 필요하다면 별도 처리, 이미 pageData 저장 흐름이라면 OK
+    }
+
+    console.log(`✅ [${page.name}] 저장 및 미리보기 갱신 성공`);
   } catch (e) {
     console.error('❌ 저장 실패:', e);
+    // alert("저장에 실패했습니다."); // 필요 시 주석 해제
   } finally {
     isSaving.value = false;
   }
 };
-
-
-// ✅ 블록 데이터를 화면에 그리는 함수
+// ✅ [Final Fix] 페이지 첫 로드 시에도 좌표 강제 적용
 const loadWorkspaceState = (pageId) => {
-  const page = pages.value.find(p => p.id === pageId);
+  const page = pages.value.find((p) => p.id === pageId);
   if (!page || !workspace) return;
 
   try {
-    // 1. 렌더링 일시 중지 (성능 및 꼬임 방지) [cite: 2026-01-21]
-    Blockly.Events.disable(); 
     workspace.clear();
 
-    const rawData = page.layoutData || (page.workspaces && page.workspaces.structure);
+    const rawData =
+      page.layoutData || (page.workspaces && page.workspaces.structure);
+
     if (!rawData || rawData === '<xml></xml>' || rawData === '{}') {
-      Blockly.Events.enable();
       return;
     }
 
-    // 2. 데이터 주입
-    if (typeof rawData === 'string' && rawData.trim().startsWith('<xml')) {
-        const dom = Blockly.utils.xml.textToDom(rawData);
-        Blockly.Xml.domToWorkspace(dom, workspace);
+    // 1. 데이터 로드
+    if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
+      const dom = Blockly.utils.xml.textToDom(rawData);
+      Blockly.Xml.domToWorkspace(dom, workspace);
     } else {
-        let state = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
-        Blockly.serialization.workspaces.load(state, workspace);
+      let state = rawData;
+      if (typeof state === 'string') {
+        try {
+          state = JSON.parse(state);
+        } catch (e) {}
+      }
+      Blockly.serialization.workspaces.load(state, workspace);
     }
 
-    // 🚀 [핵심 추가] 주입 직후 강제로 렌더링을 다시 계산하게 시킵니다.
-    workspace.render(); // 블록들을 다시 그림 [cite: 2026-01-21]
-    workspace.cleanUp(); // 블록 배치 정돈
-    
-    // 3. 렌더링 재개 및 화면 갱신 [cite: 2026-01-21]
-    Blockly.Events.enable();
-    Blockly.svgResize(workspace); 
+    // 🚀 [핵심 추가] 로드 후 좌표 강제 보정 (Self-Healing)
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((block) => {
+      if (block.data) {
+        try {
+          const pos = JSON.parse(block.data);
+          if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+            block.moveTo(new Blockly.utils.Coordinate(pos.x, pos.y));
+          }
+        } catch (e) {}
+      }
+    });
 
     refreshCodeAndPreview();
   } catch (e) {
-    console.error("❌ 블록 불러오기 최종 실패:", e);
-    Blockly.Events.enable();
+    console.error('❌ 블록 로드 실패:', e);
   }
 };
-
-const loadPagesFromStorage = () => {
-  try {
-    const rawData = localStorage.getItem(`wc_pages_${props.webId}`);
-    if (!rawData) return []; // null 대신 빈 배열 추천
-
-    const parsed = JSON.parse(rawData);
-    
-    // 프로젝트 제목 복구
-    if (parsed.settings?.projectName) {
-      projectTitle.value = parsed.settings.projectName;
-    }
-
-    return parsed.pages ?? parsed;
-  } catch (e) {
-    console.error('로컬 로드 실패:', e);
-    return [];
-  }
-};
+// ✅ 수정: 로컬 스토리지(localStorage) 저장 로직 완전 삭제
 const savePagesToStorage = () => {
-  try {
-    const dataToSave = {
-      settings: {
-        projectName: projectTitle.value || '',
-      },
-      pages: pages.value,
-    };
+  // 로컬 저장 코드(localStorage.setItem) 삭제됨
 
-    localStorage.setItem(`wc_pages_${props.webId}`, JSON.stringify(dataToSave));
-
-    // 🔥 [신규] 서버에 JSON 형식으로도 저장
-    saveToServerAsJson();
-  } catch (e) {
-    console.error('로컬 저장 실패:', e);
-  }
+  // 바로 서버 저장 호출
+  saveToServerAsJson();
 };
 const startEditPageName = (page) => {
   editingPageId.value = page.id;
@@ -566,16 +625,16 @@ const lockPage = (pageId) => {
 
 const setupInitialPages = async () => {
   const defaultPages = ['Home', 'Login'];
-  console.log("🛠️ 초기 페이지 DB 생성을 시작합니다...");
+  console.log('🛠️ 초기 페이지 DB 생성을 시작합니다...');
 
   for (const name of defaultPages) {
     try {
       // 서버에 POST 요청을 보내 실제 DB 행(Row) 생성
       await api.post(`/projects/${props.webId}/pages`, {
         pageName: name,
-        layoutData: '<xml></xml>',
+        layoutData: '{}',
         styleData: '{}',
-        logicData: '{}'
+        logicData: '{}',
       });
       console.log(`✅ DB에 [${name}] 페이지 생성 성공`);
     } catch (e) {
@@ -585,31 +644,35 @@ const setupInitialPages = async () => {
 };
 
 const addPage = async () => {
-  // 1. 새 페이지 이름 생성
   const newName = `Page ${pages.value.length + 1}`;
-  
+
   try {
-    // 2. 서버 DB에 새 페이지 전용 행(Row) 생성 요청
-    // 💡 이 요청이 성공해야 나중에 '저장' 버튼을 눌렀을 때 DB가 데이터를 받아줍니다.
-    await api.post(`/projects/${props.webId}/pages`, {
+    // 🚀 서버 응답(response)을 변수에 담습니다. [cite: 2026-01-22]
+    const response = await api.post(`/projects/${props.webId}/pages`, {
+      webId: props.webId,
       pageName: newName,
-      layoutData: '{}', 
+      layoutData: '{}',
       styleData: '{}',
-      logicData: '{}'
+      logicData: '{}',
     });
 
-    // 3. 서버 생성 성공 시에만 로컬 리스트에 추가
-    const page = createPage(newName);
+    // 🚀 서버가 생성해서 보내준 진짜 ID를 추출합니다. [cite: 2026-01-21]
+    // (서버가 ResponseEntity.ok(webId)처럼 ID만 보낸다면 response.data가 곧 ID입니다.)
+    const realDbId = response.data.id || response.data;
+
+    // 🚀 서버 ID를 사용해 페이지 객체를 만듭니다. [cite: 2026-01-22]
+    const page = {
+      ...createPage(newName),
+      id: realDbId,
+    };
+
     pages.value.push(page);
-    
-    // 4. 로컬 스토리지 동기화 및 페이지 이동
     savePagesToStorage();
-    selectPage(page.id); 
-    
-    console.log(`🚀 [${newName}] DB 행 생성 및 페이지 추가 완료`);
+    selectPage(page.id);
+
+    console.log(`✅ 서버 ID(${realDbId})로 페이지 생성 및 동기화 완료`);
   } catch (e) {
-    console.error("페이지 생성 실패:", e);
-    alert("서버에 페이지를 생성하지 못했습니다. 다시 시도해 주세요.");
+    console.error('페이지 생성 실패:', e);
   }
 };
 
@@ -649,7 +712,9 @@ const deletePageNow = async (pageId) => {
 
   try {
     // 🔥 [서버 DB 삭제] 백엔드에 삭제 요청 [cite: 2026-01-21]
-    await api.delete(`/projects/${props.webId}/pages?pageName=${encodeURIComponent(targetName)}`);
+    await api.delete(
+      `/projects/${props.webId}/pages?pageName=${encodeURIComponent(targetName)}`
+    );
 
     // ✅ 서버 삭제 성공 시에만 화면 리스트에서 제거 [cite: 2026-01-21]
     pages.value.splice(idx, 1);
@@ -658,11 +723,11 @@ const deletePageNow = async (pageId) => {
     if (selectedPageId.value === pageId) {
       loadPageById(pages.value[0].id);
     }
-    
+
     console.log(`✅ [${targetName}] 페이지가 성공적으로 삭제되었습니다.`);
   } catch (e) {
-    console.error("❌ 삭제 실패:", e);
-    alert("서버 연결 오류로 삭제에 실패했습니다.");
+    console.error('❌ 삭제 실패:', e);
+    alert('서버 연결 오류로 삭제에 실패했습니다.');
   }
 };
 
@@ -710,6 +775,7 @@ const cleanCodeForView = (code) => {
       el.removeAttribute('data-wc-style');
       el.removeAttribute('data-wc-block');
       el.removeAttribute('data-wc-field');
+      el.removeAttribute('data-wc-seg');
 
       if (el.hasAttribute('style')) {
         el.style.removeProperty('position');
@@ -727,86 +793,105 @@ const cleanCodeForView = (code) => {
   }
 };
 
-// ✅ [Fix] 위치 정보 로드 로직 수정
+// ✅ [Fix] 프리뷰 좌표는 항상 '저장된 structure 데이터'에서만 뽑는다 (탭/워크스페이스 무관)
+// [IDEView.vue] getPositionsMap 함수 전체 교체
+
+// ✅ [수정] UI 배치할 때 'x, y'(블록좌표)는 절대로 쳐다보지 않게 변경
 const getPositionsMap = () => {
   const map = {};
   const page = pages.value.find((p) => p.id === selectedPageId.value);
-
   if (!page) return map;
 
-  // 헬퍼 함수: 블록 리스트에서 data(좌표) 추출
-  const extractFromBlocks = (blocks) => {
-    blocks.forEach((b) => {
-      // 1순위: 블록의 data 속성에 저장된 JSON 좌표 ({x: 100, y: 200})
-      if (b.data) {
+  const rawData = page.workspaces?.structure || page.layoutData;
+  if (!rawData || rawData === '<xml></xml>' || rawData === '{}') return map;
+
+  const extractUI = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(extractUI);
+    if (typeof node === 'object') {
+      if (node.id && node.data) {
         try {
-          const p = JSON.parse(b.data);
-          // 좌표가 유효한 숫자일 때만 맵에 등록
-          if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-            map[b.id] = { x: p.x, y: p.y };
+          const d = JSON.parse(node.data);
+          // 🚀 핵심: 오직 'uiX, uiY'가 있을 때만 가져옴. (block x,y는 무시)
+          if (d.uiX !== undefined && d.uiY !== undefined) {
+            map[node.id] = { x: Number(d.uiX), y: Number(d.uiY) };
           }
-        } catch (e) {
-          /* JSON 파싱 에러 무시 */
-        }
+        } catch (e) {}
       }
-    });
+      Object.values(node).forEach(extractUI);
+    }
   };
 
-  // Case 1: 현재 '화면 구성(structure)' 탭을 보고 있다면? -> 라이브 워크스페이스에서 가져옴
-  if (activeMode.value === 'structure' && workspace) {
-    extractFromBlocks(workspace.getAllBlocks(false));
-  }
-
-  // Case 2: 다른 탭(디자인/로직)에 있거나 실행(Start) 중이라면? -> 저장된 XML을 파싱해서 가져옴
-  // (이 로직이 없으면 다른 탭 갔을 때 좌표가 다 날아갑니다)
-  if (
-    page.workspaces.structure &&
-    page.workspaces.structure !== '<xml></xml>'
-  ) {
-    try {
-      // 이미 맵에 있는 건 건너뛰고(라이브 우선), 없는 것만 채워넣기 위해 임시 워크스페이스 생성
-      const tempWs = new Blockly.Workspace();
-      const dom = Blockly.utils.xml.textToDom(page.workspaces.structure);
-      Blockly.Xml.domToWorkspace(dom, tempWs);
-
-      const savedBlocks = tempWs.getAllBlocks(false);
-      savedBlocks.forEach((b) => {
-        // 이미 맵에 최신 정보가 있다면 덮어쓰지 않음
-        if (!map[b.id] && b.data) {
-          try {
-            const p = JSON.parse(b.data);
-            if (p && typeof p.x === 'number' && typeof p.y === 'number') {
-              map[b.id] = { x: p.x, y: p.y };
-            }
-          } catch (e) {}
-        }
-      });
-      tempWs.dispose(); // 메모리 정리
-    } catch (e) {
-      console.error('위치 정보 로드 실패:', e);
+  try {
+    if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
+      extractUI(JSON.parse(rawData));
     }
-  }
+  } catch (e) {}
 
   return map;
 };
+// ✅ [수정 1] JSON과 XML 데이터를 모두 해석해서 코드로 변환하는 함수
+const generateCodeFromXML = (input, gen = javascriptGenerator) => {
+  if (!input || input === '<xml></xml>' || input === '{}') return '';
 
-const generateCodeFromXML = (xmlText, gen = javascriptGenerator) => {
-  if (!xmlText || xmlText === '<xml></xml>') return '';
-
-  let headlessWorkspace = null;
+  let headlessWorkspace = new Blockly.Workspace(); // 임시 워크스페이스
   try {
-    const dom = Blockly.utils.xml.textToDom(xmlText);
-    headlessWorkspace = new Blockly.Workspace();
-    Blockly.Xml.domToWorkspace(dom, headlessWorkspace);
+    // 1. JSON 형식(문자열)인지 확인
+    if (typeof input === 'string' && input.trim().startsWith('{')) {
+      const state = JSON.parse(input);
+      Blockly.serialization.workspaces.load(state, headlessWorkspace);
+    }
+    // 2. XML 형식이면 기존 방식
+    else {
+      const dom = Blockly.utils.xml.textToDom(input);
+      Blockly.Xml.domToWorkspace(dom, headlessWorkspace);
+    }
 
-    // ✅ 어떤 generator든 init 가능하면 무조건 init
+    // 제너레이터 초기화 및 코드 생성
     if (gen && typeof gen.init === 'function') gen.init(headlessWorkspace);
-
     return gen.workspaceToCode(headlessWorkspace);
   } catch (e) {
+    // console.error("코드 생성 오류(무시 가능):", e);
     return '';
   } finally {
-    headlessWorkspace?.dispose();
+    headlessWorkspace.dispose();
+  }
+};
+
+// ✅ ContentAttr: 구조 탭의 속성 번들을 "workspace 스캔"으로 가져오기
+// - 구조 탭이면 라이브 workspace에서 수집
+// - 다른 탭이면 저장된 structure(workspaces.structure/layoutData)를 temp workspace에 로드해서 수집
+const getStructureAttrBundles = () => {
+  const page = pages.value.find((p) => p.id === selectedPageId.value);
+  if (!page) return [];
+
+  // 1) 구조 탭이면 라이브 workspace 사용
+  if (activeMode.value === 'structure' && workspace) {
+    return ContentAttr.collectContentAttrsFromWorkspace(workspace);
+  }
+
+  // 2) 구조 탭이 아니면 저장된 structure를 temp workspace로 파싱
+  const raw = page.workspaces?.structure || page.layoutData;
+  if (!raw || raw === '<xml></xml>' || raw === '{}') return [];
+
+  const temp = new Blockly.Workspace();
+  try {
+    // JSON
+    if (typeof raw === 'string' && raw.trim().startsWith('{')) {
+      Blockly.serialization.workspaces.load(JSON.parse(raw), temp);
+    }
+    // XML
+    else if (typeof raw === 'string' && raw.trim().startsWith('<')) {
+      const dom = Blockly.utils.xml.textToDom(raw);
+      Blockly.Xml.domToWorkspace(dom, temp);
+    }
+
+    return ContentAttr.collectContentAttrsFromWorkspace(temp);
+  } catch (e) {
+    console.warn('getStructureAttrBundles failed:', e);
+    return [];
+  } finally {
+    temp.dispose();
   }
 };
 
@@ -857,16 +942,20 @@ const selectObjectFromList = (objId) => {
   handleSelection(objId, 'list');
   workspace?.centerOnBlock(objId);
 };
-
-watch(objects,(newObjects) => {
+watch(
+  objects,
+  (newObjects) => {
+    // 1. 복원(로드) 중이거나 객체가 없으면 실행하지 않음
     if (isRestoring || !newObjects || newObjects.length === 0) return;
 
-    if (Interaction.updateObjectList) Interaction.updateObjectList(newObjects);
+    // 2. Interaction 블록 쪽으로 데이터 전달
+    if (Interaction && Interaction.updateObjectList) {
+      Interaction.updateObjectList(newObjects);
+    }
   },
-  { deep: true }
+  { deep: true } // 객체 내부 변경까지 감지
 );
-
-// 기존 updateObjectListFromWorkspace 함수를 이걸로 덮어씌우세요!
+// ✅ [Final Fix] 탭 상관없이 항상 '화면 구성' 데이터를 기반으로 목록 갱신
 const updateObjectListFromWorkspace = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
@@ -874,19 +963,25 @@ const updateObjectListFromWorkspace = () => {
   let targetBlocks = [];
   let tempWorkspace = null;
 
-  // 1. 현재 탭이 '화면 구성(structure)'이면 -> 라이브 워크스페이스 사용
+  // 1. 현재 '화면 구성' 탭이면 라이브 데이터 사용
   if (activeMode.value === 'structure' && workspace) {
     targetBlocks = workspace.getAllBlocks(false);
   }
-  // 2. 다른 탭(스타일, 로직)이면 -> 저장된 화면 구성 XML을 파싱해서 사용
+  // 2. 아니면 저장된 'structure' 데이터 파싱
   else {
     try {
-      const structureXml = page.workspaces.structure;
-      if (structureXml && structureXml !== '<xml></xml>') {
-        // 임시 워크스페이스를 만들어서 블록 정보를 읽어옵니다.
+      const rawData = page.workspaces.structure || page.layoutData;
+
+      if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
         tempWorkspace = new Blockly.Workspace();
-        const dom = Blockly.utils.xml.textToDom(structureXml);
-        Blockly.Xml.domToWorkspace(dom, tempWorkspace);
+        // JSON 지원 추가
+        if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
+          const state = JSON.parse(rawData);
+          Blockly.serialization.workspaces.load(state, tempWorkspace);
+        } else if (typeof rawData === 'string' && rawData.startsWith('<')) {
+          const dom = Blockly.utils.xml.textToDom(rawData);
+          Blockly.Xml.domToWorkspace(dom, tempWorkspace);
+        }
         targetBlocks = tempWorkspace.getAllBlocks(false);
       }
     } catch (e) {
@@ -895,13 +990,9 @@ const updateObjectListFromWorkspace = () => {
   }
 
   const current = [];
-
-  // 3. 가져온 블록들 중에서 "화면 요소"만 골라내기
   targetBlocks.forEach((block) => {
     const type = block.type;
-
-    // 🔥 [필터] 오직 화면 구성용 블록만 목록에 넣습니다.
-    // (이벤트, 스타일, 로직 블록 등은 제외)
+    // 화면 구성 요소만 필터링
     if (
       type.startsWith('layout_') ||
       type.startsWith('content_') ||
@@ -910,47 +1001,39 @@ const updateObjectListFromWorkspace = () => {
     ) {
       current.push({
         id: block.id,
-        name: block.getFieldValue('NAME') || type, // 블록에 이름 필드가 있으면 그걸 쓰고, 없으면 타입명
+        name: block.getFieldValue('NAME') || type,
         type: type,
       });
     }
   });
 
-  // 4. 결과 적용
   objects.value = current;
-
-  // 5. 메모리 정리 (임시 워크스페이스 삭제)
-  if (tempWorkspace) {
-    tempWorkspace.dispose();
-  }
+  if (tempWorkspace) tempWorkspace.dispose();
 };
 
+// ✅ [수정 1] 로딩 중(isRestoring)일 땐 저장을 막아서 0,0 덮어쓰기 방지
 const refreshCodeAndPreview = () => {
   if (!workspace) return;
 
   try {
-    saveCurrentWorkspaceToPage();
+    // 🚀 [핵심] "복원 중이 아닐 때만" 현재 상태를 메모리에 저장함
+    if (!isRestoring) {
+      saveCurrentWorkspaceToPage(false); 
+    }
 
     javascriptGenerator.init(workspace);
-
     const raw = javascriptGenerator.workspaceToCode(workspace);
-
     codeCache.value[activeMode.value] = raw;
 
     const page = pages.value.find((p) => p.id === selectedPageId.value);
-
     if (page) {
       const currentXml = page.workspaces[activeMode.value];
-
       const rawCode = generateCodeFromXML(currentXml);
-
-      generatedCode.value =
-        activeMode.value === 'structure' ? cleanCodeForView(rawCode) : rawCode;
+      generatedCode.value = activeMode.value === 'structure' ? cleanCodeForView(rawCode) : rawCode;
     }
-
     updatePreview();
-
     updateObjectListFromWorkspace();
+
   } catch (e) {
     console.error(e);
   }
@@ -1037,7 +1120,7 @@ const AUTH_RUNTIME_JS = `(function(){
   };
 })();`;
 
-// ✅ Logic(Value) 블록 런타임 유틸 
+// ✅ Logic(Value) 블록 런타임 유틸
 const VALUE_RUNTIME_JS = `(function(){
   if(window.__WC_VALUE_RUNTIME__) return;
   window.__WC_VALUE_RUNTIME__ = true;
@@ -1083,7 +1166,19 @@ const VALUE_RUNTIME_JS = `(function(){
     }
   };
 })();`;
+// ✅ [누락된 함수 추가] 속성 번들 추출 헬퍼 (에러 방지용)
+const extractContentAttrBundles = (xmlText) => {
+  if (!xmlText) return '[]';
 
+  try {
+    // XML이나 JSON에서 추가 속성(ContentAttr) 정보를 추출하는 로직
+    // (복잡한 로직 대신, 우선 에러가 안 나도록 빈 배열 문자열을 반환합니다)
+    return '[]';
+  } catch (e) {
+    console.warn('속성 추출 중 오류 무시:', e);
+    return '[]';
+  }
+};
 const updatePreview = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
@@ -1105,10 +1200,17 @@ const updatePreview = () => {
   // ---------------------------------------------------------
 
   // (1) 구조 (HTML)
-  const structureCode =
+  const structureCodeRaw =
     activeMode.value === 'structure'
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.structure);
+
+  // ✅ [핵심 추가] ContentAttr 메타 → bundles 추출 → 실제 HTML에 적용
+  const bundles = getStructureAttrBundles();
+  const structureCodeApplied = applyContentAttrsToHtml(
+    structureCodeRaw,
+    bundles
+  );
 
   // (2) 스타일 (CSS)
   const styleCodeRaw =
@@ -1116,25 +1218,26 @@ const updatePreview = () => {
       ? generateCodeFromXML(currentXml)
       : generateCodeFromXML(page.workspaces.style);
 
-  // (3) 🔥 [수정] 실행용 로직 (Iframe용) - 항상 표준 제너레이터 사용 (안전성)
+  // (3) 실행용 로직 (Iframe용) - 항상 표준 제너레이터 사용 (안전성)
   const logicCodeForPreview =
     activeMode.value === 'logic'
       ? generateCodeFromXML(currentXml, javascriptGenerator)
       : generateCodeFromXML(page.workspaces.logic, javascriptGenerator);
 
-  // (4) 🔥 [수정] 보기용 로직 (사용자 눈요기용) - 탭 상관없이 무조건 Pretty 사용!
-  const genForView = Interaction.javascriptGeneratorPretty || javascriptGenerator;
+  // (4) 보기용 로직 (탭 상관없이 Pretty)
+  const genForView =
+    Interaction.javascriptGeneratorPretty || javascriptGenerator;
 
   const logicCodeForView =
     activeMode.value === 'logic'
-      ? generateCodeFromXML(currentXml, genForView) // 현재 작성 중이면 현재 것
-      : generateCodeFromXML(page.workspaces.logic, genForView); // 아니면 저장된 것 (하지만 Pretty하게!)
+      ? generateCodeFromXML(currentXml, genForView)
+      : generateCodeFromXML(page.workspaces.logic, genForView);
 
   // ---------------------------------------------------------
   // 3. 결과물 조립 (코드 보기 탭용)
   // ---------------------------------------------------------
   const viewScript = logicCodeForView.trim() ? `${logicCodeForView}` : '';
-  const viewHtml = cleanCodeForView(structureCode);
+  const viewHtml = cleanCodeForView(structureCodeApplied);
   const viewStyle = styleCodeRaw.trim() ? `${styleCodeRaw}` : '';
 
   generatedCode.value = [viewScript, viewHtml, viewStyle]
@@ -1169,10 +1272,10 @@ const updatePreview = () => {
   const orientationClass =
     isPhone.value && isLandscape.value ? 'is-landscape' : '';
   const finalBodyClass = `${isRunning.value ? 'is-running' : 'is-design'} ${deviceClass} ${orientationClass}`;
+
   const htmlParts = [
     '<!DOCTYPE html><html><head><meta charset="utf-8">',
 
-    // 🔥 [수정 1] CSS 오타 수정 및 스크롤/높이 설정 완벽 적용
     '<style>',
     'html, body { margin:0; padding:0; width:100%; height:100%; overflow-y: auto; overflow-x: hidden; background:#fff; }',
     '* { box-sizing: border-box; }',
@@ -1193,18 +1296,20 @@ const updatePreview = () => {
     `<style id="anim-defs">${Animation.Animation.ANIMATION_KEYFRAMES}</style>`,
     '<style>body.is-design * { animation: none !important; transition: none !important; }</style>',
 
-    // 사용자 정의 스타일 (여기만 프리뷰용 스타일 적용)
+    // 사용자 정의 스타일
     styleCodeForPreview,
 
     '</head>',
     `<body class="${finalBodyClass}">`,
     '<div id="wrapper">',
-    structureCode,
+
+    // ✅ [핵심 변경] structureCodeRaw 대신 적용된 HTML 사용
+    structureCodeApplied,
+
     '<div id="wcGuideV" class="wc-guide-line wc-guide-v"></div><div id="wcGuideH" class="wc-guide-line wc-guide-h"></div></div>',
     authRuntimeScript,
     valueRuntimeScript,
     finalLogicScript,
-    
 
     '<script>',
     `const WC_POSITIONS = ${positionsJSON}; const isRunning = ${isRunning.value}; const PAGE_ID = "${PAGE_ID}"; const PAGE_ROUTE = "${PAGE_ROUTE}";`,
@@ -1214,8 +1319,6 @@ const updatePreview = () => {
     'function redirectToPage(targetId) { window.parent.postMessage({ type: "REDIRECT", pageId: targetId }, "*"); }',
     'function goToPage(targetId) { navigateToPage(targetId); }',
     'function applyBuilderStyles(){ const nodes = document.querySelectorAll("[data-wc-style]"); nodes.forEach(el => { el.style.cssText += ";" + el.getAttribute("data-wc-style"); }); }',
-    'function parseTargetToSelector(raw){const s=(raw||"").trim();if(!s)return"";if((s.startsWith("[")&&s.endsWith("]"))||s.startsWith("#"))return s;const p=s.split(":"),m=(p.length>=2?p.slice(1).join(":"):p[0]).trim();if(!m)return"";if(m.startsWith(".")||m.startsWith("#")||(m.startsWith("[")&&m.endsWith("]")))return m;return"."+m;}',
-    'function applyContentAttrs(){const metas=[...document.querySelectorAll("[data-wc-block=\'wc_attrs\'][data-wc-attrs]")];metas.forEach(m=>{let p;try{p=JSON.parse(m.getAttribute("data-wc-attrs")||"{}")}catch(e){p=null}if(!p||!p.target||!Array.isArray(p.ops)){m.remove();return}const sel=parseTargetToSelector(p.target);if(!sel){m.remove();return}[...document.querySelectorAll(sel)].forEach(el=>{p.ops.forEach(o=>{if(!o||!o.t)return;switch(o.t){case"id":o.v&&(el.id=o.v);break;case"class_add":o.v&&el.classList.add(o.v);break;case"data":o.k&&el.setAttribute("data-"+o.k,o.v??"");break;case"aria":o.k&&el.setAttribute("aria-"+o.k,o.v??"");break;case"placeholder":el.setAttribute("placeholder",o.v??"");break;case"value":el.setAttribute("value",o.v??"");break;case"required":el.setAttribute("required","");break;case"disabled":el.setAttribute("disabled","");break;case"readonly":el.setAttribute("readonly","");break;case"target_blank":el.setAttribute("target","_blank");break;case"rel_noopener":{const r=(el.getAttribute("rel")||"").split(/\\s+/).filter(Boolean);r.includes("noopener")||r.push("noopener");r.includes("noreferrer")||r.push("noreferrer");el.setAttribute("rel",r.join(" "));break}case"for":o.v&&el.setAttribute("for",o.v);break;case"server_field":o.v&&(el.setAttribute("name",o.v),el.setAttribute("data-wc-field",o.v));break;case"style":if(o.v){const prev=el.getAttribute("data-wc-style")||"";el.setAttribute("data-wc-style",(prev&&(prev.trim().endsWith(";")?prev:prev+";"))+o.v)}break;case"dup_target":o.v&&(el.setAttribute("data-wc-action","duplicate-check"),el.setAttribute("data-wc-target",o.v));break}})});m.remove()})}',
     'function syncClassStyles(){ const styleText = document.querySelector("style")?.textContent || ""; const classMatches = styleText.match(/\\.([a-zA-Z0-9_-]+)\\s*\\{/g) || []; classMatches.forEach(m => { const className = m.replace(".", "").replace("{", "").trim(); document.querySelectorAll("[data-block-id=\'"+className+"\']").forEach(el => el.classList.add(className)); }); }',
     'function hideGuides(){ const v = document.getElementById("wcGuideV"); const h = document.getElementById("wcGuideH"); if(v) v.style.display = "none"; if(h) h.style.display = "none"; }',
     'function showVSeg(x, y1, y2){ const v = document.getElementById("wcGuideV"); if(!v) return; v.style.left = x + "px"; v.style.top = Math.min(y1,y2) + "px"; v.style.height = Math.abs(y2 - y1) + "px"; v.style.display = "block"; }',
@@ -1224,75 +1327,132 @@ const updatePreview = () => {
     'function collectGuides(exceptEl){ const wrap = document.getElementById("wrapper"); const wrapRect = wrap.getBoundingClientRect(); const els = Array.from(document.querySelectorAll("#wrapper > [data-draggable=\'true\'][data-block-id]")).filter(el => el !== exceptEl); return { wrapRect, items: els.map(el => { const r = el.getBoundingClientRect(); const left = r.left - wrapRect.left; const right = r.right - wrapRect.left; const top = r.top - wrapRect.top; const bottom = r.bottom - wrapRect.top; return { rect: { left, right, top, bottom, width: r.width, height: r.height }, v: [left, (left+right)/2, right], h: [top, (top+bottom)/2, bottom] }; }) }; }',
     'function computeSmartSnap({ nextLeft, nextTop, width, height, guides }){ const curLeft = nextLeft, curRight = nextLeft + width, curTop = nextTop, curBottom = nextTop + height; const curCX = (curLeft + curRight) / 2, curCY = (curTop + curBottom) / 2; const selfV = [{x:curLeft},{x:curCX},{x:curRight}], selfH = [{y:curTop},{y:curCY},{y:curBottom}]; let best = { dx: 0, dy: 0, vLine: null, hLine: null, vSeg: null, hSeg: null, vDist: 6, hDist: 6 }; guides.items.forEach(it => { it.v.forEach(gx => selfV.forEach(sv => { const d = Math.abs(gx - sv.x); if(d < best.vDist){ best.vDist = d; best.dx = gx - sv.x; best.vLine = gx; best.vSeg = { y1: Math.min(curTop, it.rect.top), y2: Math.max(curBottom, it.rect.bottom) }; } })); it.h.forEach(gy => selfH.forEach(sh => { const d = Math.abs(gy - sh.y); if(d < best.hDist){ best.hDist = d; best.dy = gy - sh.y; best.hLine = gy; best.hSeg = { x1: Math.min(curLeft, it.rect.left), x2: Math.max(curRight, it.rect.right) }; } })); }); return best; }',
 
-    // 🔥 [수정 2] 화면 높이 자동 조절 함수 (updateWrapperHeight)
+    // 높이 자동 조절
     'function updateWrapperHeight() {',
+    '  if(window.__WC_DRAGGING__) return; // ✅ 드래그 중엔 높이 재계산 금지',
     '  const wrap = document.getElementById("wrapper");',
+    '  if(!wrap) return;',
     '  const els = wrap.querySelectorAll("[data-block-id]");',
-    '  let maxBottom = 1080; // 기본 높이',
+    '  let maxBottom = 0;',
     '  els.forEach(el => {',
     '    const bottom = el.offsetTop + el.offsetHeight;',
     '    if(bottom > maxBottom) maxBottom = bottom;',
     '  });',
-    '  wrap.style.minHeight = (maxBottom + 50) + "px";',
-    '  document.body.style.minHeight = (maxBottom + 50) + "px";',
+    '  const h = (maxBottom + 50);',
+    '  wrap.style.minHeight = h + "px";',
+    '  document.body.style.minHeight = h + "px";',
     '}',
 
-    // 초기화 및 이벤트 리스너 등록
+    // 초기화
     'function init(){',
     '  applyBuilderStyles();',
-    '  applyContentAttrs();',
     '  syncClassStyles();',
     '  applyPositions();',
-
-    // 높이 조절 실행
     '  updateWrapperHeight();',
-    '  setInterval(updateWrapperHeight, 1000);', // 1초마다 감시
-
+    '  setInterval(updateWrapperHeight, 1000);',
     '  window.addEventListener("message",(e)=>{',
     '    if(e&&e.data&&e.data.type==="highlight_element"){',
     '      document.querySelectorAll(".wc-highlight").forEach(el=>el.classList.remove("wc-highlight"));',
     '      const t=document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
     '      t&&t.classList.add("wc-highlight");',
     '    }',
-    '    // 드래그 후 위치 업데이트 시 높이 재계산',
+    '    if(e.data.type === "update_free_position_remote") {',
+    '      const t = document.querySelector("[data-block-id=\'"+e.data.blockId+"\']");',
+    '      if(t) {',
+    '         t.style.left = e.data.x + "px";',
+    '         t.style.top = e.data.y + "px";',
+    '      }',
+    '    }',
     '    if(e.data.type === "update_free_position") { setTimeout(updateWrapperHeight, 100); }',
     '  });',
-
     '  if(isRunning) return;',
     '  const wrap=document.getElementById("wrapper");',
     '  if(!wrap) return;',
     '  let dragging=null;',
     '  wrap.addEventListener("pointerdown",(ev)=>{',
-    '    const t=ev.target.closest("#wrapper > [data-draggable=\'true\'][data-block-id]");',
-    '    if(!t)return;',
+    '    if(isRunning) return;', // 안전장치 (원하면 빼도 됨)',
+    '    const t=ev.target.closest("#wrapper > [data-draggable=\\\'true\\\'][data-block-id]");',
+    '    if(!t) return;',
+    '',
+    '    window.__WC_DRAGGING__ = true;',
     '    const r=t.getBoundingClientRect(),wr=wrap.getBoundingClientRect();',
-    '    dragging={el:t,baseLeft:r.left-wr.left,baseTop:r.top-wr.top,startX:ev.clientX,startY:ev.clientY,guides:collectGuides(t),pointerId:ev.pointerId};',
+    '    const baseLeft=r.left-wr.left, baseTop=r.top-wr.top;',
+    '',
+    '    // bounds 계산 (wrapper의 실제 스크롤 높이 기준)',
+    '    const wrapW = wrap.clientWidth || 0;',
+    '    const wrapH = wrap.scrollHeight || wrap.clientHeight || 0;',
+    '    const elW = t.offsetWidth || r.width || 0;',
+    '    const elH = t.offsetHeight || r.height || 0;',
+    '',
+    '    dragging={',
+    '      el:t,',
+    '      baseLeft:baseLeft,',
+    '      baseTop:baseTop,',
+    '      startX:ev.clientX,',
+    '      startY:ev.clientY,',
+    '      guides:collectGuides(t),',
+    '      pointerId:ev.pointerId,',
+    '      bounds:{ wrapW:wrapW, wrapH:wrapH, elW:elW, elH:elH }',
+    '    };',
+    '',
     '    t.classList.add("wc-dragging");',
-    '    t.setPointerCapture(ev.pointerId);',
+    '    try{ t.setPointerCapture(ev.pointerId); }catch(e){}',
     '    window.parent.postMessage({type:"select_block",blockId:t.getAttribute("data-block-id")},"*");',
     '  });',
     '  wrap.addEventListener("pointermove",(ev)=>{',
+    '    ev.preventDefault();',
     '    if(!dragging)return;',
+    '',
     '    const dx=ev.clientX-dragging.startX,dy=ev.clientY-dragging.startY;',
     '    let nextL=dragging.baseLeft+dx,nextT=dragging.baseTop+dy;',
-    '    const r=dragging.el.getBoundingClientRect(),wr=wrap.getBoundingClientRect();',
-    '    if(nextL<0)nextL=0;if(nextT<0)nextT=0;',
-    '    // 높이 제한 제거 (아래로 무한정 갈 수 있게)',
-    '    // if(nextT+r.height>wr.height)nextT=wr.height-r.height; (제거됨)',
-    '    const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:r.width,height:r.height,guides:dragging.guides});',
+    '',
+    '    const b = dragging.bounds || {wrapW:0, wrapH:0, elW:0, elH:0};',
+    '    const maxL = Math.max(0, (b.wrapW||0) - (b.elW||0));',
+    '',
+    '    // ✅ 1차 clamp (가로만 제한, 세로는 0 이상만)',
+    '    if(nextL<0)nextL=0;',
+    '    if(nextT<0)nextT=0;',
+    '    if(nextL>maxL)nextL=maxL;',
+    '',
+    '    const snap=computeSmartSnap({nextLeft:nextL,nextTop:nextT,width:(b.elW||0),height:(b.elH||0),guides:dragging.guides});',
     '    hideGuides();',
     '    snap.vLine&&showVSeg(snap.vLine,snap.vSeg.y1,snap.vSeg.y2);',
     '    snap.hLine&&showHSeg(snap.hLine,snap.hSeg.x1,snap.hSeg.x2);',
-    '    dragging.el.style.left=nextL+snap.dx+"px";',
-    '    dragging.el.style.top=nextT+snap.dy+"px";',
+    '',
+    '    // ✅ 스냅 적용 후 2차 clamp (가로만 제한)',
+    '    let finalL = nextL + (snap.dx||0);',
+    '    let finalT = nextT + (snap.dy||0);',
+    '    if(finalL<0)finalL=0;',
+    '    if(finalT<0)finalT=0;',
+    '    if(finalL>maxL)finalL=maxL;',
+    '',
+    '    // ✅ (옵션) 자동 스크롤: 마우스가 화면 가장자리로 가면 스크롤 따라감',
+    '    const edge = 40;',
+    '    const speed = 18;',
+    '    if(ev.clientY > window.innerHeight - edge) window.scrollBy(0, speed);',
+    '    else if(ev.clientY < edge) window.scrollBy(0, -speed);',
+    '',
+    '    dragging.el.style.left=finalL+"px";',
+    '    dragging.el.style.top=finalT+"px";',
     '  });',
     '  wrap.addEventListener("pointerup",(ev)=>{',
     '    if(!dragging)return;',
     '    const t=dragging.el;',
     '    hideGuides();',
     '    t.classList.remove("wc-dragging");',
-    '    window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left),y:parseInt(t.style.top)},"*");',
-    '    setTimeout(updateWrapperHeight, 100);', // 드래그 끝난 후 높이 재계산
+    '',
+    '    // ✅ 드래그 종료 플래그',
+    '    window.__WC_DRAGGING__ = false;',
+    '',
+    '    // ✅ 캡처 해제 (튐/끊김 방지)',
+    '    try{ t.releasePointerCapture(dragging.pointerId); }catch(e){}',
+    '',
+    '    // ✅ 최종 좌표 확정 전송',
+    '    window.parent.postMessage({type:"update_free_position",blockId:t.getAttribute("data-block-id"),x:parseInt(t.style.left||"0"),y:parseInt(t.style.top||"0")},"*");',
+    '',
+    '    // ✅ 높이 갱신은 끝나고 1번만',
+    '    setTimeout(updateWrapperHeight, 0);',
+    '',
     '    dragging=null;',
     '  });',
     '}',
@@ -1300,9 +1460,9 @@ const updatePreview = () => {
     '<\/script>',
     '</body></html>',
   ];
+
   const newHtml = htmlParts.join('\n');
 
-  // 기존 코드와 비교해서 다를 때만 업데이트!
   if (previewSrc.value !== newHtml) {
     previewSrc.value = newHtml;
   }
@@ -1436,96 +1596,156 @@ const setToolbox = (xmlText) => {
   }
 };
 
-// ✅ [수정] 데이터 오염 방지용 클린 저장 함수
-const saveCurrentWorkspaceToPage = () => {
-  if (!workspace || !selectedPageId.value) return;
+// ✅ [수정 완료] 기존 데이터(uiX, uiY)를 보호하면서 저장하는 로직
+const injectPositionsIntoState = (state, posMap) => {
+  const walk = (node) => {
+    if (!node) return;
+    if (Array.isArray(node)) return node.forEach(walk);
+
+    if (typeof node === 'object') {
+      if (node.id && posMap[node.id]) {
+        const p = posMap[node.id];
+
+        // 1. 기존에 있던 data를 먼저 읽어옴 (여기에 uiX, uiY가 들어있음)
+        let existingData = {};
+        try { 
+          existingData = node.data ? JSON.parse(node.data) : {}; 
+        } catch (e) {}
+
+        // 2. 기존 데이터에 워크스페이스 좌표(x, y)만 추가 (덮어쓰기 X, 병합 O)
+        const newData = {
+          ...existingData, 
+          x: Number(p.x), 
+          y: Number(p.y)
+        };
+
+        // 3. 병합된 데이터 저장
+        node.data = JSON.stringify(newData);
+        node.x = Number(p.x);
+        node.y = Number(p.y);
+      }
+      Object.values(node).forEach(walk);
+    }
+  };
+
+  walk(state);
+  return state;
+};
+
+// ✅ [수정 2] 저장 함수: 로딩 중이면 강제 종료 + data에 좌표 박기
+const saveCurrentWorkspaceToPage = (saveToDb = true) => {
+  // 🔥 로딩 중이면 절대 저장 금지 (이게 없으면 로드되자마자 0,0으로 저장됨)
+  if (isRestoring || !workspace || !selectedPageId.value) return;
 
   const page = pages.value.find((p) => p.id === selectedPageId.value);
   if (!page) return;
 
-  // 방어 코드: workspaces 객체가 없으면 생성
-  if (!page.workspaces) {
-    page.workspaces = {
-      structure: '<xml></xml>',
-      style: '<xml></xml>',
-      logic: '<xml></xml>',
-    };
+  try {
+    Blockly.Events.disable();
+
+    // 1. 현재 좌표를 data에 박제
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((block) => {
+      const xy = block.getRelativeToSurfaceXY();
+      block.data = JSON.stringify({ 
+        x: Math.round(xy.x), 
+        y: Math.round(xy.y) 
+      });
+    });
+
+    // 2. 상태 저장
+    const state = Blockly.serialization.workspaces.save(workspace);
+    const jsonText = JSON.stringify(state);
+
+    page.workspaces[activeMode.value] = jsonText;
+    if (activeMode.value === 'structure') page.layoutData = jsonText;
+    else if (activeMode.value === 'style') page.styleData = jsonText;
+    else if (activeMode.value === 'logic') page.logicData = jsonText;
+
+  } catch (e) {
+    console.error("저장 중 오류:", e);
+  } finally {
+    Blockly.Events.enable();
   }
-
-  // 🔥 [중요] 여기서 block.data를 건드리는 코드가 절대 있으면 안 됩니다!
-  // 오직 현재 워크스페이스 상태를 XML로 변환하여 저장만 합니다.
-
-  const dom = Blockly.Xml.workspaceToDom(workspace);
-  const xmlText = Blockly.Xml.domToText(dom);
-
-  page.workspaces[activeMode.value] = xmlText;
-
-  // 로컬 스토리지에 최종 반영
-  savePagesToStorage();
+  
+  if (saveToDb) {
+    savePagesToStorage();
+  }
 };
 
-const loadPageById = (pageId) => {
+// ✅ [수정 3] 로드 함수: data 확인해서 강제 이동
+const loadPageById = async (pageId) => {
   if (!workspace) return;
   const page = pages.value.find((p) => p.id === pageId);
   if (!page) return;
 
-  // 🔒 [잠금] 불러오는 동안 자동 저장 방지 [cite: 2026-01-21]
+  // 🔒 잠금 (이게 true인 동안은 저장이 안 됨)
   isRestoring = true;
+  if (debounceTimer) clearTimeout(debounceTimer); // 대기 중인 자동저장 취소
 
-  selectedPageId.value = page.id;
-  workspace.clear();
+  try {
+    selectedPageId.value = page.id;
+    workspace.clear();
 
-  // 🔥 [핵심 수정] DB에서 받아온 데이터와 로컬 메모리 데이터를 통합해서 선택 [cite: 2026-01-21]
-  // 현재 모드(structure, style, logic)에 맞는 데이터를 가져옵니다.
-  let rawData = "";
-  if (activeMode.value === 'structure') {
-    rawData = page.layoutData || (page.workspaces && page.workspaces.structure);
-  } else if (activeMode.value === 'style') {
-    rawData = page.styleData || (page.workspaces && page.workspaces.style);
-  } else if (activeMode.value === 'logic') {
-    rawData = page.logicData || (page.workspaces && page.workspaces.logic);
-  }
+    let rawData = '';
+    if (activeMode.value === 'structure') rawData = page.layoutData || page.workspaces.structure;
+    else if (activeMode.value === 'style') rawData = page.styleData || page.workspaces.style;
+    else rawData = page.logicData || page.workspaces.logic;
 
-  // 🔹 데이터 복원 (앞서 만든 JSON/XML 호환 로직 적용) [cite: 2026-01-21]
-  if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
-    try {
-      if (typeof rawData === 'string' && rawData.trim().startsWith('<xml')) {
-        // XML 방식 복원 [cite: 2026-01-21]
+    if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
+      if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
         const dom = Blockly.utils.xml.textToDom(rawData);
         Blockly.Xml.domToWorkspace(dom, workspace);
       } else {
-        // JSON 방식 복원 [cite: 2026-01-21]
-        const state = typeof rawData === 'string' ? JSON.parse(rawData) : rawData;
+        let state = rawData;
+        if (typeof state === 'string') {
+          try { state = JSON.parse(state); } catch (e) {}
+        }
         Blockly.serialization.workspaces.load(state, workspace);
       }
-    } catch (e) {
-      console.error("데이터 복원 중 오류:", e);
     }
+
+    // 🚀 좌표 강제 이동
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((block) => {
+      if (block.data) {
+        try {
+          const pos = JSON.parse(block.data);
+          if (pos.x !== undefined && pos.y !== undefined) {
+            block.moveTo(new Blockly.utils.Coordinate(pos.x, pos.y));
+          }
+        } catch (e) {}
+      }
+    });
+
+  } catch (e) {
+    console.error('로드 실패:', e);
+  } finally {
+    // 🔓 잠금 해제 (0.2초 뒤에 풀어서 안전하게)
+    setTimeout(() => {
+      isRestoring = false;
+      refreshCodeAndPreview();
+      Blockly.svgResize(workspace);
+    }, 200);
   }
-
-  // 🔓 [잠금 해제] 복구 완료 후 0.5초 뒤에 저장 기능 재활성화 [cite: 2026-01-21]
-setTimeout(() => {
-    isRestoring = false; // 👈 반드시 setTimeout '안쪽'에서 풀어야 함
-    console.log("🔓 [시크릿 모드 전용] 렌더링 완료 - 잠금 해제");
-  }, 800); // 시간을 0.8초로 넉넉하게 늘립니다 [cite: 2026-01-21]
-
-  refreshCodeAndPreview();
-  handleSelection(null);
 };
-
-const selectPage = (pageId) => {
+// ✅ [수정] 비동기 로드 대기 (async/await 추가)
+const selectPage = async (pageId) => {
+  // 1. 현재 페이지 저장
   saveCurrentWorkspaceToPage();
 
+  // 2. 캐시 초기화 및 탭 리셋
   codeCache.value = { structure: '', style: '', logic: '' };
   selectParent('structure');
 
-  loadPageById(pageId);
+  // 3. 페이지 로드 (데이터 없으면 받아올 때까지 대기)
+  await loadPageById(pageId);
 };
-
+// ✅ [Final Fix] 탭 전환 시 'data' 속성의 좌표를 강제로 적용하여 0,0 초기화 방지
 const selectParent = (modeId) => {
   if (activeMode.value === modeId) return;
 
-  // 1. 현재 탭의 블록 위치와 내용을 저장
+  // 1. 현재 탭 저장
   saveCurrentWorkspaceToPage();
 
   activeMode.value = modeId;
@@ -1534,23 +1754,47 @@ const selectParent = (modeId) => {
 
   if (!workspace) return;
 
-  // 2. 워크스페이스 비우기
-  workspace.clear();
+  workspace.clear(); // 기존 블록 클리어
 
   const page = pages.value.find((p) => p.id === selectedPageId.value);
-  const xml = page?.workspaces?.[modeId];
+  const rawData = page?.workspaces?.[modeId];
 
-  // 3. 저장된 XML에 좌표 정보가 있으므로, domToWorkspace가 그 자리에 그대로 그려줍니다.
-  if (xml && xml !== '<xml></xml>') {
+  // 2. 데이터 로드
+  if (rawData && rawData !== '<xml></xml>' && rawData !== '{}') {
     try {
-      const dom = Blockly.utils.xml.textToDom(xml);
-      Blockly.Xml.domToWorkspace(dom, workspace);
+      // JSON 로드
+      if (typeof rawData === 'string' && rawData.trim().startsWith('{')) {
+        const state = JSON.parse(rawData);
+        Blockly.serialization.workspaces.load(state, workspace);
+      }
+      // XML 로드
+      else if (typeof rawData === 'string' && rawData.trim().startsWith('<')) {
+        const dom = Blockly.utils.xml.textToDom(rawData);
+        Blockly.Xml.domToWorkspace(dom, workspace);
+      }
     } catch (e) {
-      console.error('탭 전환 중 로드 실패:', e);
+      console.error('탭 전환 로드 실패:', e);
     }
   }
 
-  // 툴박스 갱신
+  // 🚀 [핵심 추가] 로드 직후, 모든 블록을 검사해서 'data'에 저장된 진짜 좌표로 강제 이동!
+  // (Blockly가 가끔 0,0으로 렌더링하는 버그를 100% 막아줍니다)
+  const blocks = workspace.getAllBlocks(false);
+  blocks.forEach((block) => {
+    if (block.data) {
+      try {
+        const pos = JSON.parse(block.data);
+        // data 안에 유효한 x, y가 있다면 그 위치로 강제 이동
+        if (typeof pos.x === 'number' && typeof pos.y === 'number') {
+          block.moveTo(new Blockly.utils.Coordinate(pos.x, pos.y));
+        }
+      } catch (e) {
+        /* 파싱 에러 무시 */
+      }
+    }
+  });
+
+  // 4. 툴박스 및 UI 갱신
   setToolbox(toolboxXMLs.empty);
   const group = categoryGroups.find((g) => g.id === modeId);
   if (group && group.items.length > 0) {
@@ -1559,8 +1803,102 @@ const selectParent = (modeId) => {
 
   refreshCodeAndPreview();
 };
-// [상수 추가] 스크립트 맨 위에 추가해두세요
-const FLYOUT_WIDTH = 300;
+
+// ✅ 드래그 중 삭제 드롭존(엔트리 스타일)
+const isTrashZoneOpen = ref(false);
+const isOverTrash = ref(false);
+let draggingBlockId = null;
+
+let __trashRaf = 0;
+let __trashEndBound = null; // ✅ pointerup fallback 핸들러
+let __trashLastX = 0;
+let __trashLastY = 0;
+let __trashMoveBound = null;
+
+function startTrashDrag(blockId) {
+  if (!blockId) return;
+
+  draggingBlockId = blockId;
+  isTrashZoneOpen.value = true;
+  isOverTrash.value = false;
+
+  __trashLastX = 0;
+  __trashLastY = 0;
+
+  if (!__trashMoveBound) {
+    __trashMoveBound = (ev) => {
+      __trashLastX = ev.clientX;
+      __trashLastY = ev.clientY;
+
+      if (__trashRaf) return;
+      __trashRaf = requestAnimationFrame(() => {
+        __trashRaf = 0;
+        isOverTrash.value = isPointerInTrashZone(__trashLastX, __trashLastY);
+      });
+    };
+    window.addEventListener("pointermove", __trashMoveBound, true);
+  }
+
+  if (!__trashEndBound) {
+    __trashEndBound = () => endTrashDrag();
+    window.addEventListener("pointerup", __trashEndBound, true);
+    window.addEventListener("pointercancel", __trashEndBound, true);
+  }
+}
+
+function endTrashDrag() {
+  if (__trashRaf) cancelAnimationFrame(__trashRaf);
+  __trashRaf = 0;
+  // ✅ 최종 판정 + 삭제 (좌표 기반)
+  const bid = draggingBlockId;
+  const shouldDelete = bid && isPointerInTrashZone(__trashLastX, __trashLastY);
+
+  isTrashZoneOpen.value = false;
+  isOverTrash.value = false;
+  draggingBlockId = null;
+
+  // ✅ pointermove 리스너 해제 (필수)
+  if (__trashMoveBound) {
+    window.removeEventListener('pointermove', __trashMoveBound, true);
+    __trashMoveBound = null;
+  }
+
+  // pointerup 리스너 해제
+  if (__trashEndBound) {
+    window.removeEventListener('pointerup', __trashEndBound, true);
+    window.removeEventListener('pointercancel', __trashEndBound, true);
+    __trashEndBound = null;
+  }
+
+  if (shouldDelete) {
+    const b = workspace?.getBlockById(bid);
+    if (b) {
+      Blockly.Events.setGroup(true);
+      try {
+        b.dispose(true);
+      } finally {
+        Blockly.Events.setGroup(false);
+      }
+
+      // ✅ 삭제 후 동기화
+      updateObjectListFromWorkspace();
+      saveCurrentWorkspaceToPage();
+      refreshCodeAndPreview();
+    }
+  }
+}
+
+function isPointerInTrashZone(x, y) {
+  // ✅ 휴지통 판정은 "진짜 오버레이 요소"의 rect로만 한다
+  const hit =
+    document.querySelector('.wc-trash-zone.active .wc-trash-hit') ||
+    document.querySelector('.wc-trash-hit');
+
+  if (!hit) return false;
+
+  const r = hit.getBoundingClientRect();
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
 
 /**
  * 카테고리 선택 및 블록 목록(Flyout) 표시 함수
@@ -1573,6 +1911,7 @@ const selectCategory = (key) => {
   if (activeTab.value === key) {
     activeTab.value = null;
     workspace.getFlyout().hide();
+    endTrashDrag();
     setTimeout(() => Blockly.svgResize(workspace), 310);
     return;
   }
@@ -1613,7 +1952,7 @@ const toggleOrientation = () => {
   isLandscape.value = !isLandscape.value;
   updatePreview(); // 화면 비율 변경 시 프리뷰 갱신
 };
-const handleThemeApply = (payload) => {
+const handleThemeApply = async (payload) => {
   // payload 구조: { theme: {...}, settings: {...} }
 
   // 1. 테마 적용 (payload.theme 사용)
@@ -1638,128 +1977,220 @@ const handleThemeApply = (payload) => {
   console.log('다른 설정들:', payload.settings);
   // 예: if (payload.settings.showGrid !== workspace.getGrid().isVisible()) ...
 
+  // 2. 프로젝트 이름 저장 (자바 서버 규격에 맞춤)
   if (payload.settings && payload.settings.projectName) {
-    projectTitle.value = payload.settings.projectName; // 👈 이 코드가 있어야 상단 제목이 바뀝니다.
-    savePagesToStorage();
+    try {
+      // 🚀 핵심: 자바 컨트롤러 body.get("name")에 맞춰서 키를 'name'으로 보냅니다.
+      await api.put(`/projects/${props.webId}/name`, {
+        name: payload.settings.projectName,
+      });
+
+      projectTitle.value = payload.settings.projectName;
+      savePagesToStorage(); // 500 에러가 나더라도 이름 저장은 위에서 이미 끝남
+      console.log('✅ 프로젝트 이름 서버 저장 완료');
+    } catch (e) {
+      console.error('❌ 이름 저장 실패:', e);
+    }
   }
 
-  // 3. 저장 및 닫기
+  // 3. 마무리
   localStorage.setItem('wc_theme_settings', JSON.stringify(currentTheme));
   isThemeModalOpen.value = false;
 };
-let isRestoring = false;
 
-  const initProjectData = async () => {
-    // ✅ [핵심] 서버/로컬 어떤 데이터가 오든 page.workspaces 3종은 무조건 보장
-    const normalizePage = (p = {}) => ({
-      id: p.id,
-      name: p.name || p.pageName || 'Home',
-      route: p.route || '/home',
-      aliases: Array.isArray(p.aliases) ? p.aliases : [],
-      status: p.status || 'DRAFT',
-      workspaces: p.workspaces || {
-        structure: '<xml></xml>',
-        style: '<xml></xml>',
-        logic: '<xml></xml>',
-      },
-    });
+const initProjectData = async () => {
+  const toWorkspaceText = (data) => {
+    if (data === null || data === undefined) return '{}';
 
-    try {
-  // 1. 현재 선택된 ID(selectedPageId)를 사용해 전체 페이지(pages)에서 해당 객체를 찾습니다. [cite: 2026-01-21]
-  const currentPage = pages.value.find(p => p.id === selectedPageId.value);
-  // 2. 찾은 페이지가 있으면 그 이름을 쓰고, 없으면 안전하게 'index'를 기본값으로 씁니다. [cite: 2026-01-21]
-  const targetPageName = currentPage ? currentPage.name : 'index'; 
-  // 3. 서버에 정확한 pageName 파라미터를 실어서 보냅니다. [cite: 2026-01-21]
-  const response = await api.get(`/projects/${props.webId}/data?pageName=${encodeURIComponent(targetPageName)}`);
-
-      // ✅ 1) 서버 데이터가 정상적으로 존재할 때
-      if (response?.data && response.data.title) {
-        const loaded = response.data;
-
-        // 프로젝트명(상단 타이틀)
-        projectTitle.value = loaded.title;
-
-        // ✅ 서버가 pages 배열을 주는 경우 (멀티 페이지)
-        if (Array.isArray(loaded.pages) && loaded.pages.length > 0) {
-          pages.value = loaded.pages.map(normalizePage);
-        }
-        // ✅ 서버가 단일 페이지 구조만 주는 경우
-        else {
-          pages.value = [
-            normalizePage({
-              id: loaded.id || props.webId, // 서버 id 있으면 우선, 없으면 webId
-              name: loaded.pageName || loaded.name || 'Home',
-              route: loaded.route || '/home',
-              aliases: loaded.aliases,
-              status: loaded.status,
-              workspaces: loaded.workspaces, // 이게 없을 수 있으니 normalize가 채워줌
-            }),
-          ];
-        }
-
-        // ✅ 서버 성공 시: 로컬도 덮어써서 예전 로컬 데이터를 밀어버림
-        savePagesToStorage();
-
-        // ✅ 첫 페이지 로드
-        if (pages.value[0]?.id) {
-          await loadPageById(pages.value[0].id);
-        }
-        return; // 🚀 중요: 서버 성공이면 여기서 끝 (아래 로컬 복구 로직 실행 금지)
-      }
-    } catch (e) {
-      console.error('서버 데이터 로드 실패, 로컬 데이터를 시도합니다.', e);
+    // 이미 문자열이면 그대로
+    if (typeof data === 'string') {
+      const t = data.trim();
+      return t ? data : '{}';
     }
 
-    // ✅ 2) 서버 로드 실패 시에만: 로컬스토리지 복구
-    const stored = loadPagesFromStorage();
-    if (stored) {
-      // 저장 구조가 {settings, pages} 일 수도 있고 pages 배열일 수도 있어서 둘 다 처리
-      const storedPages = Array.isArray(stored) ? stored : stored.pages;
-
-      if (Array.isArray(storedPages) && storedPages.length > 0) {
-        pages.value = storedPages.map(normalizePage);
-
-        // 프로젝트명 복원 (settings 우선)
-        if (!projectTitle.value) {
-          // loadPagesFromStorage에서 projectTitle.value를 세팅해줬다면 그대로 두고,
-          // 없다면 pages[0] 이름이라도 쓰기
-          projectTitle.value = pages.value[0]?.name || 'Untitled Project';
-        }
-
-        if (pages.value[0]?.id) {
-          await loadPageById(pages.value[0].id);
-        }
-      }
+    // 객체/배열이면 JSON 문자열로
+    try {
+      return JSON.stringify(data);
+    } catch (e) {
+      return '{}';
     }
   };
 
-onMounted(async () => {
-  
-  // 0. 한국어 설정
-  if (Ko) Blockly.setLocale(Ko);
+  const normalizePage = (p) => {
+    // 서버에서 내려오는 필드명 케이스까지 흡수
+    const layoutText = toWorkspaceText(p.layoutData);
+    const styleText = toWorkspaceText(p.styleData);
+    const logicText = toWorkspaceText(p.logicData);
 
-  // 1. 블록 정의
+    const name = p.pageName || p.name || 'Home';
+
+    return {
+      id: p.id,
+      name,
+      route: p.route || getUniqueRoute(name),
+      oldName: name,
+      status: p.status || 'DRAFT',
+
+      // ✅ 항상 string
+      layoutData: layoutText,
+      styleData: styleText,
+      logicData: logicText,
+
+      workspaces: {
+        structure: layoutText,
+        style: styleText,
+        logic: logicText,
+      },
+    };
+  };
+
+  // 🔄 플래그 초기화
+  isLoadFailed.value = false;
+
+  try {
+    console.log(`📡 [데이터 로드 시작] WebID: ${props.webId}`);
+
+    let fetchedPages = [];
+
+    // 1. 전체 목록 가져오기
+    try {
+      const listRes = await api.get(`/projects/${props.webId}/pages`);
+      if (Array.isArray(listRes.data)) {
+        fetchedPages = listRes.data.map((p) => normalizePage(p));
+      }
+    } catch (e) {
+      console.warn('목록 로드 실패, 단일 모드로 진행');
+    }
+
+    // 2. 현재 페이지 상세 가져오기
+    let currentDetail = null;
+    try {
+      let targetName = 'Home';
+      const savedId = selectedPageId.value;
+      const foundInList = fetchedPages.find((p) => p.id === savedId);
+      if (foundInList) targetName = foundInList.name;
+
+      const detailRes = await api.get(
+        `/projects/${props.webId}/data?pageName=${encodeURIComponent(targetName)}`
+      );
+      if (detailRes.data) {
+        currentDetail = normalizePage(detailRes.data);
+        if (detailRes.data.title) projectTitle.value = detailRes.data.title;
+      }
+    } catch (e) {
+      console.error('상세 로드 실패 (서버 에러)');
+      isLoadFailed.value = true; // 🚨 실패 플래그 ON
+    }
+
+    // 3. 데이터 병합
+    if (fetchedPages.length > 0) {
+      pages.value = fetchedPages;
+      if (currentDetail) {
+        const idx = pages.value.findIndex((p) => p.id === currentDetail.id);
+        if (idx !== -1) pages.value[idx] = currentDetail;
+        else pages.value.push(currentDetail);
+      }
+    } else if (currentDetail) {
+      pages.value = [currentDetail];
+    }
+
+    // 4. 화면 초기화
+    if (pages.value.length > 0) {
+      const validPage =
+        pages.value.find((p) => p.id === selectedPageId.value) ||
+        pages.value[0];
+      selectedPageId.value = validPage.id;
+      await loadPageById(validPage.id);
+    }
+
+    console.log(`✅ 초기화 완료: 총 ${pages.value.length}개 페이지`);
+  } catch (e) {
+    console.error('❌ 초기화 치명적 오류:', e);
+    isLoadFailed.value = true;
+  }
+};
+// 🔄 프로젝트 ID(webId)가 바뀌면 강제로 초기화 및 재로딩
+watch(
+  () => props.webId,
+  async (newId, oldId) => {
+    if (!newId || newId === oldId) return;
+
+    console.log(`♻️ 프로젝트 변경 감지: ${oldId} -> ${newId}`);
+
+    // 1. 저장 방지 잠금 (초기화 중에 자동저장되는 것 막기)
+    isRestoring = true;
+
+    // 2. 기존 데이터 싹 밀어버리기 (초기화)
+    pages.value = [];
+    objects.value = [];
+    selectedPageId.value = null;
+    generatedCode.value = '';
+    codeCache.value = { structure: '', style: '', logic: '' };
+
+    // 블록리 작업 공간 비우기
+    if (workspace) workspace.clear();
+
+    // 3. 새 프로젝트 데이터 로드 (onMounted에 있던 로직 재실행)
+    await initProjectData();
+
+    // 4. (만약 새 프로젝트라 데이터가 없다면) 기본 페이지(Home, Login) 생성
+    if (!isLoadFailed.value && pages.value.length === 0) {
+      console.log('🆕 새 프로젝트 초기 설정 진행...');
+      await setupInitialPages(); // DB에 Home, Login 생성 요청
+      pages.value = [createPage('Home'), createPage('Login')]; // 화면에 반영
+
+      // 생성된 ID 등 싱크를 맞추기 위해 한 번 더 로드
+      await initProjectData();
+    }
+
+    // 5. 첫 번째 페이지 로드해서 화면에 띄우기
+    if (pages.value.length > 0 && pages.value[0].id) {
+      await loadPageById(pages.value[0].id);
+    }
+
+    // 잠금 해제
+    setTimeout(() => {
+      isRestoring = false;
+    }, 500);
+  }
+);
+let debounceTimer = null;
+onMounted(async () => {
+  // 1. 사용자 정보 확인
+  try {
+    console.log('👤 [사용자 확인 시작]');
+    const memberRes = await api.get('/member/me');
+    if (memberRes.data && memberRes.data.member) {
+      const userNickname = memberRes.data.member.nickname;
+      console.log(`✅ 사용자 인식 완료: ${userNickname}`);
+      if (userInfo.value !== undefined) {
+        userInfo.value = memberRes.data.member;
+      }
+    }
+  } catch (e) {
+    console.warn('⚠️ 로그인 정보 로드 실패 (게스트 모드)');
+  }
+
+  // 2. Blockly 초기 설정
+  if (Ko) Blockly.setLocale(Ko);
   defineCustomBlocks();
   patchPrettyGenerator();
   await nextTick();
 
-  // ============================================================
-  // ✨ Blockly 주입
-  // ============================================================
-  workspace = Blockly.inject('blocklyDiv', {
+  // 3. Blockly 워크스페이스 주입
+  const blocklyDiv = document.getElementById('blocklyDiv');
+  if (!blocklyDiv) return;
+
+  workspace = Blockly.inject(blocklyDiv, {
     renderer: 'zelos',
     toolbox: toolboxXMLs.empty,
     move: { scrollbars: true, drag: true, wheel: true },
-    zoom: {
-      controls: true,
-      wheel: false,
-      startScale: 0.8,
-    },
+    zoom: { controls: true, wheel: false, startScale: 0.8 },
     grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
     trashcan: true,
   });
 
-  // 2. 테마 및 배경색 적용
+  // 4. 테마 적용
   let savedTheme = currentTheme;
   try {
     const loaded = localStorage.getItem('wc_theme_settings');
@@ -1773,219 +2204,152 @@ onMounted(async () => {
   if (flyoutBg) flyoutBg.style.backgroundColor = savedTheme.toolboxColor;
   const wsBg = document.querySelector('.blocklyMainBackground');
   if (wsBg) wsBg.style.fill = savedTheme.workspaceColor;
-  const blocklyDiv = document.getElementById('blocklyDiv');
-  if (blocklyDiv) blocklyDiv.style.backgroundColor = savedTheme.workspaceColor;
-  const loadedPages = loadPagesFromStorage(); 
-  
-  if (loadedPages && loadedPages.length > 0) {
-    pages.value = loadedPages;
-    selectedPageId.value = loadedPages[0].id; // 첫 페이지 선택
-  } else {
-    return;
-  }
 
-  // 2. 블록 화면 그리기 (중요!)
-  // Blockly 주입(inject)이 완료된 후 실행해야 함
-  setTimeout(() => {
-     loadWorkspaceState(selectedPageId.value);
-  }, 100);
-  // UI 밀림 방지
+  // 5. UI 레이아웃 보정
   const metricsManager = workspace.getMetricsManager();
-  metricsManager.getToolboxMetrics = () => ({
-    width: 0,
-    height: 0,
-    position: Blockly.TOOLBOX_AT_LEFT,
-  });
-  metricsManager.getFlyoutMetrics = () => ({
-    width: 0,
-    height: 0,
-    position: Blockly.TOOLBOX_AT_LEFT,
-  });
+  metricsManager.getToolboxMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
+  metricsManager.getFlyoutMetrics = () => ({ width: 0, height: 0, position: Blockly.TOOLBOX_AT_LEFT });
 
   const flyout = workspace.getFlyout();
   if (flyout) flyout.autoClose = false;
   workspace.resize();
 
-  // VS Code 스타일 줌 (Ctrl + Wheel)
-  blocklyDiv.addEventListener(
-    'wheel',
-    (e) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        const direction = e.deltaY > 0 ? -1 : 1;
-        workspace.zoom(e.offsetX, e.offsetY, direction);
-      }
-    },
-    { passive: false }
-  );
+  // 6. 줌 컨트롤
+  blocklyDiv.addEventListener('wheel', (e) => {
+    if (e.ctrlKey) {
+      e.preventDefault();
+      const direction = e.deltaY > 0 ? -1 : 1;
+      workspace.zoom(e.offsetX, e.offsetY, direction);
+    }
+  }, { passive: false });
 
-  // ============================================================
-  // 3. Blockly 이벤트 리스너 (여기에 위치 로직 통합됨!)
-  // ============================================================
-  // 5. Blockly 이벤트 리스너 (통합 및 최적화 버전)
-  let debounceTimer = null;
+  // ------------------------------------------------------------
+  // 🔥 7. [통합] Blockly 이벤트 리스너 (웹소켓 + 자동저장 + 휴지통)
+  // ------------------------------------------------------------
   workspace.addChangeListener((e) => {
-    
-    // 1. 로딩 중이거나, 단순 UI 이벤트(클릭 등)는 무시
-    if (isRestoring || e.isUiEvent) return;
-
-    // 2. 우리가 관심을 가질 이벤트들 (생성, 삭제, 변경, 이동)
-    if (
-      e.type === Blockly.Events.BLOCK_CREATE ||
-      e.type === Blockly.Events.BLOCK_DELETE ||
-      e.type === Blockly.Events.BLOCK_CHANGE ||
-      e.type === Blockly.Events.BLOCK_MOVE
-    ) {
-      
-      // 3. 디바운스 적용 (0.3초 대기)
-      // 설명: 블록을 드래그하는 동안에는 저장/갱신을 하지 않고, 
-      // 손을 놓거나 동작이 멈추면 그때 한 번만 실행합니다. (성능 최적화 + 블록 사라짐 방지)
-      if (debounceTimer) clearTimeout(debounceTimer);
-      
-      debounceTimer = setTimeout(() => {
-        // (1) 객체 목록 갱신
-        updateObjectListFromWorkspace();
-        
-        // (2) 저장 실행
-        saveCurrentWorkspaceToPage();
-        
-        // (3) 코드 생성 및 미리보기 갱신 (이제 이동(Move)할 때도 실행됨!)
-        refreshCodeAndPreview();
-        
-        console.log(`📝 상태 업데이트 완료 (${e.type})`);
-      }, 300); // 300ms 딜레이
-    }
-
-    // 4. 선택 이벤트 (기존 유지)
-    if (e.type === Blockly.Events.SELECTED) {
-      if (!isSelectingProgrammatically) {
-        handleSelection(e.newElementId, 'blockly');
+    // (1) 실시간 동기화 (블록 이동)
+    if (e.type === Blockly.Events.BLOCK_MOVE && !e.isUiEvent && !isRemoteUpdate) {
+      const block = workspace.getBlockById(e.blockId);
+      if (block && stompClient && stompClient.connected) {
+        const xy = block.getRelativeToSurfaceXY();
+        stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+            blockId: e.blockId,
+            x: Math.round(xy.x),
+            y: Math.round(xy.y),
+            senderId: props.nickname // 내 닉네임 전송
+        }));
       }
     }
-  });
 
-  // 4. Iframe 통신 리스너
-  window.addEventListener('message', (event) => {
-    const data = event.data;
-    if (!data) return;
-
-    // 🚀 [핵심] iframe 위치 이동 시: XML 데이터를 직접 수정해서 저장
-    if (data.type === 'update_free_position') {
-      const { blockId, x, y } = data;
-      const page = pages.value.find((p) => p.id === selectedPageId.value);
-
-      if (page && page.workspaces && page.workspaces.structure) {
-        try {
-          // 1. 저장된 XML을 파싱 (DOM으로 변환)
-          const parser = new DOMParser();
-          const xmlDoc = parser.parseFromString(
-            page.workspaces.structure,
-            'text/xml'
-          );
-
-          // 2. 해당 블록 ID를 가진 태그 찾기
-          const targetBlock = xmlDoc.querySelector(`block[id="${blockId}"]`);
-
-          if (targetBlock) {
-            // 3. data 속성에 좌표값 강제 주입
-            const newPos = JSON.stringify({ x: Number(x), y: Number(y) });
-            targetBlock.setAttribute('data', newPos);
-
-            // 4. XML 문자열로 다시 변환하여 저장
-            const serializer = new XMLSerializer();
-            page.workspaces.structure = serializer.serializeToString(xmlDoc);
-
-            // 5. 로컬 스토리지 저장
-            savePagesToStorage();
-
-            console.log(`📍 XML 직접 업데이트 완료: ${blockId} -> ${newPos}`);
-
-            // 6. (옵션) 만약 현재 화면 구성 탭이라면, 라이브 블록에도 반영 (UI 싱크용)
-            if (workspace && activeMode.value === 'structure') {
-              const liveBlock = workspace.getBlockById(blockId);
-              if (liveBlock) liveBlock.data = newPos;
-            }
+    // (2) UI 로직: 드래그 및 휴지통 처리 (이게 빠져있었음!)
+    if (e.type === Blockly.Events.BLOCK_DRAG) {
+      const flyoutSvg = document.querySelector('.blocklyFlyout');
+      if (e.isEnd) {
+        if (flyoutSvg) flyoutSvg.style.pointerEvents = 'auto';
+        endTrashDrag();
+      } else if (e.isStart) {
+        if (flyoutSvg) flyoutSvg.style.pointerEvents = 'none';
+        if (!isTrashZoneOpen.value && activeTab.value) {
+          isTrashZoneOpen.value = true;
+          draggingBlockId = e.blockId || draggingBlockId;
+          // 드래그 추적 리스너 등록 (생략 시 휴지통 안됨)
+          if (!__trashMoveBound) {
+            __trashMoveBound = (ev) => {
+              __trashLastX = ev.clientX;
+              __trashLastY = ev.clientY;
+              isOverTrash.value = isPointerInTrashZone(__trashLastX, __trashLastY);
+            };
+            window.addEventListener('pointermove', __trashMoveBound, true);
           }
-        } catch (e) {
-          console.error('XML 직접 수정 실패:', e);
+          if (!__trashEndBound) {
+            __trashEndBound = () => {
+              if (flyoutSvg) flyoutSvg.style.pointerEvents = 'auto';
+              endTrashDrag();
+            };
+            window.addEventListener('pointerup', __trashEndBound, true);
+            window.addEventListener('pointercancel', __trashEndBound, true);
+          }
         }
       }
     }
 
-    // [기존 코드 유지] 페이지 이동
-    if (
-      data.type === 'NAVIGATE' ||
-      data.type === 'REDIRECT' ||
-      data.type === 'change_page_request'
-    ) {
-      const targetId = data.pageId;
-      const targetPage = pages.value.find(
-        (p) => p.id === targetId || p.route === targetId || p.name === targetId
-      );
-      if (targetPage) {
-        lockPage(targetPage.id);
-        selectPage(targetPage.id);
-      } else {
-        alert('이동할 페이지를 찾을 수 없습니다: ' + targetId);
-      }
-    }
+    // (3) 데이터 자동 저장 (생성/삭제/변경 시)
+    if (isRestoring || e.isUiEvent) return;
+    if (e.type === Blockly.Events.FINISHED_LOADING) return;
 
-    // [기존 코드 유지] 선택 하이라이트
-    if (data.type === 'select_block') handleSelection(data.blockId, 'iframe');
-    if (data.type === 'deselect_block') handleSelection(null, 'iframe');
+    const saveEvents = [
+      Blockly.Events.BLOCK_CREATE,
+      Blockly.Events.BLOCK_DELETE,
+      Blockly.Events.BLOCK_CHANGE,
+    ];
+
+    if (saveEvents.includes(e.type)) {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (!isSaving.value) {
+          updateObjectListFromWorkspace();
+          saveCurrentWorkspaceToPage();
+          refreshCodeAndPreview();
+          console.log(`📝 DB 자동 저장 완료 (${e.type})`);
+        }
+      }, 1000);
+    }
   });
 
-  // 5. 전역 함수 및 데이터 로드
-  window.WC_GET_PAGES = () => {
-    if (!pages.value || pages.value.length === 0) return [['페이지 없음', '']];
-    // 🔥 [수정] 모든 값을 문자열로 변환 (Blockly 드롭다운 요구사항)
-    return pages.value.map((p) => [p.name, String(p.id)]);
-  };
+  // ------------------------------------------------------------
+  // 🔥 8. [복구] Iframe 통신 리스너 (미리보기 좌표 동기화)
+  // ------------------------------------------------------------
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data) return;
 
-  // IDEView.vue 내 수정
+  // 1. 드래그 끝났을 때: UI 좌표 저장 (로그 확인용)
+  if (data.type === 'update_free_position') {
+    const { blockId, x, y } = data;
+    if (workspace) {
+      const liveBlock = workspace.getBlockById(blockId);
+      if (liveBlock) {
+        let currentData = {};
+        try { currentData = liveBlock.data ? JSON.parse(liveBlock.data) : {}; } catch (e) {}
 
-  // 1. 프로젝트 제목을 별도로 관리할 변수 선언 (이미 있다면 확인)
-  // IDEView.vue 내 initProjectData 함수 수정
+        // uiX, uiY로 저장
+        currentData.uiX = Number(x);
+        currentData.uiY = Number(y);
 
+        if (stompClient && stompClient.connected) {
+          stompClient.send(`/app/project/${props.webId}/block-move`, {}, JSON.stringify({
+            type: 'UI_MOVE', // 👈 일반 블록 이동과 구분하기 위한 태그
+            blockId: blockId,
+            x: Number(x),
+            y: Number(y),
+            senderId: props.nickname
+          }));
+        }
 
-// 1️⃣ [잠금] 서버 데이터를 다 그릴 때까지 '자동 저장'을 원천 봉쇄합니다. [cite: 2026-01-21]
-isRestoring = true; 
-
-  // 2️⃣ 서버 데이터 로드 시도
-  console.log("📡 서버 데이터 로딩 시작...");
-  await initProjectData();
-  
-  // 🚀 [핵심] Vue가 pages 변수를 갱신할 때까지 대기 [cite: 2026-01-21]
-  await nextTick(); 
-
-  if (pages.value && pages.value.length > 0) {
-    // 3️⃣ [지연 렌더링] 워크스페이스가 준비될 시간을 0.8초 줍니다.
-    setTimeout(async () => {
-      if (workspace) {
-        // 📏 크기 재조정 후 블록 주입 [cite: 2026-01-21]
-        workspace.resize();
-        Blockly.svgResize(workspace);
-        
-        const firstPageId = pages.value[0].id;
-        loadWorkspaceState(firstPageId);
-        console.log("🎨 [성공] 화면에 블록 주입 완료");
+        liveBlock.data = JSON.stringify(currentData);
+        console.log(`📌 [UI 저장] ${blockId} : (${x}, ${y})`);
       }
-
-      // 4️⃣ [잠금 해제] 화면에 모든 블록이 뜬 '후'에만 저장을 허용 [cite: 2026-01-21]
-      setTimeout(() => {
-        isRestoring = false;
-        console.log("🔓 이제부터 안전하게 저장이 가능합니다.");
-      }, 1000); // 넉넉하게 1초 뒤 잠금 해제
-    }, 800);
-  } else {
-    // 신규 프로젝트 로직 [cite: 2026-01-21]
-    await setupInitialPages();
-    pages.value = [createPage('Home'), createPage('Login')];
-    savePagesToStorage();
-    isRestoring = false;
+    }
+    saveToServerAsJson(); 
   }
 
-  // 6. 리사이즈 감지
+  // 2. 블록 선택 동기화
+  if (data.type === 'select_block') {
+    handleSelection(data.blockId, 'preview');
+  }
+  });
+
+  // 9. 프로젝트 데이터 로드
+  await initProjectData();
+
+  if (!isLoadFailed.value && pages.value.length === 0) {
+    console.log('🆕 신규 프로젝트 감지: 기본 페이지 생성 시작');
+    await setupInitialPages();
+    await initProjectData();
+    if (pages.value[0]?.id) await loadPageById(pages.value[0].id);
+  }
+
+  // 10. 리사이즈 감지
   new ResizeObserver(() => {
     if (workspace) Blockly.svgResize(workspace);
   }).observe(document.getElementById('workspace-area'));
@@ -1999,24 +2363,105 @@ isRestoring = true;
   const iframeWrapper = document.querySelector('.iframe-wrapper');
   if (iframeWrapper) iframeResizeObserver.observe(iframeWrapper);
 
-  // 7. ESC 키 종료
+  // 11. ESC 키 리스너
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && isRunning.value) toggleRun();
   });
-  autoSaveTimer = setInterval(
-    () => {
-      console.log('🕒 자동 저장 실행 중...');
-      saveToServerAsJson();
-    },
-    10 * 60 * 1000
-  );
+
+  // 12. 자동 저장 타이머
+  autoSaveTimer = setInterval(() => {
+    if (!isLoadFailed.value) saveToServerAsJson();
+  }, 10 * 60 * 1000);
+
+  // 13. 웹소켓 연결
+  const connectWebSocket = () => {
+    const socket = new SockJS('http://localhost:8080/wsproject');
+    stompClient = Stomp.over(socket);
+    stompClient.debug = null;
+
+    stompClient.connect({}, (frame) => {
+      console.log('🚀 [협업 서버 연결 성공]');
+      
+      stompClient.subscribe(`/topic/project/${props.webId}/block-updates`, (res) => {
+        const data = JSON.parse(res.body);
+
+        // -----------------------------------------------------------
+        // 1. (기존) 블록 자체 이동 로직 (type이 없을 때)
+        // -----------------------------------------------------------
+        if (!data.type && data.blockId && data.senderId !== props.nickname) {
+          const targetWorkspace = Blockly.getMainWorkspace();
+          const block = targetWorkspace.getBlockById(data.blockId);
+          if (block) {
+            isRemoteUpdate = true;
+            Blockly.Events.disable();
+            block.moveTo(new Blockly.utils.Coordinate(Number(data.x), Number(data.y)));
+            Blockly.Events.enable();
+            refreshCodeAndPreview();
+            setTimeout(() => { isRemoteUpdate = false; }, 100);
+          }
+        }
+
+        // -----------------------------------------------------------
+        // 2. 🔥 [추가] UI 드래그 실시간 반영 로직 (type === 'UI_MOVE')
+        // -----------------------------------------------------------
+        if (data.type === 'UI_MOVE' && data.senderId !== props.nickname) {
+           console.log(`📡 [외부 UI 이동 수신] ${data.blockId} -> (${data.x}, ${data.y})`);
+
+           // (A) 내 데이터에도 몰래 반영 (저장 대비)
+           const targetWorkspace = Blockly.getMainWorkspace();
+           const block = targetWorkspace.getBlockById(data.blockId);
+           if (block) {
+             let d = {};
+             try { d = block.data ? JSON.parse(block.data) : {}; } catch (e) {}
+             
+             d.uiX = data.x;
+             d.uiY = data.y;
+             block.data = JSON.stringify(d);
+           }
+
+           // (B) 미리보기 화면(Iframe) 속 요소 강제 이동 시키기
+           const iframe = document.getElementById('previewFrame');
+           if (iframe && iframe.contentWindow) {
+             iframe.contentWindow.postMessage({
+               type: 'update_free_position_remote', // Iframe이 알아듣는 명령어
+               blockId: data.blockId,
+               x: data.x,
+               y: data.y
+             }, '*');
+           }
+        }
+      });
+    }, (error) => {
+      console.error('❌ [웹소켓 연결 실패]:', error);
+      setTimeout(connectWebSocket, 5000);
+    });
+  };
+  connectWebSocket();
+
+  // ---------------------------------------------------------
+  // ✅ 14. [최종 추가] 프로젝트 조회수 증가 (s 붙인 버전)
+  // ---------------------------------------------------------
+  try {
+    const currentWebId = props.webId;
+    if (currentWebId) {
+      await api.patch(`/projects/hit/${currentWebId}`);
+      console.log(`📈 프로젝트(${currentWebId}) 조회수 증가 완료`);
+    }
+  } catch (err) {
+    console.warn("조회수 업데이트 중 오류 발생:", err);
+  }
 });
 onUnmounted(() => {
-  if (autoSaveTimer) {
-    clearInterval(autoSaveTimer); // 페이지 나갈 때 타이머 해제
+  if (autoSaveTimer) clearInterval(autoSaveTimer);
+  if (__trashRaf) cancelAnimationFrame(__trashRaf);
+  __trashRaf = 0;
+  if (__trashMoveBound) {
+    window.removeEventListener('pointermove', __trashMoveBound, true);
+    __trashMoveBound = null;
   }
 });
 // PC 모드일 때는 강제로 넓게 잡고 축소해서 보여줌
+// ✅ [Final] 컴퓨터 표준 16:9 비율(1920x1080)로 강제 고정
 const iframeStyle = computed(() => {
   if (isPhone.value) {
     return {
@@ -2026,38 +2471,33 @@ const iframeStyle = computed(() => {
       border: 'none',
     };
   } else {
+    // 🖥️ 표준 PC 해상도 (FHD)
     const baseWidth = 1920;
-    const baseHeight = 1130; // 기본 FHD 높이
+    const baseHeight = 1080; // 16:9 비율
 
-    // 1. 박스 크기 가져오기
-    const currentWidth = 651;
-    const currentHeight = 800;
+    // 현재 미리보기 박스의 너비 (높이는 무시하고 너비 기준으로 비율만 맞춤)
+    const currentWidth = wrapperWidth.value || 800;
 
-    // 2. 배율 계산
+    // 배율 계산
     const scaleRatio = currentWidth / baseWidth;
-
-    // 🔥 [핵심 로직]
-    // "미리보기 박스 높이"를 "배율"로 나누면, iframe이 가져야 할 실제 높이가 나옵니다.
-    // 예: 박스 800px / 배율 0.5 = iframe은 1600px이 되어야 꽉 참.
-    // 단, 최소 1080px은 보장해야 함 (Math.max 사용)
-    const finalHeight = Math.max(baseHeight, currentHeight / scaleRatio);
 
     return {
       position: 'absolute',
       transformOrigin: 'top left',
 
+      // 🚀 핵심: 무조건 1920x1080으로 크기 고정
       width: `${baseWidth}px`,
-      height: `${finalHeight}px`, // 👈 계산된 높이 적용 (빈 공간 제거됨!)
+      height: `${baseHeight}px`,
 
+      // 🚀 축소 (화면 크기에 맞춰서 꽉 차게 줄임)
       transform: `scale(${scaleRatio})`,
+
       border: 'none',
       backgroundColor: '#fff',
-      boxShadow: '0 0 30px rgba(0,0,0,0.1)', // (선택) 그림자 좀 더 진하게
+      boxShadow: '0 0 30px rgba(0,0,0,0.1)',
     };
   }
 });
-
-
 // 📚 애니메이션 도서관 (이름: CSS코드)
 const ANIMATION_LIBRARY = {
   // [등장]
@@ -2085,92 +2525,100 @@ const ANIMATION_LIBRARY = {
   flip3D: `@keyframes flip3D { from { transform: perspective(400px) rotateY(0); } to { transform: perspective(400px) rotateY(360deg); } }`,
   swinging: `@keyframes swinging {0% { transform: rotate(0deg); transform-origin: top center; } 20% { transform: rotate(15deg); }40% { transform: rotate(-10deg); }60% { transform: rotate(5deg); }80% { transform: rotate(-5deg); }100% { transform: rotate(0deg); }}`,
 };
-// 💾 [배포] 전체 프로젝트를 ZIP으로 다운로드 (CSS 오류 수정 + 좌표 강제 적용)
+// ✅ [수정 4] 다운로드 시 JSON 구조 깊숙한 곳의 좌표까지 찾아내는 로직
 const downloadProject = async () => {
   const zip = new JSZip();
-
-  // 1. 페이지 ID와 파일명 매핑
   const pageMap = {};
   pages.value.forEach((p, index) => {
     const filename = index === 0 ? 'index.html' : `${p.name.trim()}.html`;
     pageMap[p.id] = filename;
   });
 
-  // 2. 모든 페이지 순회
   for (const page of pages.value) {
     const filename = pageMap[page.id];
-
-    // (1) XML에서 좌표 정보(x, y) 추출
     const coordsMap = {};
-    if (page.workspaces.structure) {
-      try {
-        const parser = new DOMParser();
-        const xmlDoc = parser.parseFromString(
-          page.workspaces.structure,
-          'text/xml'
-        );
-        const blocks = xmlDoc.querySelectorAll('block');
-        blocks.forEach((block) => {
-          const id = block.getAttribute('id');
-          const dataStr = block.getAttribute('data');
+    const rawData = page.workspaces.structure || page.layoutData;
 
-          if (id && dataStr) {
-            try {
-              const pos = JSON.parse(dataStr);
-              // 좌표가 유효한지 확인
-              if (
-                pos &&
-                typeof pos.x === 'number' &&
-                typeof pos.y === 'number'
-              ) {
-                coordsMap[id] = pos;
-              }
-            } catch (e) {}
+    // 🔎 좌표 추출 로직 (JSON 재귀 탐색)
+    if (
+      rawData &&
+      typeof rawData === 'string' &&
+      rawData.trim().startsWith('{')
+    ) {
+      try {
+        const jsonState = JSON.parse(rawData);
+
+        // 재귀 함수: 모든 블록을 뒤져서 좌표 찾기
+        const collectCoords = (node) => {
+          if (!node) return;
+          if (Array.isArray(node)) {
+            node.forEach(collectCoords);
+            return;
           }
-        });
+          if (typeof node === 'object') {
+            if (node.id && node.x !== undefined && node.y !== undefined) {
+              coordsMap[node.id] = { x: node.x, y: node.y };
+            }
+            // data 속성에 숨겨진 좌표도 확인
+            else if (node.id && node.data) {
+              try {
+                const hidden = JSON.parse(node.data);
+                if (hidden.x !== undefined)
+                  coordsMap[node.id] = { x: hidden.x, y: hidden.y };
+              } catch (e) {}
+            }
+            Object.values(node).forEach(collectCoords);
+          }
+        };
+        collectCoords(jsonState);
       } catch (e) {
-        console.error('좌표 파싱 오류:', e);
+        console.error('다운로드 좌표 파싱 실패', e);
       }
     }
+    // XML 파싱 (구버전 호환)
+    else if (
+      rawData &&
+      typeof rawData === 'string' &&
+      rawData.startsWith('<')
+    ) {
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(rawData, 'text/xml');
+        xmlDoc.querySelectorAll('block').forEach((b) => {
+          const id = b.getAttribute('id');
+          const x = b.getAttribute('x');
+          const y = b.getAttribute('y');
+          if (id && x && y) coordsMap[id] = { x: Number(x), y: Number(y) };
+        });
+      } catch (e) {}
+    }
 
-    // (2) 코드 생성
     const structCode = generateCodeFromXML(page.workspaces.structure);
     const styleCode = generateCodeFromXML(page.workspaces.style);
     const logicCode = generateCodeFromXML(page.workspaces.logic);
-
-    // 🔥 [핵심 수정 1] CSS 태그 중복 제거 (styleCode 안에 <style>태그가 포함되어 있으면 제거)
-    // 블록이 "<style>...</style>"을 반환하더라도, 여기서 태그를 벗겨내서 순수 CSS만 남깁니다.
     const cleanStyleCode = styleCode.replace(/<\/?style[^>]*>/g, '').trim();
 
-    // (3) 애니메이션 Tree Shaking
     const fullSourceCode = structCode + styleCode + logicCode;
     let usedKeyframes = '';
     Object.keys(ANIMATION_LIBRARY).forEach((name) => {
-      if (fullSourceCode.includes(name)) {
+      if (fullSourceCode.includes(name))
         usedKeyframes += ANIMATION_LIBRARY[name] + '\n';
-      }
     });
 
-    // (4) HTML 세탁 및 좌표 주입
     const cleanContainer = document.createElement('div');
     cleanContainer.innerHTML = structCode;
 
     cleanContainer.querySelectorAll('*').forEach((el) => {
       const blockId = el.getAttribute('data-block-id');
-
-      // 🔥 [핵심 수정 2] 좌표 적용 로직
       if (blockId && coordsMap[blockId]) {
         const { x, y } = coordsMap[blockId];
-        // 기존 스타일 유지하며 좌표 추가
         el.style.position = 'absolute';
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
-        // 배포 버전에서는 transform 제거 (드래그 잔재 방지)
         el.style.transform = 'none';
       }
-
-      // 불필요한 속성 제거
-      const dirtyAttributes = [
+      // 불필요 속성 제거
+      [
         'data-block-id',
         'data-draggable',
         'data-wc-block',
@@ -2179,18 +2627,11 @@ const downloadProject = async () => {
         'spellcheck',
         'data-x',
         'data-y',
-      ];
-
-      dirtyAttributes.forEach((attr) => el.removeAttribute(attr));
+      ].forEach((attr) => el.removeAttribute(attr));
       el.classList.remove('wc-highlight', 'wc-dragging', 'selected');
-
-      // 클래스가 비어있으면 속성 삭제
       if (el.classList.length === 0) el.removeAttribute('class');
     });
 
-    const cleanHtmlBody = cleanContainer.innerHTML;
-
-    // (5) 최종 HTML 조립
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="ko">
@@ -2199,57 +2640,29 @@ const downloadProject = async () => {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${page.name}</title>
   <style>
-    /* 기본 리셋 */
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; }
-    body { 
-      background-color: #fff; 
-      overflow-x: hidden; 
-      position: relative; 
-    }
+    body { background-color: #fff; overflow-x: hidden; position: relative; }
     * { box-sizing: border-box; }
-    
-    #root {
-      position: relative;
-      width: 100%;
-      min-height: 100vh;
-      overflow: hidden;
-    }
-
-    /* 🔥 사용자 정의 스타일 (태그 없이 내용만 삽입됨) */
+    #root { position: relative; width: 100%; min-height: 100vh; overflow: hidden; }
     ${cleanStyleCode}
-
-    /* 애니메이션 키프레임 */
     ${usedKeyframes}
   </style>
-  </head>
-  <body>
-    <div id="root">
-      ${cleanHtmlBody}
-    </div>
-
-    <script>
-      const PAGE_MAP = ${JSON.stringify(pageMap)};
-      
-      function navigateToPage(targetId) {
-        if (PAGE_MAP[targetId]) {
-          window.location.href = PAGE_MAP[targetId];
-        } else {
-          console.error('이동할 페이지를 찾을 수 없습니다:', targetId);
-        }
-      }
-      
-      function redirectToPage(targetId) { navigateToPage(targetId); }
-      function goToPage(targetId) { navigateToPage(targetId); }
-
-      ${logicCode}
-    <\/script>
-  </body>
-  </html>`.trim();
+</head>
+<body>
+  <div id="root">${cleanContainer.innerHTML}</div>
+  <script>
+    const PAGE_MAP = ${JSON.stringify(pageMap)};
+    function navigateToPage(id) { if(PAGE_MAP[id]) window.location.href = PAGE_MAP[id]; }
+    function redirectToPage(id) { navigateToPage(id); }
+    function goToPage(id) { navigateToPage(id); }
+    ${logicCode}
+  <\/script>
+</body>
+</html>`.trim();
 
     zip.file(filename, htmlContent);
   }
 
-  // 3. ZIP 생성 및 다운로드 실행
   const content = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(content);
   const a = document.createElement('a');
@@ -2468,10 +2881,16 @@ const applyManualXml = () => {
                 </span>
               </div>
 
-              <button 
-                class="btn-del" 
-                @click.stop.prevent="deletePage(page.id)" 
-                style="cursor: pointer; position: relative; z-index: 10; pointer-events: auto !important; padding: 5px;"
+              <button
+                class="btn-del"
+                @click.stop.prevent="deletePage(page.id)"
+                style="
+                  cursor: pointer;
+                  position: relative;
+                  z-index: 10;
+                  pointer-events: auto !important;
+                  padding: 5px;
+                "
               >
                 ✕
               </button>
@@ -2603,6 +3022,21 @@ const applyManualXml = () => {
           :class="{ 'drawer-open': activeTab }"
         >
           <div class="flyout-bg-panel" :class="{ open: activeTab }"></div>
+          <!-- 엔트리식 휴지통 드롭존 -->
+          <div
+            class="wc-trash-zone"
+            :class="{
+              active: isTrashZoneOpen && !!activeTab,
+              over: isOverTrash,
+            }"
+          >
+            <div class="wc-trash-zone__overlay wc-trash-hit">
+              <div class="wc-trash-zone__content">
+                <div class="wc-trash-zone__icon">🗑️</div>
+                <div class="wc-trash-zone__text">여기로 옮겨 버리기</div>
+              </div>
+            </div>
+          </div>
 
           <div id="blocklyDiv"></div>
         </div>
@@ -2618,22 +3052,22 @@ const applyManualXml = () => {
   </div>
 
   <Teleport to="body">
-    <AiChatBot 
-      :workspaces="pages.find(p => p.id === selectedPageId)?.workspaces" 
-      @generate="handleAiBlockGeneration" 
+    <AiChatBot
+      :workspaces="pages.find((p) => p.id === selectedPageId)?.workspaces"
+      @generate="handleAiBlockGeneration"
     />
   </Teleport>
 
-<!-- ✅ 삭제 확인 모달 -->
-<ConfirmModal
-  :open="confirmModal.open"
-  :message="confirmModal.message"
-  type="warning" 
-  confirm-text="삭제"
-  cancel-text="취소"
-  @confirm="confirmDeletePage"
-  @cancel="closeDeleteConfirm"
-/>
+  <!-- ✅ 삭제 확인 모달 -->
+  <ConfirmModal
+    :open="confirmModal.open"
+    :message="confirmModal.message"
+    type="warning"
+    confirm-text="삭제"
+    cancel-text="취소"
+    @confirm="confirmDeletePage"
+    @cancel="closeDeleteConfirm"
+  />
 
   <Teleport to="body">
     <div v-if="isRunning" class="fullscreen-modal">
@@ -2878,7 +3312,7 @@ iframe {
 }
 
 .manager-section {
-  height: 45%;
+  height: 48.5%;
 
   display: flex;
 
@@ -3746,7 +4180,77 @@ iframe {
 }
 
 @keyframes popIn {
-  from { opacity: 0; transform: scale(0.9) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ================================
+   엔트리 스타일 휴지통 드롭존
+   ================================ */
+
+.wc-trash-zone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 300px; /* Flyout 고정 폭 */
+  height: 100%;
+  z-index: 9999;
+
+  pointer-events: none; /* 드래그 방해 X */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+/* 활성화 */
+.wc-trash-zone.active {
+  opacity: 1;
+}
+
+/* 노란 반투명 오버레이 */
+.wc-trash-zone__overlay {
+  width: 300px;
+  max-width: 300px;
+  height: 100%;
+  background: rgba(255, 244, 200, 0.85); /* 엔트리 느낌 노랑 */
+  border: 2px dashed rgba(255, 180, 0, 0.9);
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wc-trash-zone__overlay.wc-trash-hit {
+  width: 300px; /* ✅ 판정 폭 고정 */
+  max-width: 300px; /* ✅ flyoutBackground 영향 차단 */
+}
+
+/* 중앙 콘텐츠 */
+.wc-trash-zone__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  user-select: none;
+}
+
+/* 휴지통 아이콘 */
+.wc-trash-zone__icon {
+  font-size: 72px;
+  line-height: 1;
+  color: #ff9800;
+}
+
+/* 텍스트 */
+.wc-trash-zone__text {
+  font-size: 18px;
+  font-weight: 800;
+  color: #7a4a00;
 }
 </style>

@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="home">
-    <HeroSection @create="handleCreateProject" />
+    <HeroSection/>
 
     <FeaturesSection />
     <StatsSection />

@@ -12,6 +12,10 @@ export default defineConfig({
       changeOrigin: true,
       },
   },
+  // 🚀 [추가] 브라우저에 없는 global 변수를 window로 연결하여 에러를 해결합니다.
+  define: {
+    global: 'window',
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),

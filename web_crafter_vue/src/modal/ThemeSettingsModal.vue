@@ -105,7 +105,6 @@ const handleSave = async () => {
       newName: formData.projectName // ✅ 이 값이 부모의 title을 바꿉니다.
     });
 
-    alert("설정이 저장되었습니다.");
     emit('close');
 
   } catch (error) {
@@ -146,7 +145,7 @@ const handleSave = async () => {
             
             <div class="form-group">
               <label>프로젝트 이름</label>
-              <input v-model="formData.projectName" type="text" class="input-field" />
+              <input v-model="formData.projectName" type="text" class="input-field" @keyup.enter="handleSave"/>
             </div>
 
             <div class="form-group">

@@ -4,7 +4,7 @@ import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue';
 import { useAuthStore } from '@/stores/auth';
-import { Blocks, Users, Bell, UserPlus } from 'lucide-vue-next'; // 👈 [수정] Users 아이콘 추가
+import { Blocks, Users, Bell, UserPlus, Compass } from 'lucide-vue-next'; // 👈 [수정] Users 아이콘 추가
 import FriendListModal from '@/modal/FriendListModal.vue'; // 👈 [추가] 모달 불러오기
 
 
@@ -132,7 +132,38 @@ const isIdePage = computed(() => {
 });
 
 /* ✅ [추가] 초대 모달 열기 (나중에 실제 모달과 연결) */
-const friendModalMode = ref('manage'); 
+const friendModalMode = ref('manage');
+
+// 1. 현재 프로젝트의 주인(방장)인지 확인하기 위한 변수
+const projectOwnerId = ref(null);
+
+// 2. "내가 방장인가?" 계산 (FriendListModal로 넘겨줄 값)
+const isOwner = computed(() => {
+  // 로그인 안 했거나, 방장 정보가 아직 없으면 false
+  if (!auth.me || !projectOwnerId.value) return false;
+  // 내 ID와 방장 ID가 같으면 true
+  return auth.me.id === projectOwnerId.value;
+});
+
+// 3. 방장 권한 확인 함수
+const checkProjectOwner = async () => {
+  if (!currentWebId.value) return; // 프로젝트 화면이 아니면 패스
+
+  try {
+    // 내 프로젝트 목록을 가져와서 현재 프로젝트에서의 내 역할(Role)을 확인합니다.
+    const res = await api.get('/projects/list');
+    const thisProject = res.data.find(p => p.id === Number(currentWebId.value));
+
+    if (thisProject && thisProject.role === 'OWNER') {
+       projectOwnerId.value = auth.me.id; // 내가 방장임!
+    } else {
+       projectOwnerId.value = -1; // 방장 아님
+    }
+  } catch (e) {
+    console.error("권한 확인 실패:", e);
+    projectOwnerId.value = -1;
+  }
+};
 
 // [추가] 현재 프로젝트 ID (URL 파라미터에서 추출)
 const currentWebId = computed(() => route.params.webId);
@@ -145,7 +176,8 @@ const openFriendManage = () => {
 };
 
 // ✅ [수정] 'Invite' 버튼 클릭 시 실행할 함수
-const openInviteModal = () => {
+const openInviteModal = async () => {
+  await checkProjectOwner();
   friendModalMode.value = 'invite'; // 초대 모드로 설정
   isFriendListOpen.value = true;    // 모달 열기
 };
@@ -153,32 +185,49 @@ const openInviteModal = () => {
 // NavBar.vue의 createNewProject 함수 교체
 const createNewProject = async () => {
   try {
-    // [핵심 수정] 버튼 누른 시점에 내 정보(auth.me)가 없으면 서버에 다시 요청해서 채워넣음
+    // 1. [안전장치] 내 정보(auth.me)가 비어있다면 서버에서 다시 가져옵니다.
     if (!auth.me) {
        try {
          const res = await api.get('/member/me');
-         auth.me = res.data.member;
+         // 서버 응답 구조에 따라 안전하게 할당 (member 안에 있는지, 바로 있는지)
+         auth.me = res.data.member || res.data; 
          auth.isAuthed = true;
        } catch (e) {
-         // 진짜 비로그인 상태라면 여기서 catch로 빠짐
-         console.log("비로그인 상태입니다.");
+         console.warn("사용자 정보를 가져올 수 없습니다. 로그인이 필요합니다.");
+         throw { response: { status: 401 } }; // 강제로 로그인 유도 로직으로 이동
        }
     }
 
-    // 프로젝트 생성 요청
+    // 2. 프로젝트 생성 요청 (DB에 Row 생성)
     const response = await api.post('/projects/create'); 
-    const newWebId = response.data;
+    const newWebId = response.data; // 생성된 Web ID
 
-    // 이제 auth.me가 확실히 있으므로 닉네임이 들어갑니다.
-    // 만약 여전히 없다면 진짜 비로그인이므로 guest가 맞습니다.
-    const nickname = auth.me?.nickname || 'guest';
+    // 3. 🔥 [핵심 수정] 닉네임 추출 로직 강화 (guest 방지)
+    // auth.me 데이터 구조가 가끔 { member: { nickname: ... } } 형태로 래핑될 때가 있어 두 가지 다 확인해야 합니다.
+    let targetNickname = 'guest';
 
-    router.push(`/ide/${nickname}/${newWebId}`);
+    if (auth.me) {
+        if (auth.me.nickname) {
+            targetNickname = auth.me.nickname;
+        } else if (auth.me.member && auth.me.member.nickname) {
+            targetNickname = auth.me.member.nickname;
+        }
+    }
+
+    // 만약 로그인 상태인데도 닉네임을 못 찾았다면, 로그를 찍어 확인해봐야 함
+    if (auth.isAuthed && targetNickname === 'guest') {
+        console.error("🚨 닉네임 추출 실패! auth.me 데이터 확인:", auth.me);
+    }
+
+    // 4. 해당 유저의 IDE로 이동
+    router.push(`/ide/${targetNickname}/${newWebId}`);
 
   } catch (error) {
     console.error("새 프로젝트 생성 실패:", error);
+    // 401(인증안됨), 403(권한없음) 에러일 경우 로그인 페이지로
     if (error.response?.status === 401 || error.response?.status === 403) {
       openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
+        closeMenu(); // 메뉴 닫고
         router.push('/login');
       });
     } else {
@@ -266,6 +315,13 @@ const closeMenu = () => (isMenuOpen.value = false);
                </span>
                <span class="drawer-text">친구 목록</span><span class="drawer-chevron">›</span>
             </button>
+            <router-link to="/explore" class="drawer-item" @click="closeMenu" active-class="" exact-active-class="">
+               <span style="display:flex; align-items:center; justify-content:center; margin-right:6px;">
+                 <Compass :size="18" color="#00d4ff"/> 
+               </span>
+               <span class="drawer-text"  style=" text-align: center;">프로젝트 탐색</span>
+               <span class="drawer-chevron">›</span>
+            </router-link>
          </li>
          <li class="drawer-divider"></li>
          <li class="drawer-footer">
@@ -307,6 +363,7 @@ const closeMenu = () => (isMenuOpen.value = false);
     :currentUser="auth.me"
     :mode="friendModalMode"
     :webId="currentWebId"
+    :isOwner="isOwner"
     @close="isFriendListOpen = false"
   />
 </template>

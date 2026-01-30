@@ -1,12 +1,11 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-// ✅ [핵심] Send 아이콘(종이비행기)이 추가되었습니다.
 import { UserPlus, X, MessageCircle, UserMinus, Send } from 'lucide-vue-next'; 
 import SearchUserModal from '@/modal/SearchUserModal.vue'; 
 import api from '@/api/axios';
 
 // ✅ [핵심] 부모(NavBar)에서 보내준 mode('invite' or 'manage')와 webId를 받습니다.
-const props = defineProps(['isOpen', 'currentUser', 'mode', 'webId']); 
+const props = defineProps(['isOpen', 'currentUser', 'mode', 'webId', 'isOwner']); 
 defineEmits(['close']);
 
 const isSearchOpen = ref(false); 
@@ -56,6 +55,24 @@ const loadFriends = async () => {
     }
   } catch (e) {
     console.error("친구 목록 로드 실패", e);
+  }
+};
+
+// 멤버 추방 함수
+const kickMember = async (friendId, nickname) => {
+  if (!confirm(`정말로 '${nickname}' 님을 프로젝트에서 추방하시겠습니까?`)) return;
+
+  try {
+    // 백엔드 추방 API 호출
+    await api.delete(`/projects/${props.webId}/members/${friendId}`);
+    
+    // 성공 시: '참여중' 목록에서 제거 (즉시 '초대' 버튼으로 바뀜)
+    projectMemberIds.value.delete(friendId);
+    
+    alert(`'${nickname}' 님을 추방했습니다.`);
+  } catch (e) {
+    console.error(e);
+    alert(e.response?.data || "추방 실패");
   }
 };
 
@@ -174,13 +191,24 @@ watch(
                 
                 <template v-if="mode === 'invite'">
                   
-                  <div v-if="isMember(u.id)" class="member-badge">
-                    참여중
-                  </div>
+                  <template v-if="isMember(u.id)">
+                    <button 
+                      v-if="isOwner" 
+                      class="icon-btn kick" 
+                      @click.stop="kickMember(u.id, u.nickname)" 
+                      title="멤버 추방"
+                    >
+                        <UserMinus :size="18" />
+                    </button>
+                    
+                    <div v-else class="member-badge">
+                      참여중
+                    </div>
+                </template>
 
-                  <div v-else-if="isPending(u.id)" class="pending-badge">
-                    초대됨
-                  </div>
+                <div v-else-if="isPending(u.id)" class="pending-badge">
+                  초대됨
+                </div>
 
                   <button 
                     v-else
@@ -360,7 +388,7 @@ watch(
   white-space: nowrap; cursor: default;
 }
 
-/* ✅ [추가] 초대됨 (노랑/주황) */
+/* 초대됨 (노랑/주황) */
 .pending-badge {
   font-size: 0.75rem; font-weight: 700;
   color: #fbbf24; /* Amber-400 */
@@ -368,5 +396,16 @@ watch(
   padding: 4px 8px; border-radius: 6px;
   border: 1px solid rgba(251, 191, 36, 0.2);
   white-space: nowrap; cursor: default;
+}
+/*추방 버튼 스타일 (빨간색) */
+.icon-btn.kick {
+  color: #ef4444; /* Red */
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.icon-btn.kick:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  transform: translateY(-2px);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
 }
 </style>

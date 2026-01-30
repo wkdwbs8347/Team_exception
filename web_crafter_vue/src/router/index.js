@@ -6,7 +6,7 @@ import IDEView from '../views/IDEView.vue' // <--- 추가
 import LDEView from '../views/LDEView.vue' // <--- 추가
 import MyPageView from '../views/MyPageView.vue'
 import ExploreView from '../views/ExploreView.vue' // <--- 추가
-
+import GuideView from '../views/GuideView.vue' // <--- 추가
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -50,6 +50,21 @@ const router = createRouter({
       path: '/explore', // 👈 Explore 페이지 라우트 추가 [cite: 2026-01-21
       name: 'explore',
       component: ExploreView
+    },
+    {
+      path: '/guide', // 👈 Guide 페이지 라우트 추가 [cite: 2026-01-21
+      name: 'guide',
+      component: GuideView
+    },
+    {
+      path: '/guide/advanced',
+      name: 'GuideAdvanced',
+      component: () => import('@/views/GuideAdvancedView.vue')
+    },
+    {
+      path: '/architecture',
+      name: 'architecture',
+      component: () => import('@/views/Architecture.vue')
     },
   ],
   scrollBehavior(to, from, savedPosition) {

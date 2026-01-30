@@ -27,16 +27,23 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-            .csrf(csrf -> csrf.disable()) // ✅ POST 요청 허용을 위해 필수
+            // 🚀 CSRF 비활성화를 확실히 하고, 특히 웹소켓 경로는 무조건 통과하도록 합니다.
+            .csrf(csrf -> csrf.disable()) 
+            
             .authorizeHttpRequests(auth -> auth
+                // 🚀 웹소켓 통로를 최상단에서 허용 (이미 잘 되어 있지만 순서 보장)
+                .requestMatchers("/wsproject/**").permitAll() 
                 .requestMatchers("/api/member/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/projects/*/data").permitAll()
                 .requestMatchers("/api/login", "/api/register").permitAll()
-                .requestMatchers("/api/projects/**").permitAll() // 🔥 변경
-                .requestMatchers("/api/auth/**").permitAll() // 사용자 preview 경로 접근 허용
+                .requestMatchers("/api/projects/**").permitAll()
+                .requestMatchers("/api/auth/**").permitAll()
                 .anyRequest().permitAll()
             )
-            // ✅ 세션이 없으면 새로 생성하도록 설정
+            // 🚀 IDE 내부 iframe 프리뷰 및 SockJS 통신을 위해 X-Frame-Options 설정
+            .headers(headers -> headers
+                .frameOptions(frame -> frame.disable()) // 또는 .sameOrigin()
+            )
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
             );

@@ -96,8 +96,16 @@ const handleProjectAction = async (action, noti) => {
     }
 
   } catch (e) {
-    console.error(e);
-    alert(e.response?.data?.message || "처리 중 오류가 발생했습니다.");
+    console.error("에러 상세:", e);
+    
+    // 1. 서버가 보낸 메시지(한글)가 있으면 그걸 띄워줌
+    if (e.response && e.response.data) {
+        // 서버가 그냥 문자열로 보냈을 경우 (대부분 이 경우)
+        alert(e.response.data); 
+    } else {
+        // 2. 메시지가 없으면 기본 문구
+        alert("처리 중 오류가 발생했습니다.");
+    }
   }
 };
 

@@ -1,11 +1,14 @@
 package com.example.web_crafter_java.controller;
 
 import com.example.web_crafter_java.config.UserAdapter;
+import com.example.web_crafter_java.dto.UserWebPage;
 import com.example.web_crafter_java.service.ProjectService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpSession;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -71,13 +74,14 @@ public ResponseEntity<?> create(HttpSession session) {
                 return ResponseEntity.status(500).body("데이터 조회 실패");
             }
         }
+    // ProjectController.java
 
-    // 🔥 [신규] 프로젝트 데이터 저장 API
+    // 🔥 [수정] 프로젝트 데이터 저장 API (previewHtml 추가 수신)
     @PutMapping("/{webId}/data")
     public ResponseEntity<?> updateProjectData(
             @PathVariable Integer webId,
             @RequestParam String oldPageName,
-            @RequestBody com.example.web_crafter_java.dto.UserWebPage pageData,
+            @RequestBody Map<String, Object> payload, // 👈 DTO 대신 Map으로 받아서 유연하게 처리
             HttpSession session) {
         
         Integer memberId = (Integer) session.getAttribute("loginedMemberId");
@@ -86,8 +90,21 @@ public ResponseEntity<?> create(HttpSession session) {
         }
 
         try {
+            // 1. Payload에서 데이터 추출
+            // Jackson ObjectMapper 등을 써서 UserWebPage로 변환하는 게 정석이지만, 
+            // 여기선 간단히 Map에서 꺼내서 세팅한다고 가정합니다.
+            // (실제로는 ObjectMapper로 변환하거나 프론트에서 구조를 맞춰 보내야 함)
+            
+            // 편의상 DTO 변환 로직 (간략화)
+            ObjectMapper mapper = new ObjectMapper();
+            UserWebPage pageData = mapper.convertValue(payload.get("pageData"), UserWebPage.class);
+            String previewHtml = (String) payload.get("previewHtml"); // 🔥 HTML 받기
+
             pageData.setWebId(webId);
-            projectService.updateProjectData(webId, oldPageName ,pageData);
+            
+            // 2. 서비스 호출 (인자 4개)
+            projectService.updateProjectData(webId, oldPageName, pageData, previewHtml);
+            
             return ResponseEntity.ok().build();
         } catch (Exception e) {
             e.printStackTrace();
@@ -241,4 +258,51 @@ public ResponseEntity<?> createNewPage(
                 return ResponseEntity.status(500).build();
             }
         }
+
+    // 🔥 [추방 API] 방장이 멤버 내보내기
+    @DeleteMapping("/{webId}/members/{memberId}")
+    public ResponseEntity<?> kickMember(
+            @PathVariable Integer webId,
+            @PathVariable Integer memberId,
+            HttpSession session) {
+        
+        Integer myId = (Integer) session.getAttribute("loginedMemberId");
+        if (myId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+        try {
+            projectService.kickMember(myId, webId, memberId);
+            return ResponseEntity.ok("멤버를 추방했습니다.");
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+    // ProjectController.java 내부에 추가
+
+    // 🔥 [신규] 프로젝트 리메이크 (복제) API
+    @PostMapping("/{webId}/remake")
+    public ResponseEntity<?> remakeProject(
+            @PathVariable Integer webId, // 원본 프로젝트 ID
+            HttpSession session
+    ) {
+        Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+        if (memberId == null) {
+            return ResponseEntity.status(401).body("로그인이 필요합니다.");
+        }
+
+        try {
+            // 서비스 호출 -> 복제된 새 프로젝트 ID 반환
+            Integer newWebId = projectService.remakeProject(webId, memberId);
+            return ResponseEntity.ok(newWebId);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.status(500).body("프로젝트 복제 실패: " + e.getMessage());
+        }
+    }
+    // ProjectController.java
+
+    @PatchMapping("/hit/{webId}")
+    public ResponseEntity<Void> updateHit(@PathVariable("webId") Integer webId) { // 👈 ("webId") 추가!!
+        projectService.updateHit(webId);
+        return ResponseEntity.ok().build();
+    }
 }

@@ -1,4 +1,7 @@
 <script setup>
+// 1. 필요한 아이콘들을 import 합니다.
+import { Blocks, Layers, Facebook, Linkedin, Youtube } from 'lucide-vue-next';
+
 const currentYear = new Date().getFullYear()
 
 const footerLinks = {
@@ -22,11 +25,16 @@ const footerLinks = {
   ]
 }
 
+// 2. socialLinks 배열을 컴포넌트 객체로 변경합니다.
 const socialLinks = [
-  { icon: '𝕏', label: 'Twitter', href: '#' },
-  { icon: 'f', label: 'Facebook', href: '#' },
-  { icon: 'in', label: 'LinkedIn', href: '#' },
-  { icon: '▶', label: 'YouTube', href: '#' }
+  { 
+    icon: Layers, // 트위터 대신 아키텍처 아이콘 사용
+    label: 'System Architecture', 
+    href: '/architecture' // 아키텍처 페이지 라우터 주소
+  },
+  { icon: Facebook, label: 'Facebook', href: '#' },
+  { icon: Linkedin, label: 'LinkedIn', href: '#' },
+  { icon: Youtube, label: 'YouTube', href: '#' }
 ]
 </script>
 
@@ -36,15 +44,21 @@ const socialLinks = [
       <div class="footer-content">
         <div class="footer-section">
           <h3 class="footer-brand">
-            <span class="brand-icon">✨</span>
-            StyleHub
+            <span class="brand-icon"><Blocks :size="28"/></span>
+            Web Crafter
           </h3>
           <p class="brand-description">
-            Transform your digital presence with cutting-edge design and technology.
+            블록코딩 기술을 활용하여 나만의 웹 사이트를 손쉽게 제작하고 관리하세요.
           </p>
           <div class="social-links">
-            <a v-for="social in socialLinks" :key="social.label" :href="social.href" class="social-link" :title="social.label">
-              {{ social.icon }}
+            <a 
+              v-for="social in socialLinks" 
+              :key="social.label" 
+              :href="social.href" 
+              class="social-link" 
+              :title="social.label"
+            >
+              <component :is="social.icon" :size="20" />
             </a>
           </div>
         </div>
@@ -79,7 +93,7 @@ const socialLinks = [
 
       <div class="footer-bottom">
         <div class="footer-bottom-left">
-          <p>&copy; {{ currentYear }} StyleHub. All rights reserved.</p>
+          <p>&copy; {{ currentYear }} Web Crafter. All rights reserved.</p>
         </div>
         <div class="footer-bottom-right">
           <a href="#" class="footer-link">Privacy Policy</a>
@@ -94,6 +108,7 @@ const socialLinks = [
 </template>
 
 <style scoped>
+/* 기존 스타일 유지 */
 .footer {
   position: relative;
   background: linear-gradient(180deg, rgba(15, 15, 30, 0.5) 0%, #0f0f1e 100%);
@@ -134,6 +149,9 @@ const socialLinks = [
 
 .brand-icon {
   font-size: 2rem;
+  /* SVG 정렬 보정 */
+  display: flex; 
+  align-items: center;
 }
 
 .brand-description {
@@ -167,6 +185,7 @@ const socialLinks = [
   background: rgba(0, 212, 255, 0.2);
   border-color: rgba(0, 212, 255, 0.4);
   transform: translateY(-3px);
+  color: #fff; /* 호버 시 아이콘 색상을 흰색으로 */
 }
 
 .section-title {
