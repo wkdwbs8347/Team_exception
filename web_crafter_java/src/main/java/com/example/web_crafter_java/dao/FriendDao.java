@@ -42,30 +42,24 @@ public interface FriendDao {
     
     // 🔥 [수정 1] 내 친구 목록 조회 (쿼리 강화)
     // 내가 신청했든(requester), 내가 받았든(receiver) 상관없이 상대방 정보를 정확히 가져옵니다.
-    @Select("""
-        SELECT 
-            u.id, 
-            u.nickname, 
-            u.email, 
-            u.bio, 
-            -- ✅ 1. DB의 is_login을 자바 변수명 isLogin으로 매핑 (AS 사용)
-            u.is_login AS isLogin, 
-            -- ✅ 2. 실시간 상태에 따라 'online' 또는 'offline' 문자열 반환
-            CASE 
-                WHEN u.is_login = 1 THEN 'online' 
-                ELSE 'offline' 
-            END AS connectStatus 
-        FROM friend f
-        INNER JOIN `user` u ON u.id = (
-            CASE 
-                WHEN f.requesterId = #{myId} THEN f.receiverId
-                WHEN f.receiverId = #{myId} THEN f.requesterId
-            END
-        )
-        WHERE (f.requesterId = #{myId} OR f.receiverId = #{myId})
-          AND f.status = 'ACCEPTED'
-    """)
-    List<Member> getMyFriends(@Param("myId") Integer myId);
+   @Select("""
+    SELECT 
+        u.id,
+        u.nickname,
+        u.email,
+        u.bio
+    FROM friend f
+    INNER JOIN `user` u ON u.id = (
+        CASE 
+            WHEN f.requesterId = #{myId} THEN f.receiverId
+            WHEN f.receiverId = #{myId} THEN f.requesterId
+        END
+    )
+    WHERE (f.requesterId = #{myId} OR f.receiverId = #{myId})
+      AND f.status = 'ACCEPTED'
+""")
+List<Member> getMyFriends(@Param("myId") Integer myId);
+
 
 // 6. 내 알림 목록 조회 (수정됨: member -> `user`)
     @Select("""
@@ -112,5 +106,17 @@ public interface FriendDao {
            OR (requesterId = #{targetId} AND receiverId = #{myId})
     """)
     void deleteFriendship(@Param("myId") Integer myId, @Param("targetId") Integer targetId);
+
+    @Select("""
+    SELECT 
+      CASE 
+        WHEN requesterId = #{myId} THEN receiverId
+        ELSE requesterId
+      END AS friendId
+    FROM friend
+    WHERE (requesterId = #{myId} OR receiverId = #{myId})
+      AND status = 'ACCEPTED'
+""")
+List<Integer> getFriendIds(@Param("myId") Integer myId);
 
 }

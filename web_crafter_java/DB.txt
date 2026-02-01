@@ -127,6 +127,19 @@ CREATE TABLE wc_user (
   UNIQUE KEY uq_email (email),
   UNIQUE KEY uq_nickname (nickname)
 );
+
+/* [채팅 메시지 내역 테이블] 
+   - 로직: 실시간 대화 내용을 저장하여 나중에 접속해도 대화 로그를 볼 수 있게 함
+*/
+CREATE TABLE chat_message (
+    id INT UNSIGNED PRIMARY KEY AUTO_INCREMENT COMMENT 'PK',
+    room_id VARCHAR(100) NOT NULL COMMENT '채팅방 ID (예: user1_user2 조합)',
+    sender_id INT UNSIGNED NOT NULL COMMENT '메시지 보낸 사람 (user.id)',
+    content TEXT NOT NULL COMMENT '메시지 내용',
+    regDate DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '보낸 시간',
+    CONSTRAINT fk_chat_sender FOREIGN KEY (sender_id) REFERENCES `user`(id) ON DELETE CASCADE
+);
+
 SELECT * FROM `user`;
 SELECT * FROM wc_user;
 SELECT * FROM userWeb_pages;

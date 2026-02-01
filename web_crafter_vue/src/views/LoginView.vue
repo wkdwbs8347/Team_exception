@@ -22,6 +22,7 @@
 import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue';
+import FindPasswordModal from '@/modal/FindPasswordModal.vue';
 import api from '@/api/axios'; // baseURL: http://localhost:8080/api (※ 다른 곳에서 쓸 수 있으니 유지)
 import {
   TriangleAlert,
@@ -155,6 +156,47 @@ const closeModal = async () => {
   modal.value.focusField = null;
 };
 
+// 비밀번호 찾기 모달
+const isFindPwOpen = ref(false);
+const isFindPwLoading = ref(false);
+
+const openFindPwModal = () => {
+  clearAllTooltips();
+  isFindPwOpen.value = true;
+};
+
+const closeFindPwModal = () => {
+  isFindPwOpen.value = false;
+};
+
+// ✅ 임시 비밀번호 발송 요청
+const submitFindPassword = async ({ name, email }) => {
+  if (isFindPwLoading.value) return;
+
+  isFindPwLoading.value = true;
+
+  try {
+    /**
+     * ✅ 백엔드 엔드포인트는 너가 정하면 됨
+     * 예시로 /member/password/temp 발송 API 가정
+     *
+     * 요청 바디:
+     * { name: "...", email: "..." }
+     */
+    await api.post('/member/password/find', { name, email });
+
+    closeFindPwModal();
+    openModal('임시 비밀번호를 이메일로 전송했습니다.', 'success');
+  } catch (e) {
+    const msg =
+      e?.response?.data?.message || '임시 비밀번호 전송에 실패했습니다.';
+    // 모달은 유지하고, 알림은 GlobalModal로
+    openModal(msg, 'error');
+  } finally {
+    isFindPwLoading.value = false;
+  }
+};
+
 /* ======================
    유틸: 이메일 형식 체크
 ====================== */
@@ -258,8 +300,7 @@ const togglePasswordVisibility = () => {
 };
 
 /* 이메일 찾기 / 비밀번호 찾기 라우팅 */
-const goFindEmail = () => router.push('/find-email');
-const goFindPw = () => router.push('/find-password');
+const goFindPw = () => openFindPwModal();
 
 const handleSignUp = () => router.push('/register');
 </script>
@@ -352,14 +393,6 @@ const handleSignUp = () => router.push('/register');
 
             <!-- 이메일 찾기 및 비밀번호 찾기 -->
             <div class="find-links">
-              <button
-                type="button"
-                class="forgot-password"
-                @click="goFindEmail"
-              >
-                이메일 찾기
-              </button>
-              <span class="divider-dot">|</span>
               <button type="button" class="forgot-password" @click="goFindPw">
                 비밀번호 찾기
               </button>
@@ -384,7 +417,33 @@ const handleSignUp = () => router.push('/register');
         <!-- 소셜 로그인 -->
         <div class="social-login">
           <button type="button" class="social-btn google">
-            <span> <svg aria-label="Google logo" width="18" height="18" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><g><path fill="#34a853" d="M153 292c30 82 118 95 171 60h62v48A192 192 0 0190 341"></path><path fill="#4285f4" d="m386 400a140 175 0 0053-179H260v74h102q-7 37-38 57"></path><path fill="#fbbc02" d="m90 341a208 200 0 010-171l63 49q-12 37 0 73"></path><path fill="#ea4335" d="m153 219c22-69 116-109 179-50l55-54c-78-75-230-72-297 55"></path></g></svg></span>
+            <span>
+              <svg
+                aria-label="Google logo"
+                width="18"
+                height="18"
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 512 512"
+              >
+                <g>
+                  <path
+                    fill="#34a853"
+                    d="M153 292c30 82 118 95 171 60h62v48A192 192 0 0190 341"
+                  ></path>
+                  <path
+                    fill="#4285f4"
+                    d="m386 400a140 175 0 0053-179H260v74h102q-7 37-38 57"
+                  ></path>
+                  <path
+                    fill="#fbbc02"
+                    d="m90 341a208 200 0 010-171l63 49q-12 37 0 73"
+                  ></path>
+                  <path
+                    fill="#ea4335"
+                    d="m153 219c22-69 116-109 179-50l55-54c-78-75-230-72-297 55"
+                  ></path>
+                </g></svg
+            ></span>
             Google
           </button>
           <button type="button" class="social-btn github">
@@ -442,6 +501,13 @@ const handleSignUp = () => router.push('/register');
     :message="modal.message"
     :type="modal.type"
     @confirm="closeModal"
+  />
+
+  <FindPasswordModal
+    :open="isFindPwOpen"
+    :loading="isFindPwLoading"
+    @close="closeFindPwModal"
+    @submit="submitFindPassword"
   />
 </template>
 

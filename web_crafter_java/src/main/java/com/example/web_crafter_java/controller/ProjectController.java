@@ -151,9 +151,9 @@ public ResponseEntity<?> createNewPage(
     if (memberId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
 
     try {
-        // 실제 저장 로직 수행 (Service에 구현되어 있어야 함)
         projectService.insertNewPage(pageData); 
-        return ResponseEntity.ok("페이지 생성 성공");
+        // insert가 성공하면 pageData 안에 DB에서 따온 새 ID가 들어있어야 합니다.
+        return ResponseEntity.ok(pageData); 
     } catch (Exception e) {
         return ResponseEntity.status(500).body("페이지 생성 실패: " + e.getMessage());
     }
@@ -305,4 +305,25 @@ public ResponseEntity<?> createNewPage(
         projectService.updateHit(webId);
         return ResponseEntity.ok().build();
     }
+
+    // 🔥 [추가] 개별 페이지 삭제 API
+@DeleteMapping("/{webId}/pages")
+public ResponseEntity<?> deletePage(
+        @PathVariable Integer webId,
+        @RequestParam String pageName,
+        HttpSession session) {
+    
+    Integer memberId = (Integer) session.getAttribute("loginedMemberId");
+    if (memberId == null) return ResponseEntity.status(401).body("로그인이 필요합니다.");
+
+    try {
+        // 서비스에 삭제 로직 요청
+        projectService.deletePage(webId, pageName); 
+        return ResponseEntity.ok("페이지가 삭제되었습니다.");
+    } catch (Exception e) {
+        e.printStackTrace();
+        return ResponseEntity.status(500).body("페이지 삭제 실패: " + e.getMessage());
+    }
+}
+    
 }

@@ -4,6 +4,7 @@ import lombok.Data;
 
 @Data
 public class AuthRegisterReq {
+    private Integer webId; 
     private String loginId;
     private String email;
     private String nickname;

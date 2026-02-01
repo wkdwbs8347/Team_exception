@@ -28,9 +28,11 @@ public class AuthController {
     public ResponseEntity<?> login(@RequestBody AuthLoginReq req, HttpServletRequest request) {
         var user = authService.login(req);
 
-        // ✅ cookie(session) 기반
         HttpSession session = request.getSession(true);
         session.setAttribute("WC_USER_ID", user.getId());
+
+        // ✅ (선택) 프로젝트 스코프도 세션에 저장해두면 이후 인증/조회에 도움됨
+        session.setAttribute("WC_WEB_ID", req.getWebId());
 
         return ResponseEntity.ok(Map.of(
                 "ok", true,
@@ -39,8 +41,12 @@ public class AuthController {
     }
 
     @GetMapping("/duplicate")
-    public ResponseEntity<?> duplicate(@RequestParam String field, @RequestParam String value) {
-        boolean available = authService.isAvailable(field, value);
+    public ResponseEntity<?> duplicate(
+            @RequestParam Integer webId,      // ✅ 추가
+            @RequestParam String field,
+            @RequestParam String value
+    ) {
+        boolean available = authService.isAvailable(webId, field, value);
         return ResponseEntity.ok(Map.of(
                 "ok", true,
                 "available", available,

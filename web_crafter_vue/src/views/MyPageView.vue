@@ -1,187 +1,282 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
-import { useAuthStore } from '@/stores/auth'; // Pinia/Vuex 스토어
-import api from '@/api/axios'; // Axios 인터셉터 설정 파일
-import EditProfileModal from '@/modal/EditProfileModal.vue'; // 프로필 수정 모달
+import { useAuthStore } from '@/stores/auth'; // Pinia 스토어
+import api from '@/api/axios';
+import EditProfileModal from '@/modal/EditProfileModal.vue';
+import GlobalModal from '@/modal/GlobalModal.vue';
+import ConfirmModal from '@/modal/ConfirmModal.vue';
 
 const router = useRouter();
 const authStore = useAuthStore();
 
-// 1. 데이터 상태 관리 (DB 컬럼 구조 반영)
-const myProjects = ref([]);    // 내가 방장인 프로젝트
-const sharedProjects = ref([]); // 초대받은 협업 프로젝트
-const currentTab = ref('ALL'); // ✅ 추가: 현재 선택된 탭 (ALL, MY, SHARED)
-const myProjectCount = ref(0);    // 숫자 표시용 변수 추가
+// 1. 데이터 상태 관리
+const isLoading = ref(true);
+const myProjects = ref([]);
+const sharedProjects = ref([]);
+const currentTab = ref('ALL');
+const myProjectCount = ref(0);
 const sharedProjectCount = ref(0);
-const unreadNotiCount = ref(0); // 읽지 않은 알림 수
-const isEditModalOpen = ref(false); // 모달 제어를 위한 상태 변수
-const notifications = ref([]); // 알림 목록 저장 변수
+const isEditModalOpen = ref(false);
+
+// ✅ [핵심 수정 1] 로컬 변수(ref) 삭제하고 Store를 바라보게 변경(computed)
+// 이제 NavBar가 Store를 업데이트하면 여기도 자동으로 바뀝니다.
+const notifications = computed(() => authStore.notifications || []);
+const unreadNotiCount = computed(() =>
+  authStore.notifications ? authStore.notifications.length : 0
+);
+
+/* ======================
+   ✅ 공용 알림 모달 (alert 대체)
+====================== */
+const modal = ref({
+  open: false,
+  message: '',
+  type: 'info', // warning | info | success | error
+  onConfirm: null,
+});
+
+const openModal = (message, type = 'info', onConfirm = null) => {
+  modal.value.open = true;
+  modal.value.message = message;
+  modal.value.type = type;
+  modal.value.onConfirm = onConfirm;
+};
+
+const closeModal = async () => {
+  modal.value.open = false;
+  await nextTick();
+
+  if (modal.value.onConfirm) {
+    const fn = modal.value.onConfirm;
+    modal.value.onConfirm = null;
+    fn?.();
+  }
+};
+
+/* ======================
+   ✅ 컨펌 모달 (confirm 대체)
+====================== */
+const confirmModal = ref({
+  open: false,
+  message: '',
+  type: 'warning',
+  confirmText: '삭제',
+  cancelText: '취소',
+  onConfirm: null,
+  onCancel: null,
+});
+
+const openConfirm = ({
+  message,
+  type = 'warning',
+  confirmText = '삭제',
+  cancelText = '취소',
+  onConfirm = null,
+  onCancel = null,
+}) => {
+  confirmModal.value.open = true;
+  confirmModal.value.message = message;
+  confirmModal.value.type = type;
+  confirmModal.value.confirmText = confirmText;
+  confirmModal.value.cancelText = cancelText;
+  confirmModal.value.onConfirm = onConfirm;
+  confirmModal.value.onCancel = onCancel;
+};
+
+const closeConfirm = async () => {
+  confirmModal.value.open = false;
+  await nextTick();
+  confirmModal.value.onCancel?.();
+  confirmModal.value.onCancel = null;
+  confirmModal.value.onConfirm = null;
+};
+
+const handleConfirm = async () => {
+  confirmModal.value.open = false;
+  await nextTick();
+  const fn = confirmModal.value.onConfirm;
+  confirmModal.value.onConfirm = null;
+  confirmModal.value.onCancel = null;
+  fn?.();
+};
+
+// Enter/Escape 키 처리 (알림/컨펌 모달)
+const handleKeydown = (e) => {
+  if (modal.value.open) {
+    if (e.key === 'Enter' || e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+    }
+    return;
+  }
+  if (confirmModal.value.open) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeConfirm();
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleConfirm();
+    }
+  }
+};
+
+onMounted(() => window.addEventListener('keydown', handleKeydown));
+onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 
 const changeTab = async (tabName) => {
   currentTab.value = tabName;
 
-  // 알림 탭을 눌렀을 때만 서버 요청
+  // 알림 탭 누를 때 확실하게 서버랑 동기화 (Store 업데이트)
   if (tabName === 'NOTI') {
     try {
       const res = await api.get('/friends/notifications');
-      notifications.value = res.data;
-      
-      // (선택) 확인했으니 읽지 않은 알림 수 0으로 초기화
-      // unreadNotiCount.value = 0; 
+      authStore.setNotifications(res.data); // ✅ Store 갱신
     } catch (e) {
-      console.error("알림 목록 로드 실패:", e);
+      console.error('알림 로드 실패:', e);
+      openModal('알림을 불러오지 못했습니다.', 'error');
     }
   }
 };
 
 // [수정] 친구 요청 수락/거절 처리
 const handleFriendAction = async (action, noti) => {
-  // 1. 데이터 확인 로그 (브라우저 콘솔(F12)에 찍힙니다)
   console.log(`[프론트] 친구 ${action} 요청 시작:`, noti);
 
-  // 2. 안전장치: 보낸 사람 ID가 없으면 멈춤!
   if (!noti.senderId) {
-    alert("오류: 보낸 사람 정보(senderId)가 없습니다. 알림을 새로고침 해주세요.");
+    openModal('오류: 보낸 사람 정보가 없습니다.', 'error');
     return;
   }
 
   try {
-    // 3. 서버로 전송 (이때 senderId가 꼭 있어야 함!)
-    await api.post(`/friends/${action}`, { 
-      senderId: noti.senderId, 
-      notiId: noti.id 
+    await api.post(`/friends/${action}`, {
+      senderId: noti.senderId,
+      notiId: noti.id,
     });
 
-    // 4. 성공 시 목록에서 즉시 제거
-    notifications.value = notifications.value.filter(n => n.id !== noti.id);
-    unreadNotiCount.value = Math.max(0, unreadNotiCount.value - 1);
-    
-    alert(action === 'accept' ? "친구 요청을 수락했습니다! 🎉" : "요청을 거절했습니다.");
-    
-    // (선택) 수락했으니 내 친구 목록 숫자 업데이트
-    if (action === 'accept') {
-       // 친구 목록 갱신 트리거가 필요할 수 있음
-    }
+    // ✅ [핵심 수정 2] 처리된 알림은 Store에서 제거 -> 화면 자동 반영
+    const newList = authStore.notifications.filter((n) => n.id !== noti.id);
+    authStore.setNotifications(newList);
 
+    openModal(
+      action === 'accept'
+        ? '친구 요청을 수락했습니다! 🎉'
+        : '요청을 거절했습니다.',
+      action === 'accept' ? 'success' : 'info'
+    );
   } catch (e) {
     console.error(e);
-    alert("처리 중 오류가 발생했습니다.");
+    openModal('처리 중 오류가 발생했습니다.', 'error');
   }
 };
 
 // 프로젝트 초대 수락/거절 처리
 const handleProjectAction = async (action, noti) => {
-  if (!confirm(action === 'accept' ? "프로젝트 초대를 수락하시겠습니까?" : "정말 거절하시겠습니까?")) return;
+  openConfirm({
+    message:
+      action === 'accept'
+        ? '프로젝트 초대를 수락하시겠습니까?'
+        : '정말 거절하시겠습니까?',
+    type: 'warning',
+    confirmText: action === 'accept' ? '수락' : '거절',
+    cancelText: '취소',
+    onConfirm: async () => {
+      try {
+        await api.post(`/projects/${action}`, {
+          notiId: noti.id,
+          webId: noti.relId,
+        });
 
-  try {
-    // 1. 서버 요청 (/projects/accept 또는 /projects/reject)
-    await api.post(`/projects/${action}`, { 
-      notiId: noti.id,
-      webId: noti.relId // 알림 생성 시 저장된 프로젝트 ID
-    });
+        // ✅ [핵심 수정 3] Store에서 제거
+        const newList = authStore.notifications.filter((n) => n.id !== noti.id);
+        authStore.setNotifications(newList);
 
-    // 2. 알림 목록에서 제거
-    notifications.value = notifications.value.filter(n => n.id !== noti.id);
-    unreadNotiCount.value = Math.max(0, unreadNotiCount.value - 1);
-
-    // 3. 수락했다면? -> 내 프로젝트 목록(Collaborating) 갱신이 필요함!
-    if (action === 'accept') {
-      const res = await api.get('/member/me'); // 최신 데이터 다시 로드
-      sharedProjects.value = res.data.sharedProjects || [];
-      sharedProjectCount.value = res.data.member.sharedProjectCount || 0;
-      alert("프로젝트에 참여했습니다! 워크스페이스를 확인해보세요. 🎉");
-    } else {
-      alert("초대를 거절했습니다.");
-    }
-
-  } catch (e) {
-    console.error("에러 상세:", e);
-    
-    // 1. 서버가 보낸 메시지(한글)가 있으면 그걸 띄워줌
-    if (e.response && e.response.data) {
-        // 서버가 그냥 문자열로 보냈을 경우 (대부분 이 경우)
-        alert(e.response.data); 
-    } else {
-        // 2. 메시지가 없으면 기본 문구
-        alert("처리 중 오류가 발생했습니다.");
-    }
-  }
+        // 수락 시 프로젝트 목록 갱신
+        if (action === 'accept') {
+          const res = await api.get('/member/me');
+          sharedProjects.value = res.data.sharedProjects || [];
+          sharedProjectCount.value = res.data.member.sharedProjectCount || 0;
+          openModal(
+            '프로젝트에 참여했습니다! 워크스페이스를 확인해보세요. 🎉',
+            'success'
+          );
+        } else {
+          openModal('초대를 거절했습니다.', 'info');
+        }
+      } catch (e) {
+        console.error('에러 상세:', e);
+        const msg =
+          e.response?.data?.message ||
+          (typeof e.response?.data === 'string' ? e.response.data : null) ||
+          '처리 중 오류가 발생했습니다.';
+        openModal(msg, 'error');
+      }
+    },
+  });
 };
 
-// 2. 초기 데이터 로드 (백엔드 API 연동)
+// 2. 초기 데이터 로드
 onMounted(async () => {
   try {
     const response = await api.get('/member/me');
-    const data = response.data; // { member: {...}, myProjects: [...], sharedProjects: [...] }
+    const data = response.data;
 
-    // 1. 전체 유저 및 통계 정보를 스토어에 저장 (data.member 사용)
     authStore.user = data.member;
-    
-    // 2. ✅ 백엔드 Map 구조에 맞춰 데이터 할당
-    // 이제 숫자는 data.member 안에 들어있습니다.
+
     myProjectCount.value = data.member.myProjectCount || 0;
     sharedProjectCount.value = data.member.sharedProjectCount || 0;
-    unreadNotiCount.value = data.member.unreadNotiCount || 0;
 
-    // 3. ✅ 프로젝트 리스트 할당 (HTML의 v-for 문과 연결됨)
     myProjects.value = data.myProjects || [];
     sharedProjects.value = data.sharedProjects || [];
 
     isLoading.value = false;
-    console.log("통계 및 리스트 로드 완료:", data);
+    console.log('통계 및 리스트 로드 완료');
   } catch (error) {
     if (error.response?.status === 401) {
-      alert("로그인이 필요합니다.");
-      router.push('/login'); // 로그인이 안 되어 있으면 즉시 이동
+      openModal('로그인이 필요합니다.', 'warning', () => {
+        router.push('/login');
+      });
+    } else {
+      openModal('데이터 로드 중 오류가 발생했습니다.', 'error');
     }
   }
-})
+});
 
-// MyPageView.vue 내 수정
 const enterIDE = (webId) => {
-  // authStore에서 현재 로그인한 유저의 닉네임을 가져옵니다.
   const nickname = authStore.user?.nickname || 'guest';
-  
-  // ✅ 닉네임을 경로에 포함시켜 이동
   router.push(`/ide/${nickname}/${webId}`);
 };
 
-// MyPageView.vue <script setup> 내부 수정
-
 const createNewProject = async () => {
   try {
-    // 1. 프로젝트 생성 API 호출
-    // withCredentials: true 설정 덕분에 세션 쿠키가 함께 전송됩니다.
-    const response = await api.post('/projects/create'); 
-    const newWebId = response.data; // 서버에서 발급된 webId
-
-    // 2. 현재 사용자 닉네임 가져오기
+    const response = await api.post('/projects/create');
+    const newWebId = response.data;
     const nickname = authStore.user?.nickname || 'guest';
-
-    // 3. 생성된 고유 경로로 이동 (예: /ide/test/25) [cite: 2026-01-19]
-    // 이동하면 IDE 컴포넌트에서 해당 webId를 기반으로 데이터를 불러오게 됩니다.
     router.push(`/ide/${nickname}/${newWebId}`);
-
   } catch (error) {
-    console.error("새 프로젝트 생성 실패:", error);
-    
-    // 세션 만료 시 로그인 페이지로 유도
+    console.error('새 프로젝트 생성 실패:', error);
     if (error.response?.status === 401 || error.response?.status === 403) {
       openModal('로그인이 필요한 서비스입니다.', 'warning', () => {
-      router.push('/login');
-    });
+        router.push('/login');
+      });
     } else {
-      alert("프로젝트 생성 중 오류가 발생했습니다.");
+      openModal('프로젝트 생성 중 오류가 발생했습니다.', 'error');
     }
   }
 };
 
 const handleLogout = () => {
-  if (confirm('로그아웃 하시겠습니까?')) {
-    authStore.logout();
-    router.push('/login');
-  }
+  openConfirm({
+    message: '로그아웃 하시겠습니까?',
+    type: 'warning',
+    confirmText: '로그아웃',
+    cancelText: '취소',
+    onConfirm: () => {
+      authStore.logout();
+      router.push('/login');
+    },
+  });
 };
 
 const filteredProjects = computed(() => {
@@ -190,119 +285,101 @@ const filteredProjects = computed(() => {
   return [...myProjects.value, ...sharedProjects.value];
 });
 
-// ✅ 개별 프로젝트의 편집 상태를 추적하기 위한 함수
 const startRename = (web) => {
   if (web.role !== 'OWNER') return;
   web.isEditing = true;
   web.tempTitle = web.title;
 };
 
-// MyPageView.vue <script setup> 내 saveNewName 수정
 const saveNewName = async (web) => {
   if (!web.isEditing) return;
-  
-  // 공백 입력 방지
+
   if (!web.tempTitle.trim()) {
     web.isEditing = false;
     return;
   }
 
   try {
-    // ✅ 경로를 /projects로 맞추고, 데이터 구조를 { name: ... }로 전달
     await api.put(`/projects/${web.id}/name`, { name: web.tempTitle });
-    
-    // ✅ 성공 시에만 실제 title을 변경하고 편집 모드 종료
     web.title = web.tempTitle;
     web.isEditing = false;
-    
-    // 로컬 리스트 데이터도 업데이트 (필요 시)
-    const target = myProjects.value.find(p => p.id === web.id);
+
+    const target = myProjects.value.find((p) => p.id === web.id);
     if (target) target.title = web.tempTitle;
-    
   } catch (e) {
-    console.error("수정 실패 상세:", e.response?.data || e.message);
-    alert("이름 수정에 실패했습니다. 서버 로그를 확인해 주세요.");
+    console.error('수정 실패 상세:', e.response?.data || e.message);
+    openModal('이름 수정에 실패했습니다.', 'error');
     web.isEditing = false;
   }
 };
 
-// 날짜 포맷 함수
 const formatDate = (date) => {
   if (!date) return 'Just now';
   return new Date(date).toLocaleDateString();
 };
-  // ✅ 1. 드롭다운 메뉴 상태 관리 변수
+
 const activeMenuId = ref(null);
 
-// ✅ 2. 메뉴 토글 함수: 클릭 시 메뉴를 열거나 닫음
 const toggleMenu = (id) => {
   activeMenuId.value = activeMenuId.value === id ? null : id;
 };
 
-// ✅ 3. 메뉴 외부 클릭 시 자동으로 닫히는 로직 등록
 onMounted(() => {
   window.addEventListener('click', (e) => {
-    // 클릭된 요소가 메뉴 영역(.menu-container)이 아니면 메뉴를 닫음
     if (!e.target.closest('.menu-container')) {
       activeMenuId.value = null;
     }
   });
 });
 
-// ✅ 4. 프로젝트 삭제 실행 함수
 const confirmDelete = async (webId) => {
-  activeMenuId.value = null; // 메뉴를 먼저 닫음
+  activeMenuId.value = null;
 
-  // if (!confirm("정말로 이 프로젝트를 삭제하시겠습니까?")) return;
-
-  try {
-    // 서버에 삭제 요청 (설계하신 /projects/:id 경로 사용)
-    await api.delete(`/projects/${webId}`); 
-    
-    // UI에서 해당 프로젝트 즉시 제거
-    myProjects.value = myProjects.value.filter(p => p.id !== webId);
-    
-    // 상단 통계 숫자 1 감소
-    myProjectCount.value = Math.max(0, myProjectCount.value - 1);
-    
-  } catch (error) {
-    console.error("삭제 실패:", error);
-    const msg = error.response?.data?.message || "삭제 권한이 없거나 오류가 발생했습니다.";
-    alert(msg);
-  }
+  openConfirm({
+    message: '정말 삭제하시겠습니까?',
+    type: 'warning',
+    confirmText: '삭제',
+    cancelText: '취소',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${webId}`);
+        myProjects.value = myProjects.value.filter((p) => p.id !== webId);
+        myProjectCount.value = Math.max(0, myProjectCount.value - 1);
+        openModal('삭제가 완료되었습니다.', 'success');
+      } catch (error) {
+        console.error('삭제 실패:', error);
+        const msg = error.response?.data?.message || '오류가 발생했습니다.';
+        openModal(msg, 'error');
+      }
+    },
+  });
 };
 </script>
 
 <script>
+// ⚠️ 다른 기능 건드리지 않기 위해 여기(alert)는 유지
+// (setup의 openModal을 Options API에서 직접 못 씀)
 import { useAuthStore } from '@/stores/auth';
-
 export default {
-  // 컴포넌트가 생성되기 전에 실행되는 네비게이션 가드
   async beforeRouteEnter(to, from, next) {
     const authStore = useAuthStore();
-
-    // 1. 이미 로그인 된 상태라면 바로 통과
     if (authStore.isAuthed) {
       next();
       return;
     }
-
-    // 2. 로그인 상태가 아니라면 (새로고침 등), 서버에 쿠키 체크(bootstrap) 요청
     try {
-      const isSuccess = await authStore.bootstrap(); // 서버에 "나 로그인 유지 중이야?" 물어봄
-      
+      const isSuccess = await authStore.bootstrap();
       if (isSuccess) {
-        next(); // "어, 너 로그인 맞아" -> 통과
+        next();
       } else {
         throw new Error('인증 실패');
       }
     } catch (e) {
-      // 3. 인증 실패 시 로그인 페이지로 보냄
       alert('로그인이 필요한 서비스입니다.');
       next('/login');
     }
-  }
-}
+  },
+};
 </script>
 
 <template>
@@ -325,84 +402,129 @@ export default {
       <section class="profile-section">
         <div class="avatar">👨‍💻</div>
         <h1 class="username">{{ authStore.user?.nickname || 'Guest' }}</h1>
-        <p class="bio">{{ authStore.user?.bio || 'Welcome to your workspace!' }}</p>
-        
+        <p class="bio">
+          {{ authStore.user?.bio || 'Welcome to your workspace!' }}
+        </p>
+
         <div v-if="authStore.user?.techStacks" class="user-tags">
-          <span v-for="tag in authStore.user.techStacks.split(',')" :key="tag" class="mini-tag">
+          <span
+            v-for="tag in authStore.user.techStacks.split(',')"
+            :key="tag"
+            class="mini-tag"
+          >
             #{{ tag }}
           </span>
         </div>
-        
+
         <div class="action-buttons">
-          <button class="btn primary" @click="createNewProject">+ New Project</button>
-          <button class="btn" @click="isEditModalOpen = true">Edit Profile</button>
+          <button class="btn primary" @click="createNewProject">
+            + New Project
+          </button>
+          <button class="btn" @click="isEditModalOpen = true">
+            Edit Profile
+          </button>
         </div>
       </section>
 
       <section class="stats-section">
-        <div class="stat-card" 
-            :class="{ active: currentTab === 'MY' }" 
-            @click="currentTab = 'MY'" 
-            style="cursor:pointer">
+        <div
+          class="stat-card"
+          :class="{ active: currentTab === 'MY' }"
+          @click="currentTab = 'MY'"
+          style="cursor: pointer"
+        >
           <div class="stat-number">{{ myProjectCount }}</div>
           <div class="stat-label">My Projects</div>
         </div>
 
-        <div class="stat-card" 
-            :class="{ active: currentTab === 'SHARED' }" 
-            @click="currentTab = 'SHARED'" 
-            style="cursor:pointer">
+        <div
+          class="stat-card"
+          :class="{ active: currentTab === 'SHARED' }"
+          @click="currentTab = 'SHARED'"
+          style="cursor: pointer"
+        >
           <div class="stat-number">{{ sharedProjectCount }}</div>
           <div class="stat-label">Collaborating</div>
         </div>
 
-        <div class="stat-card" 
-            :class="{ active: currentTab === 'NOTI' }" 
-            @click="changeTab('NOTI')" 
-            style="cursor:pointer">
+        <div
+          class="stat-card"
+          :class="{ active: currentTab === 'NOTI' }"
+          @click="changeTab('NOTI')"
+          style="cursor: pointer"
+        >
           <div class="stat-number">{{ unreadNotiCount }}</div>
           <div class="stat-label">New Alerts</div>
         </div>
       </section>
 
       <section class="activity-section">
-        <h2 class="activity-title" @click="currentTab = 'ALL'" style="cursor:pointer">
+        <h2
+          class="activity-title"
+          @click="currentTab = 'ALL'"
+          style="cursor: pointer"
+        >
           {{ currentTab === 'NOTI' ? 'Notifications' : 'Your Workspaces' }}
-          <small v-if="currentTab !== 'ALL' && currentTab !== 'NOTI'">(Filtering: {{ currentTab }})</small>
+          <small v-if="currentTab !== 'ALL' && currentTab !== 'NOTI'"
+            >(Filtering: {{ currentTab }})</small
+          >
         </h2>
-        
+
         <div v-if="currentTab === 'NOTI'" class="notification-list">
           <div v-if="notifications.length > 0" class="noti-wrapper">
             <div v-for="noti in notifications" :key="noti.id" class="noti-item">
-              
-            <div v-if="noti.type === 'FRIEND_REQ'" class="noti-content">
-              <span class="icon">💌</span>
-              <div class="text">
-                <span class="sender">{{ noti.senderName }}</span>님이 친구 요청을 보냈습니다.
-              </div>
-              
-              <div class="noti-actions">
-                <button class="btn-xs accept" @click="handleFriendAction('accept', noti)">수락</button>
-                <button class="btn-xs reject" @click="handleFriendAction('reject', noti)">거절</button>
-              </div>
-              
-              <span class="date">{{ formatDate(noti.regDate) }}</span>
-            </div>
-
-              <div v-else-if="noti.type === 'PROJECT_INVITE'" class="noti-content">
-                <span class="icon">📁</span>
+              <div v-if="noti.type === 'FRIEND_REQ'" class="noti-content">
+                <span class="icon">💌</span>
                 <div class="text">
-                  <span class="sender">{{ noti.senderName }}</span>님이 프로젝트에 초대했습니다.
+                  <span class="sender">{{ noti.senderName }}</span
+                  >님이 친구 요청을 보냈습니다.
                 </div>
-                
+
                 <div class="noti-actions">
-                  <button class="btn-xs accept" @click="handleProjectAction('accept', noti)">수락</button>
-                  <button class="btn-xs reject" @click="handleProjectAction('reject', noti)">거절</button>
+                  <button
+                    class="btn-xs accept"
+                    @click="handleFriendAction('accept', noti)"
+                  >
+                    수락
+                  </button>
+                  <button
+                    class="btn-xs reject"
+                    @click="handleFriendAction('reject', noti)"
+                  >
+                    거절
+                  </button>
                 </div>
 
                 <span class="date">{{ formatDate(noti.regDate) }}</span>
               </div>
 
+              <div
+                v-else-if="noti.type === 'PROJECT_INVITE'"
+                class="noti-content"
+              >
+                <span class="icon">📁</span>
+                <div class="text">
+                  <span class="sender">{{ noti.senderName }}</span
+                  >님이 프로젝트에 초대했습니다.
+                </div>
+
+                <div class="noti-actions">
+                  <button
+                    class="btn-xs accept"
+                    @click="handleProjectAction('accept', noti)"
+                  >
+                    수락
+                  </button>
+                  <button
+                    class="btn-xs reject"
+                    @click="handleProjectAction('reject', noti)"
+                  >
+                    거절
+                  </button>
+                </div>
+
+                <span class="date">{{ formatDate(noti.regDate) }}</span>
+              </div>
             </div>
           </div>
 
@@ -412,43 +534,58 @@ export default {
         </div>
 
         <div v-else class="project-grid">
-          <div v-for="web in filteredProjects" 
-                :key="web.id" 
-                class="activity-item project-card"
-                :class="{ shared: web.role !== 'OWNER' }">
-            
+          <div
+            v-for="web in filteredProjects"
+            :key="web.id"
+            class="activity-item project-card"
+            :class="{ shared: web.role !== 'OWNER' }"
+          >
             <div class="project-info">
               <div class="activity-text">
                 {{ web.role === 'OWNER' ? '📁' : '🤝' }}
-                <span v-if="!web.isEditing" @dblclick="startRename(web)" class="editable-title">
+                <span
+                  v-if="!web.isEditing"
+                  @dblclick="startRename(web)"
+                  class="editable-title"
+                >
                   {{ web.title }}
                 </span>
-                <input v-else 
-                        v-model="web.tempTitle" 
-                        @blur="saveNewName(web)" 
-                        @keyup.enter="saveNewName(web)"
-                        class="inline-edit-input" 
-                        autofocus />
+                <input
+                  v-else
+                  v-model="web.tempTitle"
+                  @blur="saveNewName(web)"
+                  @keyup.enter="saveNewName(web)"
+                  class="inline-edit-input"
+                  autofocus
+                />
               </div>
               <div class="activity-time">
                 {{ web.role }} | Last updated: {{ formatDate(web.updateDate) }}
-                <span v-if="web.ownerNickname">| From @{{ web.ownerNickname }}</span>
+                <span v-if="web.ownerNickname"
+                  >| From @{{ web.ownerNickname }}</span
+                >
               </div>
             </div>
 
             <div class="menu-container">
-              <button class="btn-more" @click.stop="toggleMenu(web.id)">⋮</button>
+              <button class="btn-more" @click.stop="toggleMenu(web.id)">
+                ⋮
+              </button>
               <div v-if="activeMenuId === web.id" class="dropdown-menu">
-                  <button v-if="web.role === 'OWNER'" class="delete-opt" @click="confirmDelete(web.id)">
-                    Delete
-                  </button>
+                <button
+                  v-if="web.role === 'OWNER'"
+                  class="delete-opt"
+                  @click="confirmDelete(web.id)"
+                >
+                  Delete
+                </button>
               </div>
             </div>
-            
+
             <button class="btn-sm" @click="enterIDE(web.id)">
               {{ web.role === 'OWNER' ? 'Open' : 'Join' }}
             </button>
-            </div>
+          </div>
 
           <div v-if="filteredProjects.length === 0" class="empty-msg">
             표시할 프로젝트가 없습니다.
@@ -457,10 +594,29 @@ export default {
       </section>
     </main>
 
-    <EditProfileModal 
-      v-if="isEditModalOpen" 
-      :user="authStore.user" 
+    <EditProfileModal
+      v-if="isEditModalOpen"
+      :user="authStore.user"
       @close="isEditModalOpen = false"
+    />
+
+    <!-- ✅ 알림 모달 -->
+    <GlobalModal
+      :open="modal.open"
+      :message="modal.message"
+      :type="modal.type"
+      @confirm="closeModal"
+    />
+
+    <!-- ✅ 컨펌 모달 -->
+    <ConfirmModal
+      :open="confirmModal.open"
+      :message="confirmModal.message"
+      :type="confirmModal.type"
+      :confirmText="confirmModal.confirmText"
+      :cancelText="confirmModal.cancelText"
+      @confirm="handleConfirm"
+      @cancel="closeConfirm"
     />
   </div>
 </template>
@@ -525,15 +681,16 @@ header {
   color: #0a1628;
   font-weight: 900;
 }
+
 /* 7. 워크스페이스(카드) 섹션 수정 */
 .project-grid {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  
+
   /* 높이 및 스크롤 설정 */
-  height: 150px;       /* 요청하신 고정 높이 */
-  overflow-y: auto;    /* 세로 내용이 넘치면 스크롤바 생성 */
+  height: 150px; /* 요청하신 고정 높이 */
+  overflow-y: auto; /* 세로 내용이 넘치면 스크롤바 생성 */
   padding-right: 10px; /* 스크롤바와 카드 사이의 여유 공간 */
 }
 
@@ -555,6 +712,7 @@ header {
 .project-grid::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 217, 255, 0.5);
 }
+
 nav a {
   color: #b0b8c1;
   text-decoration: none;
@@ -563,7 +721,7 @@ nav a {
   transition: all 0.3s ease;
 }
 
-nav a:hover, 
+nav a:hover,
 nav a.router-link-active {
   color: #00d9ff;
 }
@@ -684,15 +842,9 @@ main {
   font-weight: 600;
 }
 
-.project-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
 .project-card {
   display: flex;
-  justify-content: space-between;
+  justify-content: space-between; /* 정보는 왼쪽, 버튼들은 오른쪽 끝 */
   align-items: center;
   padding: 1.2rem 1.5rem;
   background: rgba(255, 255, 255, 0.02);
@@ -752,6 +904,7 @@ main {
   gap: 0.5rem;
   margin-bottom: 2rem;
 }
+
 .mini-tag {
   color: #00d9ff;
   font-size: 0.85rem;
@@ -765,9 +918,11 @@ main {
   padding: 2px 5px;
   border-radius: 4px;
 }
+
 .editable-title:hover {
   background: rgba(0, 217, 255, 0.1);
 }
+
 .inline-edit-input {
   background: #1e293b;
   border: 1px solid #00d9ff;
@@ -778,45 +933,35 @@ main {
   width: auto;
 }
 
-/* [위치]: <style scoped> 내의 기존 코드 맨 아래에 추가 */
-
-/* 1. 프로젝트 카드 내부 정렬 */
-.project-card {
-  display: flex;
-  justify-content: space-between; /* 정보는 왼쪽, 버튼들은 오른쪽 끝 [cite: 2026-01-21] */
-  align-items: center;
-  padding: 1.2rem 1.5rem;
-}
-
 /* 2. [핵심] 정보와 버튼 사이를 벌려주는 장치 */
 .project-info {
-  flex-grow: 1; /* 이 영역이 남는 공간을 다 차지해서 버튼들을 오른쪽으로 밀어냅니다 [cite: 2026-01-21] */
+  flex-grow: 1; /* 이 영역이 남는 공간을 다 차지해서 버튼들을 오른쪽으로 밀어냅니다 */
 }
 
-/* 3. 점 3개 컨테이너: margin-left: auto를 지우고 간격만 설정 [cite: 2026-01-21] */
+/* 3. 점 3개 컨테이너: 간격만 설정 */
 .menu-container {
   position: relative;
   display: flex;
   align-items: center;
   margin-left: auto;
-  margin-right: 12px; /* ⋮ 버튼과 Open 버튼 사이의 간격 [cite: 2026-01-21] */
+  margin-right: 12px; /* ⋮ 버튼과 Open 버튼 사이의 간격 */
 }
 
-/* 4. 드롭다운(Delete) 위치: 점 3개 바로 왼쪽 옆 [cite: 2026-01-21] */
+/* 4. 드롭다운(Delete) 위치 */
 .dropdown-menu {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  right: 15px; /* 점 3개에서 왼쪽으로 35px 이동하여 배치 [cite: 2026-01-21] */
+  right: 15px;
   background: transparent;
   border: none;
   z-index: 9999;
 }
 
-/* 5. Delete 버튼: Open 버튼과 동일한 크기 (Open 버튼 스타일 참고) [cite: 2026-01-21] */
+/* 5. Delete 버튼 */
 .delete-opt {
-  min-width: 70px;      /* Open 버튼과 동일한 너비 [cite: 2026-01-21] */
-  height: 38px;         /* Open 버튼과 동일한 높이 [cite: 2026-01-21] */
+  min-width: 70px;
+  height: 38px;
   padding: 0 1.2rem;
   border-radius: 6px;
   background: #2d1b1b;
@@ -876,14 +1021,14 @@ main {
 .noti-content .date {
   font-size: 0.8rem;
   color: #64748b;
-  margin-left: auto; /* 날짜를 오른쪽 끝으로 */
+  margin-left: auto;
 }
 
 /* 버튼 스타일 */
 .noti-actions {
   display: flex;
   gap: 8px;
-  margin-right: 15px; /* 날짜와의 간격 */
+  margin-right: 15px;
 }
 
 .btn-xs {
@@ -901,13 +1046,20 @@ main {
   color: #00d9ff;
   border-color: rgba(0, 217, 255, 0.3);
 }
-.btn-xs.accept:hover { background: #00d9ff; color: #0a1628; }
+
+.btn-xs.accept:hover {
+  background: #00d9ff;
+  color: #0a1628;
+}
 
 .btn-xs.reject {
   background: rgba(255, 77, 77, 0.15);
   color: #ff4d4d;
   border-color: rgba(255, 77, 77, 0.3);
 }
-.btn-xs.reject:hover { background: #ff4d4d; color: white; }
 
+.btn-xs.reject:hover {
+  background: #ff4d4d;
+  color: white;
+}
 </style>

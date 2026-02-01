@@ -224,4 +224,7 @@ public interface ProjectDao {
     // ProjectDao.java
     @Update("UPDATE `userWeb` SET `hit` = `hit` + 1 WHERE `id` = #{webId}")
     void increaseHit(@Param("webId") Integer webId);
+
+    @Delete("DELETE FROM userWeb_pages WHERE webId = #{webId} AND pageName = #{pageName}")
+    void deletePage(@Param("webId") Integer webId, @Param("pageName") String pageName);
 }

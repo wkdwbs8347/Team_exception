@@ -14,6 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.MailException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -277,5 +278,74 @@ public Member updateProfile(Integer id, MemberUpdateReq req) {
     public List<Map<String, Object>> getSharedProjects(Integer userId) {
         return memberDao.getSharedProjects(userId);
     }
+
+	@Transactional
+public void sendTemporaryPassword(String name, String email) {
+  if (name == null || name.isBlank()) {
+    throw new IllegalArgumentException("이름을 입력해주세요.");
+  }
+  if (email == null || email.isBlank()) {
+    throw new IllegalArgumentException("이메일을 입력해주세요.");
+  }
+
+  String n = name.trim();
+  String e = email.trim();
+
+  // ✅ 사용자 확인: email + name 매칭
+  Member member = memberDao.findByEmailAndName(e, n);
+
+  if (member == null) {
+    throw new IllegalArgumentException("입력하신 정보와 일치하는 사용자가 없습니다.");
+  }
+
+  // 탈퇴 유예/비활성
+  if (member.getStatus() != null && member.getStatus() == 0) {
+    throw new IllegalArgumentException("탈퇴 처리된 회원입니다.");
+  }
+
+  // local 계정만 허용 (원하면 제거 가능)
+  if (member.getAuthPath() != null && !"local".equalsIgnoreCase(member.getAuthPath())) {
+    throw new IllegalArgumentException("소셜 로그인 계정은 비밀번호 찾기를 사용할 수 없습니다.");
+  }
+
+  // ✅ 임시 비밀번호 생성 (영문+숫자 12자리)
+  String tempPw = generateTempPassword(12);
+
+  // ✅ DB에 암호화 저장
+  String encoded = encoder.encode(tempPw);
+  memberDao.updatePassword(member.getId().intValue(), encoded);
+
+  // ✅ 이메일 발송
+  try {
+    SimpleMailMessage message = new SimpleMailMessage();
+    message.setTo(e);
+    message.setSubject("[Web Crafter] 임시 비밀번호 안내");
+    message.setText("""
+        안녕하세요. Web Crafter 임시 비밀번호 안내입니다.
+
+        임시 비밀번호: %s
+
+        로그인 후 반드시 비밀번호를 변경해주세요.
+        """.formatted(tempPw));
+
+    javaMailSender.send(message);
+  } catch (MailException ex) {
+    // 메일 전송 실패 시 -> 트랜잭션 롤백 유도
+    throw new RuntimeException("메일 전송에 실패했습니다.");
+  }
+}
+
+/** 임시 비밀번호 생성 (영문 대/소문자 + 숫자) */
+private String generateTempPassword(int length) {
+  final String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  StringBuilder sb = new StringBuilder(length);
+  for (int i = 0; i < length; i++) {
+    int idx = SECURE_RANDOM.nextInt(chars.length());
+    sb.append(chars.charAt(idx));
+  }
+  return sb.toString();
+}
+
+
 
 }

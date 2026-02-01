@@ -109,4 +109,14 @@ List<Map<String, Object>> getSharedProjects(@Param("userId") Integer userId);
 @Update("UPDATE `user` SET is_login = #{status} WHERE id = #{id}")
 void updateLoginStatus(@Param("id") Integer id, @Param("status") int status);
 
+// 비밀번호 찾기: 이메일 + 이름으로 사용자 조회
+@Select("""
+    SELECT id, name, email, loginPw, nickname, bio, authPath, status
+    FROM `user`
+    WHERE email = #{email}
+      AND name = #{name}
+    LIMIT 1
+""")
+Member findByEmailAndName(@Param("email") String email, @Param("name") String name);
+
 }

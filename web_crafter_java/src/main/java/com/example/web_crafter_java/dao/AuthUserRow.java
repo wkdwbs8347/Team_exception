@@ -7,6 +7,7 @@ import java.time.LocalDate;
 @Data
 public class AuthUserRow {
     private Long id;
+    private Integer webId; 
     private String loginId;
     private String email;
     private String nickname;

@@ -220,4 +220,22 @@ public class MemberController {
     return ResponseEntity.ok(response);
 }
 
+// 비밀번호 찾기: 임시 비밀번호 발급 + 이메일 발송
+@PostMapping("/password/find")
+public ResponseEntity<?> findPasswordAndSendTemp(@RequestBody Map<String, String> body) {
+  try {
+    String name = body.get("name");
+    String email = body.get("email");
+
+    memberService.sendTemporaryPassword(name, email);
+
+    return ResponseEntity.ok(Map.of("message", "임시 비밀번호를 이메일로 전송했습니다."));
+  } catch (IllegalArgumentException e) {
+    return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+  } catch (Exception e) {
+    e.printStackTrace();
+    return ResponseEntity.internalServerError().body(Map.of("message", "임시 비밀번호 전송 실패"));
+  }
+}
+
 }

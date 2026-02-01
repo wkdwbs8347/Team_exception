@@ -267,4 +267,11 @@ public void inviteUser(Integer myId, Integer targetId, Integer webId) {
 
         return newWebId; // 새 프로젝트 ID 반환
     }
+
+    public void deletePage(Integer webId, String pageName) {
+    // 필요한 경우 권한 체크 로직을 여기에 추가할 수 있습니다.
+    projectDao.deletePage(webId, pageName);
+}
+
+
 }
