@@ -112,20 +112,32 @@ CREATE TABLE notification (
     
 );
 
-/* preview 회원가입/로그인 */
+/* preview 회원가입/로그인 (프로젝트 단위 분리) */
 CREATE TABLE wc_user (
-  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-  login_id VARCHAR(50) NOT NULL,
-  email VARCHAR(120) NULL,
-  nickname VARCHAR(50) NULL,
-  `name` VARCHAR(50) NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  birth DATE NULL,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_login_id (login_id),
-  UNIQUE KEY uq_email (email),
-  UNIQUE KEY uq_nickname (nickname)
+  id BIGINT PRIMARY KEY AUTO_INCREMENT
+  , web_id INT UNSIGNED NOT NULL COMMENT 'userWeb.id (프로젝트 ID)'
+  , login_id VARCHAR(50) NOT NULL
+  , email VARCHAR(120) NULL
+  , nickname VARCHAR(50) NULL
+  , `name` VARCHAR(50) NULL
+  , password_hash VARCHAR(255) NOT NULL
+  , birth DATE NULL
+  , created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  , updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+
+  
+  , UNIQUE KEY uq_wc_user_login_id (web_id, login_id)
+  , UNIQUE KEY uq_wc_user_email (web_id, email)
+  , UNIQUE KEY uq_wc_user_nickname (web_id, nickname)
+
+  
+  , INDEX idx_wc_user_web_id (web_id)
+
+  -- 프로젝트 삭제 시 프리뷰 유저 자동 삭제
+  , CONSTRAINT fk_wc_user_web
+    FOREIGN KEY (web_id)
+    REFERENCES userWeb(id)
+    ON DELETE CASCADE
 );
 
 /* [채팅 메시지 내역 테이블] 
