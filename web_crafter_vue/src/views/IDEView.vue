@@ -2917,61 +2917,6 @@ onMounted(async () => {
     10 * 60 * 1000
   );
 
-  // ------------------------------------------------------------
-  // 🔥 13. 웹소켓 연결 (Presence 기능 추가됨)
-  // ------------------------------------------------------------
-  const connectWebSocket = () => {
-    const socket = new SockJS('http://localhost:8080/wsproject');
-    stompClient = Stomp.over(socket);
-    stompClient.debug = null;
-
-    // 1️⃣ 내 ID 가져오기 (로그인 정보 확인)
-    // userInfo가 아직 로드 안 됐을 수도 있으므로 안전하게 처리
-    const myId = userInfo.value ? String(userInfo.value.id) : null;
-
-    // 2️⃣ 헤더 설정: 내 ID를 'x-user-id'에 담음
-    const headers = myId ? { 'x-user-id': myId } : {};
-
-    // 3️⃣ 연결 시도 (🔥 중요: 빈 객체 {} 대신 headers 변수를 넣어야 함!)
-    stompClient.connect(
-      headers,
-      (frame) => {
-        console.log(`🚀 [서버 연결 성공] UserID: ${myId}`);
-
-        // 4️⃣ 친구 상태 변화 구독 (백엔드가 쏘는 주소: /topic/user/{내ID}/presence)
-        if (myId) {
-          stompClient.subscribe(`/topic/user/${myId}/presence`, (res) => {
-            const data = JSON.parse(res.body);
-            console.log('🔔 [친구 상태 변경 알림]', data);
-
-            // 💡 1. 여기서 이벤트를 발생시켜서 모달(Connections)이 듣게 하거나
-            // 💡 2. 전역 스토어(Pinia 등)의 친구 목록을 갱신해야 합니다.
-            // 임시로 브라우저 이벤트를 쏴서 다른 컴포넌트가 듣게 해줍니다.
-            window.dispatchEvent(
-              new CustomEvent('friend-status-change', { detail: data })
-            );
-          });
-        }
-
-        // 기존: 블록 동기화 (내용 무시)
-        stompClient.subscribe(
-          `/topic/project/${props.webId}/block-updates`,
-          (res) => {
-            // 동기화 로직 비활성화 상태
-          }
-        );
-      },
-      (error) => {
-        console.error('❌ [웹소켓 연결 실패]:', error);
-        // 재연결 시도
-        setTimeout(connectWebSocket, 5000);
-      }
-    );
-  };
-
-  // 함수 실행
-  connectWebSocket();
-
   // ---------------------------------------------------------
   // ✅ 14. [최종 추가] 프로젝트 조회수 증가 (s 붙인 버전)
   // ---------------------------------------------------------

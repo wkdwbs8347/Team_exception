@@ -74,7 +74,6 @@ onMounted(() => {
               <template v-if="index === 0">
                 <div class="stack-item"><span class="dot bg-green-500"></span> Vue 3 (Composition)</div>
                 <div class="stack-item"><span class="dot bg-green-500"></span> Google Blockly</div>
-                <div class="stack-item"><span class="dot bg-green-500"></span> Pinia Store</div>
               </template>
 
               <template v-if="index === 1">
