@@ -243,20 +243,6 @@ watch(
   { immediate: true }
 );
 
-// 실시간 상태 변경
-const handleFriendStatusUpdate = (event) => {
-  const { userId, status } = event.detail;
-  auth.updateFriendPresence(userId, status);
-  console.log(`🔔 [Connections] 친구(${userId}) 상태 변경됨 -> ${status}`);
-};
-
-onMounted(() => {
-  window.addEventListener('friend-status-update', handleFriendStatusUpdate);
-});
-
-onUnmounted(() => {
-  window.removeEventListener('friend-status-update', handleFriendStatusUpdate);
-});
 </script>
 
 <template>

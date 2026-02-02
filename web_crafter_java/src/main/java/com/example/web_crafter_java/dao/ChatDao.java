@@ -7,14 +7,15 @@ import java.util.List;
 @Mapper
 public interface ChatDao {
 
-    // 메시지 저장
+    // 메시지 저장 (DB에 receiver_id 없음)
     @Insert("""
         INSERT INTO chat_message (room_id, sender_id, content, regDate)
         VALUES (#{roomId}, #{senderId}, #{content}, NOW())
     """)
+    @Options(useGeneratedKeys = true, keyProperty = "id")
     void saveMessage(ChatMessage message);
 
-    // 이전 대화 내역 불러오기
+    // ✅ roomId 바인딩 확실하게 @Param 사용
     @Select("""
         SELECT id,
                room_id AS roomId,
@@ -26,12 +27,11 @@ public interface ChatDao {
         ORDER BY regDate ASC
         LIMIT 50
     """)
-    List<ChatMessage> getMessagesByRoomId(String roomId);
+    List<ChatMessage> getMessagesByRoomId(@Param("roomId") String roomId);
 
-    // ✅ 채팅방 전체 삭제 (친구 삭제 시 호출)
     @Delete("""
         DELETE FROM chat_message
         WHERE room_id = #{roomId}
     """)
-    int deleteChatRoom(String roomId);
+    int deleteChatRoom(@Param("roomId") String roomId);
 }

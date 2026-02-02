@@ -1,6 +1,6 @@
 <script setup>
 import api from '@/api/axios';
-import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import GlobalModal from '@/modal/GlobalModal.vue';
 import { useAuthStore } from '@/stores/auth';
@@ -17,12 +17,6 @@ const isFriendListOpen = ref(false);
 const isMenuOpen = ref(false);
 const friendModalMode = ref('manage');
 
-let stompClient = null;
-let connected = false;
-let connecting = false;
-let scriptsAppending = false;
-let subscribed = false;
-
 // 페이지 이동 시 메뉴 닫기
 watch(
   () => route.path,
@@ -31,178 +25,6 @@ watch(
     isMenuOpen.value = false;
   }
 );
-
-/**
- * 🚀 [실시간 핵심] CDN 로드 + 웹소켓 연결 (중복 방지 완성본)
- */
-const loadLibrariesAndConnect = () => {
-  if (!auth.me?.id) return;
-  if (connected || connecting) return;
-
-  // ✅ 이미 라이브러리 로드되어 있으면 바로 연결만
-  if (window.SockJS && window.Stomp) {
-    connectSocketOnce();
-    return;
-  }
-
-  // ✅ script 태그 중복 append 방지
-  if (scriptsAppending) return;
-  scriptsAppending = true;
-
-  const ensureScript = (id, src) => {
-    return new Promise((resolve, reject) => {
-      // 이미 있으면 resolve
-      const existing = document.getElementById(id);
-      if (existing) {
-        // 로드 완료 보장 (이미 로드됐을 수도 / 로딩중일 수도)
-        existing.addEventListener('load', () => resolve());
-        existing.addEventListener('error', reject);
-        // 이미 로드된 경우 대비: 다음 tick에 resolve 시도
-        setTimeout(resolve, 0);
-        return;
-      }
-
-      const s = document.createElement('script');
-      s.id = id;
-      s.src = src;
-      s.onload = () => resolve();
-      s.onerror = (e) => reject(e);
-      document.head.appendChild(s);
-    });
-  };
-
-  Promise.all([
-    ensureScript(
-      'sockjs-cdn',
-      'https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js'
-    ),
-    ensureScript(
-      'stomp-cdn',
-      'https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js'
-    ),
-  ])
-    .then(() => {
-      scriptsAppending = false;
-      connectSocketOnce();
-    })
-    .catch((e) => {
-      scriptsAppending = false;
-      console.error('CDN 로드 실패:', e);
-      setTimeout(loadLibrariesAndConnect, 3000);
-    });
-};
-
-const connectSocketOnce = () => {
-  if (!auth.me?.id) return;
-  if (connected || connecting) return;
-  if (!window.SockJS || !window.Stomp) return;
-
-  connecting = true;
-
-  const socket = new window.SockJS('http://localhost:8080/wsproject');
-  stompClient = window.Stomp.over(socket);
-
-  // ✅ 디버그 켜기 (지금은 null이라 로그가 안 보임)
-  stompClient.debug = (msg) => console.log('[STOMP]', msg);
-
-  stompClient.connect(
-    { 'x-user-id': String(auth.me.id) },
-    () => {
-      connecting = false;
-      connected = true;
-      console.log('🚀 실시간 알림 웹소켓 연결 성공', auth.me.id);
-
-      if (subscribed) return;
-      subscribed = true;
-
-      // 🔔 notifications
-      stompClient.subscribe(`/topic/user/${auth.me.id}/notifications`, (res) => {
-        if (!res.body) return;
-        const payload = JSON.parse(res.body);
-
-        if (Array.isArray(payload)) {
-          auth.setNotifications(payload);
-          return;
-        }
-
-        const prev = Array.isArray(auth.notifications) ? auth.notifications : [];
-        const next = prev.some((n) => n.id === payload.id) ? prev : [payload, ...prev];
-        auth.setNotifications(next);
-      });
-
-      // ✅ 2) [추가됨] 채팅 메시지 알림 (빨간 점용)
-      stompClient.subscribe(`/topic/notifications/${auth.me.id}`, (res) => {
-        const msg = JSON.parse(res.body);
-        console.log('🔔 채팅 알림 도착:', msg);
-        auth.pushIncomingChat(msg);
-
-        // 스토어의 '안 읽은 사람 목록'에 추가 -> 종 아이콘 & 친구 목록에 빨간 점 뜸
-        auth.unreadSenders.add(msg.senderId);
-      });
-
-      // ✅ 1) 개인 토픽 presence
-      stompClient.subscribe(`/topic/user/${auth.me.id}/presence`, (res) => {
-        console.log('📥 presence(user) raw:', res.body);
-        if (!res.body) return;
-
-        try {
-          const { userId, status } = JSON.parse(res.body);
-          console.log('✅ presence(user) parsed:', userId, status);
-          auth.updateFriendPresence(userId, status);
-        } catch (e) {
-          console.error('presence(user) JSON 파싱 실패:', e);
-        }
-      });
-
-
-
-      // ✅ 2) 공용 토픽 presence (서버가 여기에 publish 하는 경우가 많음)
-      stompClient.subscribe(`/topic/presence`, (res) => {
-        console.log('📥 presence(global) raw:', res.body);
-        if (!res.body) return;
-
-        try {
-          const { userId, status } = JSON.parse(res.body);
-          console.log('✅ presence(global) parsed:', userId, status);
-          auth.updateFriendPresence(userId, status);
-        } catch (e) {
-          console.error('presence(global) JSON 파싱 실패:', e);
-        }
-      });
-
-      // ✅ 3) [여기에 추가] 친구 목록 갱신 신호
-      stompClient.subscribe(`/topic/user/${auth.me.id}/friends`, async (res) => {
-        console.log('👥 friends refresh:', res.body);
-
-        try {
-          const fres = await api.get('/friends/list');
-
-          // store에 setFriends 있으면 그걸 쓰고
-          if (typeof auth.setFriends === 'function') {
-            auth.setFriends(Array.isArray(fres.data) ? fres.data : []);
-          } 
-          // 없으면 me.friends에 넣는 임시 방식
-          else {
-            auth.me = {
-              ...(auth.me || {}),
-              friends: Array.isArray(fres.data) ? fres.data : [],
-            };
-          }
-        } catch (e) {
-          console.error('친구 목록 reload 실패', e);
-        }
-      });
-      
-    },
-    (error) => {
-      connecting = false;
-      connected = false;
-      subscribed = false;
-      console.error('소켓 연결 실패:', error);
-      setTimeout(loadLibrariesAndConnect, 3000);
-    }
-  );
-};
 
 const handleProfileCardClick = () => {
   closeMenu();
@@ -237,43 +59,24 @@ const handleKeydown = (e) => {
 onMounted(async () => {
   window.addEventListener('keydown', handleKeydown);
 
-  // ✅ 1) 무조건 store로 로그인 복원 (형태 통일)
+  // ✅ 로그인 복원 + (authStore 내부에서 websocketStore.connect를 호출함)
   await auth.bootstrap();
 
-  // 로그인 아니면 종료
-  if (!auth.me?.id) return;
-
-  // ✅ 2) 소켓 연결
-  loadLibrariesAndConnect();
-
-  // ✅ 3) 초기 알림 리스트 (실패해도 앱은 계속)
-  try {
-    const notiRes = await api.get('/friends/notifications');
-    auth.setNotifications(Array.isArray(notiRes.data) ? notiRes.data : []);
-  } catch (error) {
-    console.error('알림 초기 로드 실패:', error);
-    auth.setNotifications([]);
-  }
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleKeydown);
-
-  try {
-    if (stompClient?.connected) stompClient.disconnect();
-  } finally {
-    stompClient = null;
-    connected = false;
-    connecting = false;
-    subscribed = false;
-    scriptsAppending = false;
+  // ✅ 초기 알림 리스트
+  if (auth.me?.id) {
+    try {
+      const notiRes = await api.get('/friends/notifications');
+      auth.setNotifications(Array.isArray(notiRes.data) ? notiRes.data : []);
+    } catch (error) {
+      console.error('알림 초기 로드 실패:', error);
+      auth.setNotifications([]);
+    }
   }
 });
 
 const handleLogout = async () => {
   try {
-    await auth.logout();
-    if (stompClient) stompClient.disconnect();
+    await auth.logout(); // ✅ auth.logout 내부에서 websocketStore.disconnect 함
     isMenuOpen.value = false;
     isFriendListOpen.value = false;
     openModal('로그아웃 되었습니다.', 'success', () => router.push('/'));
@@ -317,6 +120,7 @@ const createNewProject = async () => {
 
 const userName = computed(() => auth.me?.nickname || '사용자');
 </script>
+
 
 <template>
   <nav class="navbar" :class="{ scrolled: scrollY > 50 }">

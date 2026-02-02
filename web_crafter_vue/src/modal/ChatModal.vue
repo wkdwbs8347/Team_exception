@@ -1,20 +1,26 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue';
 import { useAuthStore } from '@/stores/auth';
-import api from '@/api/axios';
+import { useWebSocketStore } from '@/stores/websocket';
 
 const props = defineProps(['friend', 'myId']);
 const emit = defineEmits(['close']);
 
 const auth = useAuthStore();
+const ws = useWebSocketStore();
+
 const input = ref('');
-const roomId = ref([props.myId, props.friend.id].sort().join('_'));
+const roomId = ref('');
 const msgBox = ref(null);
 
-// ✅ [핵심] 스토어의 공용 메시지 저장소를 실시간으로 바라봅니다.
-const messages = computed(() => {
-  return auth.allChatMessages[roomId.value] || [];
-});
+// ✅ roomId 기준으로 스토어 메시지 읽기 (전역 소켓이 넣어주는 데이터를 실시간으로 보여줌)
+const messages = computed(() => auth.allChatMessages[roomId.value] || []);
+
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (msgBox.value) msgBox.value.scrollTop = msgBox.value.scrollHeight;
+  });
+};
 
 onMounted(async () => {
   roomId.value = [Number(props.myId), Number(props.friend.id)]
@@ -24,35 +30,21 @@ onMounted(async () => {
   auth.openRoom(roomId.value);
   auth.markAsRead(props.friend.id);
 
-  try {
-    const res = await api.get(`/chat/history/${roomId.value}`);
-    const history = Array.isArray(res.data) ? res.data : [];
-
-    const current = auth.allChatMessages[roomId.value] || [];
-
-    const mergedMap = new Map();
-    const keyOf = (m) => (m.id ? `id:${m.id}` : `k:${m.senderId}|${m.content}|${m.regDate}`);
-
-    [...current, ...history].forEach((m) => mergedMap.set(keyOf(m), m));
-    auth.allChatMessages[roomId.value] = Array.from(mergedMap.values());
-  } catch (e) {
-    console.error("로드 실패", e);
-  }
+  // ✅ DB에서 과거 내역만 가져옴 (실시간은 전역 소켓이 담당)
+  await auth.loadChatHistory(roomId.value);
 
   scrollToBottom();
 });
-;
 
 onUnmounted(() => {
+  // ✅ 이제 여기서 구독 해제할 필요가 없음 (구독 자체를 안 하니까)
   auth.closeRoom();
 });
 
-// ✅ 메시지가 추가될 때마다 자동 스크롤
+// ✅ 메시지가 추가될 때마다 자동 스크롤은 유지
 watch(
   () => messages.value.length,
-  () => {
-    scrollToBottom();
-  },
+  () => scrollToBottom(),
   { flush: 'post' }
 );
 
@@ -60,34 +52,11 @@ const send = () => {
   const text = input.value.trim();
   if (!text) return;
 
-  // ✅ [수정 2] 내가 보낸 메시지도 즉시 화면에 보이게 (optimistic UI)
-  const localMsg = {
-    roomId: roomId.value,
-    senderId: props.myId,
-    receiverId: props.friend.id,
-    content: text,
-    regDate: new Date().toISOString(),
-  };
-
-  auth.allChatMessages = {
-    ...(auth.allChatMessages || {}),
-    [roomId.value]: [...(auth.allChatMessages[roomId.value] || []), localMsg],
-  };
-
-  // 서버 전송
   auth.sendChatMessage(roomId.value, props.friend.id, text);
-
   input.value = '';
 };
-
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (msgBox.value) {
-      msgBox.value.scrollTop = msgBox.value.scrollHeight;
-    }
-  });
-};
 </script>
+
 
 <template>
   <div class="chat-modal-overlay" @click.self="$emit('close')">

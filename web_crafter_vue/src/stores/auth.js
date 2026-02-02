@@ -1,25 +1,33 @@
 import { defineStore } from 'pinia';
 import api from '@/api/axios';
+import { useWebSocketStore } from '@/stores/websocket';
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     isAuthed: false,
     me: null,
     bootstrapped: false,
+
     notifications: [],
     friendPresence: {},
-    stompClient: null,
+
+    // ✅ 읽지않음 (반응성 위해 Set 교체 방식)
     unreadSenders: new Set(),
-    // ✅ [추가] 모든 채팅 메시지 저장소 (방 ID를 키로 사용)
-    allChatMessages: {}, 
+
+    // ✅ 모든 채팅 메시지 저장소 (roomId -> array)
+    allChatMessages: {},
+
     activeRoomId: null,
     isChatOpen: false,
+
+    // ✅ 채팅 빨간점
+    hasNewChat: false,
   }),
 
   getters: {
     nickname: (s) => s.me?.nickname || '',
     unreadCount: (s) => s.notifications.length,
-    isSocketConnected: (s) => !!s.stompClient && s.stompClient.connected,
+
     hasUnread: (state) => (friendId) => state.unreadSenders.has(friendId),
     hasAnyUnread: (state) => state.unreadSenders.size > 0,
   },
@@ -30,8 +38,9 @@ export const useAuthStore = defineStore('auth', {
       const me = res.data?.member ?? res.data;
       this.me = me;
       this.isAuthed = !!me?.id;
-      
-      if (this.isAuthed && !this.stompClient) {
+
+      // ✅ 로그인 상태면 websocketStore로 연결
+      if (this.isAuthed) {
         this.connectChat();
       }
       return me;
@@ -57,82 +66,117 @@ export const useAuthStore = defineStore('auth', {
 
     async logout() {
       await api.post('/member/logout');
-      if (this.stompClient) {
-        this.stompClient.disconnect();
-        this.stompClient = null;
-      }
+
+      // ✅ websocketStore 연결 해제
+      const ws = useWebSocketStore();
+      ws.disconnect();
+
       this.isAuthed = false;
       this.me = null;
       this.unreadSenders = new Set();
-      this.allChatMessages = {}; // 로그아웃 시 대화 내역 초기화
+      this.allChatMessages = {};
+      this.hasNewChat = false;
+      this.activeRoomId = null;
+      this.isChatOpen = false;
     },
 
     // -----------------------------------------------------------
-    // 📡 [핵심] 상시 메시지 수신 로직
+    // ✅ websocket 연결 (실제 연결은 websocketStore가 함)
     // -----------------------------------------------------------
     connectChat() {
-  if (this.stompClient?.connected) return;
-
-  const socket = new window.SockJS('http://localhost:8080/wsproject');
-  this.stompClient = window.Stomp.over(socket);
-
-  // 디버그 켜기
-  this.stompClient.debug = (msg) => console.log('[STOMP]', msg);
-
-  const headers = { 'x-user-id': String(this.me?.id) };
-
-  this.stompClient.connect(
-    headers,
-    () => {
-      console.log('✅ 실시간 서버 연결 성공!');
-
-      // ✅ 1) 채팅 메시지 전용: 개인 큐 (채팅창 안 열어도 무조건 받음)
-      this.stompClient.subscribe('/user/queue/chat', (res) => {
-        if (!res.body) return;
-        const msg = JSON.parse(res.body);
-        this.pushIncomingChat(msg);
-      });
-
-      // ✅ 2) 기존 알림 채널은 "알림 전용"으로만 쓰기
-      this.stompClient.subscribe(`/topic/notifications/${this.me.id}`, (res) => {
-        if (!res.body) return;
-        const payload = JSON.parse(res.body);
-
-        // 여기서는 "빨간점"만 올리거나, 알림 목록만 갱신
-        // 메시지 본문까지 여기로 섞지 마!
-        if (payload?.senderId) {
-          const updated = new Set(this.unreadSenders);
-          updated.add(payload.senderId);
-          this.unreadSenders = updated;
-        }
-      });
+      const ws = useWebSocketStore();
+      ws.connect(this.me?.id);
     },
-    (error) => {
-      console.error('❌ STOMP 에러:', error);
-    }
-  );
-},
 
-// ✅ 채팅방 열림 상태 기록
-openRoom(roomId) {
-  this.activeRoomId = roomId;
-  this.isChatOpen = true;
-},
+    // -----------------------------------------------------------
+    // ✅ [추가] 채팅 히스토리 로드용 유틸/액션
+    // -----------------------------------------------------------
+    ensureRoom(roomId) {
+      if (!roomId) return;
+      if (this.allChatMessages?.[roomId]) return;
 
-// ✅ 채팅방 닫힘
-closeRoom() {
-  this.isChatOpen = false;
-  this.activeRoomId = null;
-},
+      this.allChatMessages = {
+        ...(this.allChatMessages || {}),
+        [roomId]: [],
+      };
+    },
 
-// ✅ 실제 메시지 저장 + unread 처리
+    async loadChatHistory(roomId) {
+      if (!roomId) return;
+      this.ensureRoom(roomId);
+
+      try {
+        const res = await api.get(`/chat/history/${roomId}`);
+        const history = Array.isArray(res.data) ? res.data : [];
+
+        const current = this.allChatMessages[roomId] || [];
+
+        // ✅ 중복 제거하면서 병합
+        const mergedMap = new Map();
+        const keyOf = (m) =>
+          m?.id ? `id:${m.id}` : `k:${m.senderId}|${m.content}|${m.regDate}`;
+
+        [...current, ...history].forEach((m) => mergedMap.set(keyOf(m), m));
+        this.allChatMessages[roomId] = Array.from(mergedMap.values());
+      } catch (e) {
+        console.error('채팅 히스토리 로드 실패:', e);
+        // 실패해도 배열은 유지
+        this.ensureRoom(roomId);
+      }
+    },
+
+    // ✅ 채팅방 열림/닫힘
+    openRoom(roomId) {
+      this.activeRoomId = roomId;
+      this.isChatOpen = true;
+      this.ensureRoom(roomId);
+    },
+
+    closeRoom() {
+      this.isChatOpen = false;
+      this.activeRoomId = null;
+    },
+
+    // ✅ 수신 메시지 저장 (websocketStore의 /user/queue/chat 에서 호출됨)
 pushIncomingChat(msg) {
-  const rid = msg.roomId;
+  const rid = msg?.roomId;
   if (!rid) return;
 
-  if (!this.allChatMessages[rid]) this.allChatMessages[rid] = [];
-  this.allChatMessages[rid].push(msg);
+  if (!this.allChatMessages[rid]) {
+    this.allChatMessages = { ...this.allChatMessages, [rid]: [] };
+  }
 
+  // ✅ 1) 서버 echo가 왔고, 내가 보낸 메시지면 기존 temp 제거
+  if (String(msg.senderId) === String(this.me?.id)) {
+    const arr = this.allChatMessages[rid];
+
+    // (A) 서버가 tempId를 같이 보내주는 경우: 정확히 제거
+    if (msg.tempId) {
+      this.allChatMessages[rid] = arr.filter(m => m.tempId !== msg.tempId);
+    } else {
+      // (B) tempId가 없으면: 내용 기준으로 최근 temp 하나 제거
+      const idx = arr.findIndex(m =>
+        m._temp === true &&
+        String(m.senderId) === String(msg.senderId) &&
+        String(m.receiverId) === String(msg.receiverId) &&
+        m.content === msg.content
+      );
+      if (idx !== -1) arr.splice(idx, 1);
+    }
+  }
+
+  // ✅ 2) 중복 방지 (id가 있으면 id 우선)
+  if (msg?.id && this.allChatMessages[rid].some(m => m.id === msg.id)) return;
+
+  const keyOf = (m) => m?.id ? `id:${m.id}` : `k:${m.senderId}|${m.receiverId}|${m.content}|${m.regDate}`;
+  const incomingKey = keyOf(msg);
+  const exists = this.allChatMessages[rid].some((m) => keyOf(m) === incomingKey);
+
+  if (!exists) {
+    this.allChatMessages[rid].push(msg);
+  }
+
+  // ✅ 3) 내가 보낸게 아니면 unread 처리
   if (String(msg.senderId) !== String(this.me?.id)) {
     const updated = new Set(this.unreadSenders);
     updated.add(msg.senderId);
@@ -141,32 +185,58 @@ pushIncomingChat(msg) {
 },
 
 
-    // ✅ 읽음 처리 (채팅방 열 때 호출)
+    // ✅ 읽음 처리
     markAsRead(friendId) {
-      const updatedSet = new Set(this.unreadSenders);
-      updatedSet.delete(friendId);
-      this.unreadSenders = updatedSet;
+      const updated = new Set(this.unreadSenders);
+      updated.delete(friendId);
+      this.unreadSenders = updated;
     },
 
-    // ✅ 전송 함수
-    sendChatMessage(roomId, receiverId ,content) {
-      if (this.stompClient && this.stompClient.connected) {
-        const payload = JSON.stringify({
-          roomId: roomId,
-          senderId: this.me.id,
-          receiverId,
-          content: content
-        });
-        this.stompClient.send(`/app/chat/send`, {}, payload);
-      } else {
-        console.warn("소켓이 연결되지 않아 전송할 수 없습니다.");
-      }
+    // ✅ 전송 (optimistic push 포함: 내가 보낸게 내 화면에 바로 보이게)
+    sendChatMessage(roomId, receiverId, content) {
+      const text = (content ?? '').trim();
+      if (!text) return;
+
+      this.ensureRoom(roomId);
+
+       const tempId = `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+      // ✅ 1) 내 화면에 먼저 추가
+      const myMsg = {
+        id: 0,
+        tempId,
+        roomId,
+        senderId: this.me?.id,
+        receiverId,
+        content: text,
+        regDate: new Date().toISOString(),
+        _temp: true,
+      };
+
+      this.allChatMessages[roomId].push(myMsg);
+
+      // ✅ 2) 서버 전송
+      const ws = useWebSocketStore();
+      ws.publish('/app/chat/send', {
+        roomId,
+        senderId: this.me?.id,
+        receiverId,
+        content: text,
+        tempId,
+      });
     },
 
+    // ✅ chat 알림 빨간점
+    setHasNewChat(v) {
+      this.hasNewChat = !!v;
+    },
+
+    // ✅ 알림 목록
     setNotifications(data) {
       this.notifications = Array.isArray(data) ? data : [];
     },
-    
+
+    // ✅ presence
     updateFriendPresence(userId, status) {
       this.friendPresence = {
         ...(this.friendPresence || {}),

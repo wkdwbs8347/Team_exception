@@ -6,11 +6,13 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import api from '@/api/axios'
+import { useWebSocketStore } from '@/stores/websocket'
 import NavBar from '@/components/NavBar.vue'
 import Footer from '@/components/Footer.vue'
 
 // 전역 로그인상태 관리용
 const auth = useAuthStore()
+const wsStore = useWebSocketStore()
 
 // ==============================
 // 2️⃣ 전역 스크롤 상태 정의
@@ -36,6 +38,11 @@ const handleScroll = () => {
 onMounted(async () => {
   window.addEventListener('scroll', handleScroll)
   await auth.bootstrap() // 여기서만 복원 시도
+
+  if (auth.me?.id) {
+    console.log('🔌 [App] 사용자 인증 확인됨, 소켓 연결 시도...');
+    wsStore.connect(auth.me.id);
+  }
 })
 
 onBeforeUnmount(() => {
