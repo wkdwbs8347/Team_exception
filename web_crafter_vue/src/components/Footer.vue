@@ -1,120 +1,62 @@
 <script setup>
-// 1. 필요한 아이콘들을 import 합니다.
-import { Blocks, Layers, Facebook, Linkedin, Youtube } from 'lucide-vue-next';
+import { Blocks, Mail } from 'lucide-vue-next';
 
-const currentYear = new Date().getFullYear()
+const currentYear = new Date().getFullYear();
 
-const footerLinks = {
-  product: [
-    { label: 'Features', href: '#' },
-    { label: 'Pricing', href: '#' },
-    { label: 'Security', href: '#' },
-    { label: 'Roadmap', href: '#' }
-  ],
-  company: [
-    { label: 'About', href: '#' },
-    { label: 'Blog', href: '#' },
-    { label: 'Careers', href: '#' },
-    { label: 'Contact', href: '#' }
-  ],
-  resources: [
-    { label: 'Documentation', href: '#' },
-    { label: 'API Reference', href: '#' },
-    { label: 'Support', href: '#' },
-    { label: 'Community', href: '#' }
-  ]
-}
-
-// 2. socialLinks 배열을 컴포넌트 객체로 변경합니다.
-const socialLinks = [
-  { 
-    icon: Layers, // 트위터 대신 아키텍처 아이콘 사용
-    label: 'System Architecture', 
-    href: '/architecture' // 아키텍처 페이지 라우터 주소
-  },
-  { icon: Facebook, label: 'Facebook', href: '#' },
-  { icon: Linkedin, label: 'LinkedIn', href: '#' },
-  { icon: Youtube, label: 'YouTube', href: '#' }
-]
+// ✅ 여기 이메일만 실제 값으로 바꿔 넣으면 됨
+const members = [
+  { name: '장지윤', email: 'gbjy8347@gmail.com' },
+  { name: '김영민', email: 'ymyj0212k@gmail.com' },
+  { name: '김민재', email: 'rlaalswo4377@gmail.com' },
+];
 </script>
 
 <template>
   <footer class="footer">
     <div class="footer-container">
-      <div class="footer-content">
-        <div class="footer-section">
-          <h3 class="footer-brand">
-            <span class="brand-icon"><Blocks :size="28"/></span>
-            Web Crafter
-          </h3>
-          <p class="brand-description">
-            블록코딩 기술을 활용하여 나만의 웹 사이트를 손쉽게 제작하고 관리하세요.
-          </p>
-          <div class="social-links">
-            <a 
-              v-for="social in socialLinks" 
-              :key="social.label" 
-              :href="social.href" 
-              class="social-link" 
-              :title="social.label"
-            >
-              <component :is="social.icon" :size="20" />
-            </a>
-          </div>
+      <!-- 상단: 브랜드 + 설명 -->
+      <div class="footer-top">
+        <div class="brand">
+          <span class="brand-icon"><Blocks :size="28" /></span>
+          <span class="brand-text">Web Crafter</span>
         </div>
-
-        <div class="footer-section">
-          <h4 class="section-title">Product</h4>
-          <ul class="link-list">
-            <li v-for="link in footerLinks.product" :key="link.label">
-              <a :href="link.href">{{ link.label }}</a>
-            </li>
-          </ul>
-        </div>
-
-        <div class="footer-section">
-          <h4 class="section-title">Company</h4>
-          <ul class="link-list">
-            <li v-for="link in footerLinks.company" :key="link.label">
-              <a :href="link.href">{{ link.label }}</a>
-            </li>
-          </ul>
-        </div>
-
-        <div class="footer-section">
-          <h4 class="section-title">Resources</h4>
-          <ul class="link-list">
-            <li v-for="link in footerLinks.resources" :key="link.label">
-              <a :href="link.href">{{ link.label }}</a>
-            </li>
-          </ul>
-        </div>
+        <p class="brand-desc">
+          블록코딩 기술을 활용하여 나만의 웹 사이트를 손쉽게 제작하고 관리하세요.
+        </p>
       </div>
 
+      <!-- ✅ 팀 연락처만 -->
+      <div class="contact-card">
+        <h4 class="contact-title">
+          <Mail :size="18" />
+          <span>Contact</span>
+        </h4>
+
+        <ul class="contact-list">
+          <li v-for="m in members" :key="m.name" class="contact-item">
+            <span class="name">{{ m.name }}</span>
+            <span class="colon">:</span>
+            <a class="email" :href="`mailto:${m.email}`">{{ m.email }}</a>
+          </li>
+        </ul>
+      </div>
+
+      <!-- 하단 -->
       <div class="footer-bottom">
-        <div class="footer-bottom-left">
-          <p>&copy; {{ currentYear }} Web Crafter. All rights reserved.</p>
-        </div>
-        <div class="footer-bottom-right">
-          <a href="#" class="footer-link">Privacy Policy</a>
-          <span class="divider">•</span>
-          <a href="#" class="footer-link">Terms of Service</a>
-          <span class="divider">•</span>
-          <a href="#" class="footer-link">Cookie Policy</a>
-        </div>
+        <p>&copy; {{ currentYear }} Web Crafter. All rights reserved.</p>
       </div>
     </div>
   </footer>
 </template>
 
 <style scoped>
-/* 기존 스타일 유지 */
+/* ✅ 전체 높이 줄임: padding, margin-top 축소 */
 .footer {
   position: relative;
   background: linear-gradient(180deg, rgba(15, 15, 30, 0.5) 0%, #0f0f1e 100%);
   border-top: 1px solid rgba(0, 212, 255, 0.1);
-  padding: 4rem 2rem 2rem;
-  margin-top: 4rem;
+  padding: 2.2rem 2rem 1.2rem;  /* ⬅️ 줄임 */
+  margin-top: 2.2rem;          /* ⬅️ 줄임 */
 }
 
 .footer-container {
@@ -122,165 +64,121 @@ const socialLinks = [
   margin: 0 auto;
 }
 
-.footer-content {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 2rem;
-  margin-bottom: 3rem;
+/* ✅ 상단 간격 축소 */
+.footer-top {
+  margin-bottom: 1rem; /* ⬅️ 줄임 */
 }
 
-.footer-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.footer-brand {
+.brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 1.5rem;
+  gap: 0.5rem;           /* ⬅️ 줄임 */
+  font-size: 1.35rem;    /* ⬅️ 살짝 줄임 */
   font-weight: 800;
-  margin-bottom: 1rem;
+  margin-bottom: 0.45rem; /* ⬅️ 줄임 */
+}
+
+.brand-icon {
+  display: flex;
+  align-items: center;
+  color: #00d4ff;
+}
+
+.brand-text {
   background: linear-gradient(135deg, #00d4ff 0%, #0099cc 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-.brand-icon {
-  font-size: 2rem;
-  /* SVG 정렬 보정 */
-  display: flex; 
-  align-items: center;
-}
-
-.brand-description {
+.brand-desc {
   color: #a0a0a0;
-  font-size: 0.95rem;
-  line-height: 1.6;
-  margin-bottom: 1.5rem;
+  font-size: 0.9rem;     /* ⬅️ 줄임 */
+  line-height: 1.45;     /* ⬅️ 줄임 */
+  margin: 0;
 }
 
-.social-links {
+/* ✅ 연락처 카드: padding/라운드/타이틀 간격 축소 */
+.contact-card {
+  border: 1px solid rgba(0, 212, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;         /* ⬅️ 살짝 줄임 */
+  padding: 0.9rem 1rem;        /* ⬅️ 줄임 */
+}
+
+.contact-title {
   display: flex;
-  gap: 1rem;
-}
-
-.social-link {
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: rgba(0, 212, 255, 0.1);
-  border: 1px solid rgba(0, 212, 255, 0.2);
-  border-radius: 50%;
-  color: #00d4ff;
-  text-decoration: none;
-  font-weight: 600;
-  transition: all 0.3s ease;
-}
-
-.social-link:hover {
-  background: rgba(0, 212, 255, 0.2);
-  border-color: rgba(0, 212, 255, 0.4);
-  transform: translateY(-3px);
-  color: #fff; /* 호버 시 아이콘 색상을 흰색으로 */
-}
-
-.section-title {
-  font-size: 1rem;
-  font-weight: 700;
+  gap: 0.45rem;               /* ⬅️ 줄임 */
   color: #e0e0e0;
-  margin-bottom: 1rem;
+  font-size: 0.9rem;          /* ⬅️ 줄임 */
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 1px;
+  letter-spacing: 0.9px;
+  margin: 0 0 0.6rem 0;       /* ⬅️ 줄임 */
 }
 
-.link-list {
+.contact-title :deep(svg) {
+  color: #00d4ff;
+}
+
+/* ✅ 리스트 간격 줄임 */
+.contact-list {
   list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.45rem;               /* ⬅️ 줄임 */
+}
+
+.contact-item {
   display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.link-list a {
-  color: #a0a0a0;
-  text-decoration: none;
-  transition: all 0.3s ease;
-  position: relative;
-  padding-bottom: 0.25rem;
-}
-
-.link-list a::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  height: 1px;
-  background: #00d4ff;
-  transition: width 0.3s ease;
-}
-
-.link-list a:hover {
-  color: #00d4ff;
-}
-
-.link-list a:hover::after {
-  width: 100%;
-}
-
-.footer-bottom {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 2rem;
-  border-top: 1px solid rgba(0, 212, 255, 0.05);
+  align-items: baseline;
+  gap: 0.45rem;               /* ⬅️ 줄임 */
   flex-wrap: wrap;
-  gap: 1rem;
+  color: #a0a0a0;
+  font-size: 0.9rem;          /* ⬅️ 줄임 */
+  line-height: 1.35;          /* ⬅️ 줄임 */
 }
 
-.footer-bottom-left,
-.footer-bottom-right {
-  color: #808080;
-  font-size: 0.9rem;
+.name {
+  color: #e8eef6;
+  font-weight: 700;
 }
 
-.footer-link {
+.colon {
+  color: #606060;
+}
+
+.email {
   color: #00d4ff;
   text-decoration: none;
-  transition: all 0.3s ease;
+  border-bottom: 1px solid transparent;
+  transition: all 0.2s ease;
 }
 
-.footer-link:hover {
+.email:hover {
   color: #00ffff;
+  border-bottom-color: rgba(0, 255, 255, 0.6);
 }
 
-.divider {
-  color: #606060;
-  margin: 0 0.75rem;
+/* ✅ 하단 영역 높이 줄임 */
+.footer-bottom {
+  margin-top: 0.9rem;         /* ⬅️ 줄임 */
+  padding-top: 0.75rem;       /* ⬅️ 줄임 */
+  border-top: 1px solid rgba(0, 212, 255, 0.05);
+  color: #808080;
+  font-size: 0.85rem;         /* ⬅️ 줄임 */
 }
 
+/* ✅ 반응형에서도 padding 더 줄임 */
 @media (max-width: 768px) {
   .footer {
-    padding: 3rem 1rem 1.5rem;
+    padding: 1.8rem 1rem 1rem; /* ⬅️ 줄임 */
+    margin-top: 1.6rem;        /* ⬅️ 줄임 */
   }
-
-  .footer-content {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
-  }
-
-  .footer-bottom {
-    flex-direction: column;
-    text-align: center;
-  }
-
-  .footer-bottom-right {
-    display: flex;
-    justify-content: center;
-    gap: 0;
+  .contact-card {
+    padding: 0.85rem 0.9rem;   /* ⬅️ 줄임 */
   }
 }
 </style>

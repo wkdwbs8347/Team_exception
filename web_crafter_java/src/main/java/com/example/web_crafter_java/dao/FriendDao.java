@@ -119,4 +119,6 @@ List<Member> getMyFriends(@Param("myId") Integer myId);
 """)
 List<Integer> getFriendIds(@Param("myId") Integer myId);
 
+
+
 }

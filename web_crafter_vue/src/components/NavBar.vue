@@ -116,26 +116,29 @@ const connectSocketOnce = () => {
       subscribed = true;
 
       // 🔔 notifications
-      stompClient.subscribe(
-        `/topic/user/${auth.me.id}/notifications`,
-        (res) => {
-          if (!res.body) return;
-          const payload = JSON.parse(res.body);
+      stompClient.subscribe(`/topic/user/${auth.me.id}/notifications`, (res) => {
+        if (!res.body) return;
+        const payload = JSON.parse(res.body);
 
-          if (Array.isArray(payload)) {
-            auth.setNotifications(payload);
-            return;
-          }
-
-          const prev = Array.isArray(auth.notifications)
-            ? auth.notifications
-            : [];
-          const next = prev.some((n) => n.id === payload.id)
-            ? prev
-            : [payload, ...prev];
-          auth.setNotifications(next);
+        if (Array.isArray(payload)) {
+          auth.setNotifications(payload);
+          return;
         }
-      );
+
+        const prev = Array.isArray(auth.notifications) ? auth.notifications : [];
+        const next = prev.some((n) => n.id === payload.id) ? prev : [payload, ...prev];
+        auth.setNotifications(next);
+      });
+
+      // ✅ 2) [추가됨] 채팅 메시지 알림 (빨간 점용)
+      stompClient.subscribe(`/topic/notifications/${auth.me.id}`, (res) => {
+        const msg = JSON.parse(res.body);
+        console.log('🔔 채팅 알림 도착:', msg);
+        auth.pushIncomingChat(msg);
+
+        // 스토어의 '안 읽은 사람 목록'에 추가 -> 종 아이콘 & 친구 목록에 빨간 점 뜸
+        auth.unreadSenders.add(msg.senderId);
+      });
 
       // ✅ 1) 개인 토픽 presence
       stompClient.subscribe(`/topic/user/${auth.me.id}/presence`, (res) => {
@@ -151,6 +154,8 @@ const connectSocketOnce = () => {
         }
       });
 
+
+
       // ✅ 2) 공용 토픽 presence (서버가 여기에 publish 하는 경우가 많음)
       stompClient.subscribe(`/topic/presence`, (res) => {
         console.log('📥 presence(global) raw:', res.body);
@@ -165,8 +170,29 @@ const connectSocketOnce = () => {
         }
       });
 
-      // (선택) 서버에 스냅샷 요청 기능이 있을 때만 사용
-      // stompClient.send('/app/presence/sync', {}, JSON.stringify({ userId: auth.me.id }));
+      // ✅ 3) [여기에 추가] 친구 목록 갱신 신호
+      stompClient.subscribe(`/topic/user/${auth.me.id}/friends`, async (res) => {
+        console.log('👥 friends refresh:', res.body);
+
+        try {
+          const fres = await api.get('/friends/list');
+
+          // store에 setFriends 있으면 그걸 쓰고
+          if (typeof auth.setFriends === 'function') {
+            auth.setFriends(Array.isArray(fres.data) ? fres.data : []);
+          } 
+          // 없으면 me.friends에 넣는 임시 방식
+          else {
+            auth.me = {
+              ...(auth.me || {}),
+              friends: Array.isArray(fres.data) ? fres.data : [],
+            };
+          }
+        } catch (e) {
+          console.error('친구 목록 reload 실패', e);
+        }
+      });
+      
     },
     (error) => {
       connecting = false;
@@ -290,8 +316,6 @@ const createNewProject = async () => {
 };
 
 const userName = computed(() => auth.me?.nickname || '사용자');
-const userSub = computed(() => auth.me?.email || '로그인 상태');
-const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
 </script>
 
 <template>
@@ -313,11 +337,7 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
         </button>
       </div>
 
-      <button
-        class="menu-toggle"
-        @click="toggleMenu"
-        :class="{ active: isMenuOpen }"
-      >
+      <button class="menu-toggle" @click="toggleMenu" :class="{ active: isMenuOpen }">
         <span></span><span></span><span></span>
       </button>
 
@@ -325,7 +345,6 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
         <li class="drawer-head">
           <div class="drawer-brand">
             <span class="drawer-title">Web Crafter</span>
-            <span class="drawer-sub">Workspace</span>
           </div>
           <RouterLink
             v-if="!auth.isAuthed"
@@ -346,16 +365,12 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
             <span class="drawer-chevron">›</span>
           </button>
           <button class="drawer-item" @click="openFriendManage">
-            <span class="icon-wrapper"
-              ><Users :size="18" color="#00d4ff"
-            /></span>
+            <span class="icon-wrapper"><Users :size="18" color="#00d4ff" /></span>
             <span class="drawer-text">친구 목록</span>
             <span class="drawer-chevron">›</span>
           </button>
           <router-link to="/explore" class="drawer-item" @click="closeMenu">
-            <span class="icon-wrapper"
-              ><Compass :size="18" color="#00d4ff"
-            /></span>
+            <span class="icon-wrapper"><Compass :size="18" color="#00d4ff" /></span>
             <span class="drawer-text">프로젝트 탐색</span>
             <span class="drawer-chevron">›</span>
           </router-link>
@@ -365,33 +380,17 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
 
         <li class="drawer-footer">
           <div class="profile-card" @click="handleProfileCardClick">
-            <div class="profile-left">
-              <div class="avatar">
-                <img
-                  v-if="auth.isAuthed && auth.me?.profileImage"
-                  :src="auth.me.profileImage"
-                  alt="profile"
-                />
-                <span v-else-if="auth.isAuthed">{{ userInitial }}</span>
-                <svg v-else class="avatar-icon" viewBox="0 0 24 24" fill="none">
-                  <path
-                    d="M12 12c2.761 0 5-2.239 5-5s-2.239-5-5-5-5 2.239-5 5 2.239 5 5 5zM4 20c0-3.314 3.582-6 8-6s8 2.686 8 6"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
+            <!-- ✅ [변경] 프로필 사진 영역 제거 + 텍스트만 -->
+            <div class="profile-meta">
+              <div v-if="!auth.isAuthed" class="login-please">
+                로그인을 진행해주세요
               </div>
-              <div class="profile-meta" v-if="auth.isAuthed">
-                <div class="profile-name" :title="userName">{{ userName }}</div>
-                <div class="profile-sub" :title="userSub">{{ userSub }}</div>
-              </div>
-              <div class="profile-meta guest" v-else>
-                <div class="profile-guest-title">로그아웃 상태</div>
-                <div class="profile-guest-desc">로그인을 진행해주세요</div>
+              <div v-else class="welcome">
+                <span class="nickname">{{ userName }}</span>
+                <span> 님 환영합니다.</span>
               </div>
             </div>
+
             <div class="profile-actions">
               <button
                 v-if="!auth.isAuthed"
@@ -403,11 +402,7 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
               >
                 로그인
               </button>
-              <button
-                v-else
-                class="profile-btn danger"
-                @click.stop="handleLogout"
-              >
+              <button v-else class="profile-btn danger" @click.stop="handleLogout">
                 로그아웃
               </button>
             </div>
@@ -417,12 +412,7 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
     </div>
   </nav>
 
-  <GlobalModal
-    :open="modal.open"
-    :message="modal.message"
-    :type="modal.type"
-    @confirm="closeModal"
-  />
+  <GlobalModal :open="modal.open" :message="modal.message" :type="modal.type" @confirm="closeModal" />
   <FriendListModal
     :isOpen="isFriendListOpen"
     :currentUser="auth.me"
@@ -443,9 +433,7 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
   background: rgba(26, 26, 46, 0.92);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(0, 212, 255, 0.12);
-  transition:
-    background 0.25s,
-    box-shadow 0.25s;
+  transition: background 0.25s, box-shadow 0.25s;
 }
 .navbar.scrolled {
   background: rgba(26, 26, 46, 0.96);
@@ -500,9 +488,7 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
   height: 3px;
   background: #00d4ff;
   border-radius: 2px;
-  transition:
-    transform 0.28s,
-    opacity 0.2s;
+  transition: transform 0.28s, opacity 0.2s;
 }
 .menu-toggle.active span:nth-child(1) {
   transform: rotate(45deg) translate(8px, 8px);
@@ -524,19 +510,13 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
   display: flex;
   flex-direction: column;
   border-radius: 20px;
-  background: linear-gradient(
-    180deg,
-    rgba(10, 20, 44, 0.96),
-    rgba(8, 16, 36, 0.96)
-  );
+  background: linear-gradient(180deg, rgba(10, 20, 44, 0.96), rgba(8, 16, 36, 0.96));
   backdrop-filter: blur(18px);
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
   transform: translateX(110%);
   opacity: 0;
-  transition:
-    transform 0.28s,
-    opacity 0.28s;
+  transition: transform 0.28s, opacity 0.28s;
   z-index: 1100;
   overflow: hidden;
 }
@@ -618,20 +598,41 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
   transform: translateY(-2px);
   background: rgba(0, 212, 255, 0.08);
 }
-.avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 14px;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 212, 255, 0.14);
-  border: 1px solid rgba(0, 212, 255, 0.22);
-  overflow: hidden;
+
+/* ✅ [추가] 프로필 사진 제거 후 텍스트 레이아웃 */
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
-.avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+
+/* ✅ 로그인 안됨: 빨간 글씨 */
+.login-please {
+  color: #ff4d4d;
+  font-weight: 900;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ✅ 로그인 됨: 환영 문구 */
+.welcome {
+  color: rgba(224, 224, 224, 0.94);
+  font-weight: 850;
+  font-size: 0.95rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ✅ 닉네임만 초록 */
+.nickname {
+  color: #22c55e;
+  font-weight: 950;
 }
 
 .navbar-actions {
@@ -672,6 +673,11 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
   border: 2px solid #1a1a2e;
 }
 
+.profile-actions {
+  display: flex;
+  align-items: center;
+}
+
 .profile-btn {
   padding: 9px 12px;
   border-radius: 12px;
@@ -684,5 +690,20 @@ const userInitial = computed(() => userName.value[0]?.toUpperCase() || 'U');
 .profile-btn.danger {
   border-color: rgba(255, 90, 90, 0.35);
   background: rgba(255, 90, 90, 0.1);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }
 </style>

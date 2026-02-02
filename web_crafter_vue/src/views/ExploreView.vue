@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import api from '@/api/axios';
@@ -7,13 +7,39 @@ import GlobalModal from '@/modal/GlobalModal.vue'; // 알림용 모달
 
 const router = useRouter();
 const authStore = useAuthStore();
+
+// --- 상태 관리 ---
+const allProjects = ref([]);
+const searchQuery = ref('');
+const isLoading = ref(false);
+
+// --- 페이지네이션 ---
+const page = ref(0);
+const size = 12;
+const hasMore = ref(true);
+
+// --- 모달 관련 상태 ---
+const selectedProject = ref(null); // 현재 선택된 프로젝트 (미리보기용)
+const isPreviewOpen = ref(false);  // 모달 열림 여부
+const isRemaking = ref(false);     // 리메이크 로딩 상태
+
+// 전역 모달 (에러/알림용)
+const globalModal = ref({ open: false, message: '', type: 'info', onConfirm: null });
+const openGlobalModal = (msg, type = 'info', confirmFn = null) => {
+  globalModal.value = { open: true, message: msg, type, onConfirm: confirmFn };
+};
+const closeGlobalModal = () => {
+  if (globalModal.value.onConfirm) globalModal.value.onConfirm();
+  globalModal.value.open = false;
+};
+
 // 🔥 [신규] "이 프로젝트가 내 것인가?" 판단하는 변수
 const isMyProject = computed(() => {
   // 1. 로그인 안 했거나, 선택된 프로젝트가 없으면 '내 것' 아님
   if (!authStore.isAuthed || !authStore.me || !selectedProject.value) {
     return false;
   }
-  
+
   // 2. 닉네임 비교 (내 정보 구조가 가끔 달라서 안전하게 처리)
   const myNickname = authStore.me.nickname || authStore.me.member?.nickname;
   const ownerNickname = selectedProject.value.ownerNickname;
@@ -28,38 +54,13 @@ const handleMainAction = () => {
     goToProject(selectedProject.value);
     return;
   }
-
   // B. 남의 프로젝트면 -> 리메이크 실행
   handleRemake();
-};
-// --- 상태 관리 ---
-const allProjects = ref([]);
-const searchQuery = ref('');
-const isLoading = ref(false);
-
-// --- 페이지네이션 ---
-const page = ref(0);
-const size = 12; 
-const hasMore = ref(true);
-
-// --- 모달 관련 상태 ---
-const selectedProject = ref(null); // 현재 선택된 프로젝트 (미리보기용)
-const isPreviewOpen = ref(false);  // 모달 열림 여부
-const isRemaking = ref(false);     // 리메이크 로딩 상태
-
-// 전역 모달 (에러/알림용)
-const globalModal = ref({ open: false, message: '', type: 'info', onConfirm: null });
-const openGlobalModal = (msg, type = 'info', confirmFn = null) => {
-  globalModal.value = { open: true, message: msg, type, onConfirm: confirmFn };
-};
-const closeGlobalModal = () => {
-  if(globalModal.value.onConfirm) globalModal.value.onConfirm();
-  globalModal.value.open = false;
 };
 
 // HTML 요소 참조
 const loadTrigger = ref(null);
-const scrollContainer = ref(null); 
+const scrollContainer = ref(null);
 let observer = null;
 
 // --- 데이터 로드 ---
@@ -78,7 +79,7 @@ const fetchProjects = async (isReset = false) => {
 
     if (newProjects && newProjects.length > 0) {
       allProjects.value = [...allProjects.value, ...newProjects];
-      page.value++; 
+      page.value++;
       if (newProjects.length < size) hasMore.value = false;
     } else {
       hasMore.value = false;
@@ -103,11 +104,13 @@ onMounted(async () => {
       fetchProjects(false);
     }
   }, { root: scrollContainer.value, threshold: 0.1 });
+
   if (loadTrigger.value) observer.observe(loadTrigger.value);
 });
 
-onUnmounted(() => { if (observer) observer.disconnect(); });
-
+onUnmounted(() => {
+  if (observer) observer.disconnect();
+});
 
 // 🔥 [신규] 리메이크(복제) 버튼 핸들러
 const handleRemake = async () => {
@@ -115,7 +118,7 @@ const handleRemake = async () => {
     openGlobalModal('로그인이 필요한 기능입니다.', 'warning', () => router.push('/login'));
     return;
   }
-  
+
   if (!selectedProject.value) return;
 
   try {
@@ -127,7 +130,7 @@ const handleRemake = async () => {
     // 2. 성공 시 내 IDE로 이동
     const myNickname = authStore.me?.nickname || 'me';
     openGlobalModal('프로젝트가 복제되었습니다! 작업실로 이동합니다.', 'success', () => {
-       router.push(`/ide/${myNickname}/${newWebId}`);
+      router.push(`/ide/${myNickname}/${newWebId}`);
     });
 
   } catch (e) {
@@ -141,16 +144,73 @@ const handleRemake = async () => {
 // HTML 주입 헬퍼 (모달에서도 사용)
 const getPreviewHtml = (project) => {
   if (!project) return '';
-  let rawHtml = project.previewHtml || '';
+  const rawHtml = (project.previewHtml || '').trim();
+
+  // 비어 있을 때
   if (!rawHtml) {
-    return `<html><body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f8f9fa;color:#ccc;font-family:sans-serif;"><div style="text-align:center;">Empty</div></body></html>`;
+    return `
+<html>
+  <body style="margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f8f9fa;color:#ccc;font-family:sans-serif;">
+    <div>Empty</div>
+  </body>
+</html>`;
   }
-  const styleInjection = `<style>html,body{margin:0;padding:0;width:100%;height:100vh;overflow:hidden;background-color:#fff;}::-webkit-scrollbar{display:none;}</style>`;
-  return rawHtml.includes('</head>') ? rawHtml.replace('</head>', `${styleInjection}</head>`) : styleInjection + rawHtml;
+
+  // 기본 margin 보정
+  const softReset = `<style>
+    html,body{margin:0;padding:0;}
+  <\/style>`;
+
+  // 🔒 미리보기 전용: 드래그 / 선택 차단 (스크롤은 유지)
+  const disableDragCss = `<style>
+    * {
+      -webkit-user-drag: none !important;
+      user-drag: none !important;
+    }
+    body {
+      -webkit-user-select: none !important;
+      user-select: none !important;
+      cursor: default !important;
+    }
+  <\/style>`;
+
+  // 🔒 이벤트 기반 드래그 차단
+  const disableDragJs = `<script>
+    (function(){
+      // HTML5 drag & drop 차단
+      document.addEventListener('dragstart', function(e){
+        e.preventDefault();
+      }, true);
+
+      // 마우스 / 터치 기반 커스텀 드래그 차단
+      const stop = function(e){ e.stopPropagation(); };
+      [
+        'pointerdown','pointermove','pointerup',
+        'mousedown','mousemove','mouseup',
+        'touchstart','touchmove','touchend'
+      ].forEach(function(type){
+        document.addEventListener(type, stop, true);
+      });
+
+      // draggable 속성 제거
+      document.querySelectorAll('[draggable="true"]').forEach(function(el){
+        el.setAttribute('draggable','false');
+      });
+    })();
+  <\/script>`;
+
+  const inject = softReset + disableDragCss + disableDragJs;
+
+  // head가 있으면 head 안에 주입
+  if (rawHtml.includes('</head>')) {
+    return rawHtml.replace('</head>', `${inject}</head>`);
+  }
+
+  // head 없으면 맨 앞에 주입
+  return inject + rawHtml;
 };
 
 const formatDate = (date) => date ? new Date(date).toLocaleDateString() : '';
-// --- 포맷팅 & 기능 함수 ---
 
 // 1. 숫자가 1000이 넘으면 K 단위로 변환 (예: 1200 -> 1.2K)
 const formatViews = (count) => {
@@ -164,10 +224,9 @@ const formatViews = (count) => {
 // 2. 조회수 업데이트 API 호출
 const updateProjectHit = async (projectId) => {
   try {
-    // 백엔드 주소가 /projects/hit/${id} 임을 확인하세요.
     await api.patch(`/projects/hit/${projectId}`);
-    
-    // 로컬 데이터에도 즉시 반영 (다시 로드하지 않아도 숫자가 올라가 보이게)
+
+    // 로컬 데이터에도 즉시 반영
     const project = allProjects.value.find(p => p.id === projectId);
     if (project) project.views = (project.views || 0) + 1;
   } catch (err) {
@@ -175,34 +234,76 @@ const updateProjectHit = async (projectId) => {
   }
 };
 
-// 🔥 [수정] 카드 클릭 시 실행되는 함수에 조회수 증가 추가
+// 카드 클릭 -> 모달 열기 + 조회수 증가
 const openPreviewModal = (project) => {
   selectedProject.value = project;
   isPreviewOpen.value = true;
-  
-  // 모달을 열 때 조회수 증가 API 호출
   updateProjectHit(project.id);
 };
-// 🔥 [누락된 함수 추가] 내 프로젝트 수정하러 이동하기
+
+// 내 프로젝트 수정하러 이동
 const goToProject = (project) => {
   if (!project) return;
-  
-  // 내 닉네임 가져오기 (로그인 상태라고 가정)
+
   const myNickname = authStore.me?.nickname || authStore.me?.member?.nickname;
-  
+
   if (myNickname && project.id) {
     router.push(`/ide/${myNickname}/${project.id}`);
   } else {
     openGlobalModal('프로젝트 정보를 찾을 수 없습니다.', 'error');
   }
 };
+
+/* ======================================================
+   ✅ [비율 수정 ONLY] 모달 프리뷰를 "IDE처럼" 자동 스케일
+   - 박스 크기(모달 레이아웃)는 그대로
+   - 내부 내용만 16:9 기준으로 맞춰서 확대/축소
+   ====================================================== */
+const livePreviewBox = ref(null);
+const liveScale = ref(1);
+
+// IDE/프리뷰의 기준 해상도(16:9)
+const LIVE_STAGE_W = 1200;
+const LIVE_STAGE_H = 675;
+
+let liveResizeObs = null;
+
+const updateLiveScale = () => {
+  if (!livePreviewBox.value) return;
+  const r = livePreviewBox.value.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+
+  // 박스 안에 1200x675를 "안전하게" 맞추는 스케일
+  const s = Math.min(r.width / LIVE_STAGE_W, r.height / LIVE_STAGE_H);
+  liveScale.value = s > 0 ? s : 1;
+};
+
+watch(isPreviewOpen, async (open) => {
+  if (open) {
+    await nextTick();
+    updateLiveScale();
+
+    // ResizeObserver로 모달 크기 변해도 자동 재계산
+    if (liveResizeObs) liveResizeObs.disconnect();
+    liveResizeObs = new ResizeObserver(() => {
+      if (isPreviewOpen.value) updateLiveScale();
+    });
+    if (livePreviewBox.value) liveResizeObs.observe(livePreviewBox.value);
+  } else {
+    if (liveResizeObs) liveResizeObs.disconnect();
+  }
+});
 </script>
 
 <template>
   <div class="explore-wrapper">
     <header>
       <div class="header-container">
-        <div class="logo"><div class="logo-icon">&lt;/&gt;</div><span>Web Crafter</span> <span class="badge">Explore</span></div>
+        <div class="logo">
+          <div class="logo-icon">&lt;/&gt;</div>
+          <span>Web Crafter</span>
+          <span class="badge">Explore</span>
+        </div>
         <nav>
           <router-link to="/explore" class="active">Explore</router-link>
           <router-link to="/mypage">My Page</router-link>
@@ -224,15 +325,21 @@ const goToProject = (project) => {
 
       <section class="grid-section" ref="scrollContainer">
         <div class="card-grid">
-          <div 
-            v-for="project in allProjects" 
-            :key="project.id" 
+          <div
+            v-for="project in allProjects"
+            :key="project.id"
             class="project-card"
-            @click="openPreviewModal(project)" 
+            @click="openPreviewModal(project)"
           >
             <div class="preview-window">
               <div class="iframe-container">
-                <iframe :srcdoc="getPreviewHtml(project)" sandbox="allow-scripts allow-same-origin" loading="lazy" class="scaled-iframe" scrolling="no"></iframe>
+                <iframe
+                  :srcdoc="getPreviewHtml(project)"
+                  sandbox="allow-scripts allow-same-origin"
+                  loading="lazy"
+                  class="scaled-iframe"
+                  scrolling="no"
+                ></iframe>
               </div>
               <div class="overlay"><button class="view-btn">View Details</button></div>
             </div>
@@ -248,8 +355,9 @@ const goToProject = (project) => {
             </div>
           </div>
         </div>
+
         <div ref="loadTrigger" class="scroll-trigger">
-           <div v-if="isLoading" class="loading-msg"><span class="spinner">⏳</span> Loading...</div>
+          <div v-if="isLoading" class="loading-msg"><span class="spinner">⏳</span> Loading...</div>
         </div>
       </section>
     </main>
@@ -265,33 +373,42 @@ const goToProject = (project) => {
         </div>
 
         <div class="modal-body">
-          <div class="live-preview-box">
-             <iframe 
-                :srcdoc="getPreviewHtml(selectedProject)" 
+          <!-- ✅ 박스 크기는 그대로, 내부만 자동 스케일 -->
+          <div class="live-preview-box" ref="livePreviewBox">
+            <div
+              class="live-stage"
+              :style="{
+                width: LIVE_STAGE_W + 'px',
+                height: LIVE_STAGE_H + 'px',
+                transform: `translate(-50%, -50%) scale(${liveScale})`
+              }"
+            >
+              <iframe
+                :srcdoc="getPreviewHtml(selectedProject)"
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
                 class="live-iframe"
-             ></iframe>
+                scrolling="no"
+              ></iframe>
+            </div>
           </div>
         </div>
 
         <div class="modal-footer">
           <div class="footer-left">
-             <span class="date-badge">Last updated: {{ formatDate(selectedProject.updateDate) }}</span>
+            <span class="date-badge">Last updated: {{ formatDate(selectedProject.updateDate) }}</span>
           </div>
           <div class="footer-right">
-             <button class="action-btn cancel" @click="isPreviewOpen = false">닫기</button>
-             
-             <button 
-               class="action-btn remake" 
-               @click="handleMainAction" 
-               :disabled="isRemaking"
-             >
-               <span v-if="isRemaking">⏳ 처리 중...</span>
-               
-               <span v-else-if="isMyProject">✏️ 이어서 만들기 (수정)</span>
-               
-               <span v-else>⚡ 리메이크 (내 걸로 가져오기)</span>
-             </button>
+            <button class="action-btn cancel" @click="isPreviewOpen = false">닫기</button>
+
+            <button
+              class="action-btn remake"
+              @click="handleMainAction"
+              :disabled="isRemaking"
+            >
+              <span v-if="isRemaking">⏳ 처리 중...</span>
+              <span v-else-if="isMyProject">✏️ 이어서 만들기 (수정)</span>
+              <span v-else>⚡ 리메이크 (내 걸로 가져오기)</span>
+            </button>
           </div>
         </div>
       </div>
@@ -307,7 +424,7 @@ const goToProject = (project) => {
 </template>
 
 <style scoped>
-/* (기존 Explore 스타일은 그대로 유지하시고, 아래 모달 스타일만 추가하세요) */
+/* (기존 Explore 스타일은 그대로 유지) */
 .explore-wrapper { min-height: 100vh; background: linear-gradient(135deg, #0a1628 0%, #0d1f3c 100%); color: #fff; font-family: 'Inter', sans-serif; overflow: hidden; }
 header { background: rgba(10, 22, 40, 0.95); padding: 1rem 2rem; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(0, 217, 255, 0.1); }
 .header-container { max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; }
@@ -346,7 +463,7 @@ main { max-width: 1400px; margin: 0 auto; padding: 2rem; height: calc(100vh - 80
 @keyframes spin { 100% { transform: rotate(360deg); } }
 
 /* ======================================================
-   🔥 [NEW] 상세 미리보기 모달 스타일
+   모달 스타일
    ====================================================== */
 .preview-modal-overlay {
   position: fixed;
@@ -396,8 +513,28 @@ main { max-width: 1400px; margin: 0 auto; padding: 2rem; height: calc(100vh - 80
   overflow: hidden;
 }
 
-.live-preview-box { width: 100%; height: 100%; }
-.live-iframe { width: 100%; height: 100%; border: none; background: #fff; }
+/* ✅ [비율 수정 ONLY] 모달 프리뷰 영역: 박스 고정 + 내부 stage 자동 스케일 */
+.live-preview-box {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #fff;
+  position: relative;
+}
+
+.live-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: top left;
+}
+
+.live-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: #fff;
+}
 
 .modal-footer {
   padding: 1rem 1.5rem;

@@ -2,48 +2,112 @@
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { UserPlus, X, MessageCircle, UserMinus, Send } from 'lucide-vue-next';
 import SearchUserModal from '@/modal/SearchUserModal.vue';
+import ChatModal from '@/modal/ChatModal.vue';
+import GlobalModal from '@/modal/GlobalModal.vue';
+import ConfirmModal from '@/modal/ConfirmModal.vue';
 import api from '@/api/axios';
 import { useAuthStore } from '@/stores/auth';
+
 const auth = useAuthStore();
 const statusOf = (id) => auth.friendPresence?.[String(id)] || 'offline';
 
-// ✅ [핵심] 부모(NavBar)에서 보내준 mode('invite' or 'manage')와 webId를 받습니다.
-const props = defineProps([
-  'isOpen',
-  'currentUser',
-  'mode',
-  'webId',
-  'isOwner',
-]);
+// ✅ props
+const props = defineProps(['isOpen', 'currentUser', 'mode', 'webId', 'isOwner']);
 defineEmits(['close']);
 
 const isSearchOpen = ref(false);
+const selectedChatFriend = ref(null);
 const friends = ref([]);
 const projectMemberIds = ref(new Set()); // 이미 멤버
 const pendingInviteIds = ref(new Set()); // 초대장 보낸 사람
 
-// 닉네임 계산
+/* ======================
+   ✅ GlobalModal (alert 대체)
+====================== */
+const modal = ref({
+  open: false,
+  message: '',
+  type: 'info', // warning | info | success | error
+});
+
+const openModal = (message, type = 'info') => {
+  modal.value.open = true;
+  modal.value.message = message;
+  modal.value.type = type;
+};
+
+const closeModal = () => {
+  modal.value.open = false;
+};
+
+/* ======================
+   ✅ ConfirmModal (confirm 대체)
+====================== */
+const confirmModal = ref({
+  open: false,
+  message: '',
+  type: 'warning',
+  confirmText: '삭제',
+  cancelText: '취소',
+  onConfirm: null, // 실행할 콜백 저장
+});
+
+const openConfirm = ({
+  message,
+  type = 'warning',
+  confirmText = '삭제',
+  cancelText = '취소',
+  onConfirm,
+}) => {
+  confirmModal.value.open = true;
+  confirmModal.value.message = message;
+  confirmModal.value.type = type;
+  confirmModal.value.confirmText = confirmText;
+  confirmModal.value.cancelText = cancelText;
+  confirmModal.value.onConfirm = onConfirm;
+};
+
+const closeConfirm = () => {
+  confirmModal.value.open = false;
+  confirmModal.value.onConfirm = null;
+};
+
+const handleConfirm = async () => {
+  try {
+    if (typeof confirmModal.value.onConfirm === 'function') {
+      await confirmModal.value.onConfirm();
+    }
+  } finally {
+    closeConfirm();
+  }
+};
+
+/* ======================
+   ✅ 닉네임/이메일
+====================== */
 const myNickname = computed(() => {
   const u = props.currentUser;
   if (!u) return 'Guest';
   return u.member?.nickname || u.nickname || 'Guest';
 });
 
-// 이메일 계산
 const myEmail = computed(() => {
   const u = props.currentUser;
   if (!u) return '로그인이 필요합니다';
   const email = u.member?.email || u.email;
   if (email) return email;
-  if (myNickname.value !== 'Guest') return 'No Email';
+  if (myNickname.value !== 'Guest') return;
   return '로그인이 필요합니다';
 });
 
-// 친구 목록 불러오기 (+ 초대 모드면 멤버 목록도 같이 로드)
+/* ======================
+   ✅ 데이터 로드
+====================== */
 const loadFriends = async () => {
   if (myNickname.value === 'Guest') return;
+
   try {
-    // 1. 친구 목록
+    // 1) 친구 목록
     const res = await api.get('/friends/list');
     friends.value = res.data;
 
@@ -52,14 +116,12 @@ const loadFriends = async () => {
       auth.updateFriendPresence(u.id, s);
     }
 
-    // 2. 초대 모드일 때: 멤버 목록 + ✅ [추가] 대기 목록 가져오기
+    // 2) 초대 모드일 때: 멤버 목록 + pending 목록
     if (props.mode === 'invite' && props.webId) {
       try {
-        // (1) 이미 멤버인 사람들
         const memberRes = await api.get(`/projects/${props.webId}/members`);
         projectMemberIds.value = new Set(memberRes.data);
 
-        // (2) ✅ [추가] 초대를 보낸 사람들 (Pending)
         const pendingRes = await api.get(
           `/projects/${props.webId}/pending-invites`
         );
@@ -73,64 +135,102 @@ const loadFriends = async () => {
   }
 };
 
-// 멤버 추방 함수
-const kickMember = async (friendId, nickname) => {
-  if (!confirm(`정말로 '${nickname}' 님을 프로젝트에서 추방하시겠습니까?`))
-    return;
-
-  try {
-    // 백엔드 추방 API 호출
-    await api.delete(`/projects/${props.webId}/members/${friendId}`);
-
-    // 성공 시: '참여중' 목록에서 제거 (즉시 '초대' 버튼으로 바뀜)
-    projectMemberIds.value.delete(friendId);
-
-    alert(`'${nickname}' 님을 추방했습니다.`);
-  } catch (e) {
-    console.error(e);
-    alert(e.response?.data || '추방 실패');
-  }
-};
-
-// 친구 삭제 함수
-const deleteFriend = async (friendId, nickname) => {
-  if (!confirm(`정말로 '${nickname}' 님을 친구 목록에서 삭제하시겠습니까?`))
-    return;
-  try {
-    await api.delete(`/friends/${friendId}`);
-    friends.value = friends.value.filter((u) => u.id !== friendId);
-  } catch (e) {
-    console.error(e);
-    alert('삭제 실패: ' + (e.response?.data?.message || '서버 오류'));
-  }
-};
-
-const isMember = (userId) => projectMemberIds.value.has(userId); // 참여중
-const isPending = (userId) => pendingInviteIds.value.has(userId); // 초대됨(대기)
-
-// ✅ [추가] 프로젝트 초대 함수
-const inviteProject = async (friendId, nickname) => {
-  if (!confirm(`'${nickname}'님을 현재 프로젝트에 초대하시겠습니까?`)) return;
-
-  try {
-    // 백엔드 초대 API 호출
-    await api.post('/projects/invite', {
-      targetId: friendId,
-      webId: props.webId,
-    });
-
-    alert(`'${nickname}'님에게 초대장을 보냈습니다! 💌`);
-  } catch (e) {
-    console.error(e);
-    alert(e.response?.data?.message || '초대 실패 (이미 멤버이거나 오류)');
-  }
-};
-
 const handleSearchClose = () => {
   isSearchOpen.value = false;
   loadFriends();
 };
 
+/* ======================
+   ✅ 상태 판정
+====================== */
+const isMember = (userId) => projectMemberIds.value.has(userId);
+const isPending = (userId) => pendingInviteIds.value.has(userId);
+
+/* ======================
+   ✅ 액션 함수들 (confirm/alert 모달 적용)
+====================== */
+
+// 친구 삭제
+const deleteFriend = (friendId, nickname) => {
+  openConfirm({
+    message: `정말로 '${nickname}' 님을 친구 목록에서 삭제하시겠습니까?`,
+    type: 'warning',
+    confirmText: '삭제',
+    cancelText: '취소',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/friends/${friendId}`);
+        friends.value = friends.value.filter((u) => u.id !== friendId);
+        openModal(`'${nickname}' 님을 친구 목록에서 삭제했습니다.`, 'success');
+      } catch (e) {
+        console.error(e);
+        openModal(
+          '삭제 실패: ' + (e.response?.data?.message || '서버 오류'),
+          'error'
+        );
+      }
+    },
+  });
+};
+
+// 멤버 추방
+const kickMember = (friendId, nickname) => {
+  openConfirm({
+    message: `정말로 '${nickname}' 님을 프로젝트에서 추방하시겠습니까?`,
+    type: 'warning',
+    confirmText: '추방',
+    cancelText: '취소',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${props.webId}/members/${friendId}`);
+        projectMemberIds.value.delete(friendId);
+        openModal(`'${nickname}' 님을 추방했습니다.`, 'success');
+      } catch (e) {
+        console.error(e);
+        openModal(e.response?.data || '추방 실패', 'error');
+      }
+    },
+  });
+};
+
+// 프로젝트 초대
+const inviteProject = (friendId, nickname) => {
+  openConfirm({
+    message: `'${nickname}'님을 현재 프로젝트에 초대하시겠습니까?`,
+    type: 'info',
+    confirmText: '초대',
+    cancelText: '취소',
+    onConfirm: async () => {
+      try {
+        await api.post('/projects/invite', {
+          targetId: friendId,
+          webId: props.webId,
+        });
+
+        // UI 즉시 반영
+        pendingInviteIds.value.add(friendId);
+
+        openModal(`'${nickname}'님에게 초대장을 보냈습니다! 💌`, 'success');
+      } catch (e) {
+        console.error(e);
+        openModal(
+          e.response?.data?.message || '초대 실패 (이미 멤버이거나 오류)',
+          'error'
+        );
+      }
+    },
+  });
+};
+
+// 채팅 열기
+const openChat = (friend) => {
+  auth.markAsRead(friend.id);
+  selectedChatFriend.value = friend;
+};
+
+/* ======================
+   ✅ watch / realtime
+====================== */
 watch(
   [() => props.isOpen, () => props.currentUser],
   ([isOpen, user]) => {
@@ -138,24 +238,18 @@ watch(
       friends.value = [];
       return;
     }
-    if (isOpen) {
-      loadFriends();
-    }
+    if (isOpen) loadFriends();
   },
   { immediate: true }
 );
 
-// 📡 [추가] 실시간 상태 변경 이벤트 수신 핸들러
+// 실시간 상태 변경
 const handleFriendStatusUpdate = (event) => {
   const { userId, status } = event.detail;
-
-  // 1. Pinia 스토어 상태 업데이트 (이러면 statusOf 함수가 반응해서 UI 바뀜)
   auth.updateFriendPresence(userId, status);
-
   console.log(`🔔 [Connections] 친구(${userId}) 상태 변경됨 -> ${status}`);
 };
 
-// ✅ 컴포넌트가 켜질 때 리스너 등록, 꺼질 때 해제
 onMounted(() => {
   window.addEventListener('friend-status-update', handleFriendStatusUpdate);
 });
@@ -195,21 +289,13 @@ onUnmounted(() => {
             <div class="avatar me">ME</div>
             <div class="status-dot online"></div>
           </div>
+
           <div class="info-area">
             <div class="user-name">
               {{ myNickname }}
               <span class="badge" v-if="myNickname !== 'Guest'">Me</span>
             </div>
-            <div
-              class="user-bio"
-              v-if="
-                myEmail &&
-                myEmail !== 'No Email' &&
-                myEmail !== '로그인이 필요합니다'
-              "
-            >
-              {{ myEmail }}
-            </div>
+            <div class="user-bio">{{ myEmail }}</div>
           </div>
         </div>
 
@@ -220,7 +306,6 @@ onUnmounted(() => {
 
           <div v-if="friends.length === 0" class="empty-state">
             <p>아직 친구가 없습니다.</p>
-            <p class="sub">친구를 추가해서 프로젝트에 초대해보세요!</p>
           </div>
 
           <div v-else class="friend-list">
@@ -236,18 +321,15 @@ onUnmounted(() => {
               </div>
 
               <div class="action-group">
+                <!-- ✅ invite mode -->
                 <template v-if="mode === 'invite'">
                   <template v-if="isMember(u.id)">
-                    <button
-                      v-if="isOwner"
-                      class="icon-btn kick"
-                      @click.stop="kickMember(u.id, u.nickname)"
-                      title="멤버 추방"
-                    >
-                      <UserMinus :size="18" />
+                    <div class="member-badge">참여중</div>
+                    <!-- (원하면 추방 버튼도 여기 추가 가능)
+                    <button v-if="isOwner" class="icon-btn kick" @click.stop="kickMember(u.id, u.nickname)" title="추방">
+                      ...
                     </button>
-
-                    <div v-else class="member-badge">참여중</div>
+                    -->
                   </template>
 
                   <div v-else-if="isPending(u.id)" class="pending-badge">
@@ -258,16 +340,22 @@ onUnmounted(() => {
                     v-else
                     class="icon-btn invite"
                     @click.stop="inviteProject(u.id, u.nickname)"
-                    title="프로젝트 초대 보내기"
+                    title="프로젝트 초대"
                   >
                     <Send :size="18" />
                   </button>
                 </template>
 
+                <!-- ✅ manage mode -->
                 <template v-else>
-                  <button class="icon-btn chat" title="채팅 보내기">
+                  <button
+                    class="icon-btn chat"
+                    title="채팅 보내기"
+                    @click.stop="openChat(u)"
+                  >
                     <MessageCircle :size="18" />
                   </button>
+
                   <button
                     class="icon-btn delete"
                     @click.stop="deleteFriend(u.id, u.nickname)"
@@ -284,6 +372,32 @@ onUnmounted(() => {
     </div>
 
     <SearchUserModal :isOpen="isSearchOpen" @close="handleSearchClose" />
+
+    <ChatModal
+      v-if="selectedChatFriend"
+      :friend="selectedChatFriend"
+      :my-id="auth.me?.id"
+      @close="selectedChatFriend = null"
+    />
+
+    <!-- ✅ 알림 모달 (네가 준 방식 그대로) -->
+    <GlobalModal
+      :open="modal.open"
+      :message="modal.message"
+      :type="modal.type"
+      @confirm="closeModal"
+    />
+
+    <!-- ✅ 컨펌 모달 (네가 준 방식 그대로) -->
+    <ConfirmModal
+      :open="confirmModal.open"
+      :message="confirmModal.message"
+      :type="confirmModal.type"
+      :confirmText="confirmModal.confirmText"
+      :cancelText="confirmModal.cancelText"
+      @confirm="handleConfirm"
+      @cancel="closeConfirm"
+    />
   </div>
 </template>
 
@@ -643,5 +757,30 @@ onUnmounted(() => {
 .friend-item .status-dot.online {
   background: #22c55e;
   box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+/* ✅ [수정 3] 빨간 점(unread-badge) 스타일 추가 */
+.unread-badge {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  background: #ef4444;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 800;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 2px solid #151922;
+  box-shadow: 0 2px 5px rgba(239, 68, 68, 0.4);
+  animation: bounce 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes bounce {
+  0% { transform: scale(0); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1); }
 }
 </style>

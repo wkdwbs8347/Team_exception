@@ -36,7 +36,6 @@ import {
   Monitor, // 미리보기
   Settings2, // 설정 없이 바로 시작
   Play, // 실행
-  Github, // GitHub 버튼 아이콘
 } from 'lucide-vue-next';
 import { useAuthStore } from '@/stores/auth';
 
@@ -409,49 +408,6 @@ const handleSignUp = () => router.push('/register');
           </button>
         </form>
 
-        <!-- 구분선 -->
-        <div class="divider">
-          <span>or</span>
-        </div>
-
-        <!-- 소셜 로그인 -->
-        <div class="social-login">
-          <button type="button" class="social-btn google">
-            <span>
-              <svg
-                aria-label="Google logo"
-                width="18"
-                height="18"
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 512 512"
-              >
-                <g>
-                  <path
-                    fill="#34a853"
-                    d="M153 292c30 82 118 95 171 60h62v48A192 192 0 0190 341"
-                  ></path>
-                  <path
-                    fill="#4285f4"
-                    d="m386 400a140 175 0 0053-179H260v74h102q-7 37-38 57"
-                  ></path>
-                  <path
-                    fill="#fbbc02"
-                    d="m90 341a208 200 0 010-171l63 49q-12 37 0 73"
-                  ></path>
-                  <path
-                    fill="#ea4335"
-                    d="m153 219c22-69 116-109 179-50l55-54c-78-75-230-72-297 55"
-                  ></path>
-                </g></svg
-            ></span>
-            Google
-          </button>
-          <button type="button" class="social-btn github">
-            <span><Github :size="18" /></span>
-            GitHub
-          </button>
-        </div>
-
         <!-- 회원가입 링크 -->
         <div class="signup-section">
           <p>
@@ -512,6 +468,37 @@ const handleSignUp = () => router.push('/register');
 </template>
 
 <style scoped>
+/* =========================================
+   🔥 브라우저 자동완성(Autofill) 스타일 강제 수정 (가장 중요)
+   - 크롬, 엣지 등에서 배경이 하얗게/파랗게 변하는 것 방지
+========================================= */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  /* 1. 글자 색상 */
+  -webkit-text-fill-color: #e0e0e0 !important;
+  
+  /* 2. 배경색 덮어쓰기 (내부 그림자) - 다크 테마 유지 */
+  -webkit-box-shadow: 0 0 0px 1000px #1a1a2e inset !important;
+  
+  /* 3. 배경 전환 애니메이션 딜레이 */
+  transition: background-color 5000s ease-in-out 0s;
+  
+  /* 4. 보더 스타일 강제 지정 (Register.vue와 동일하게) */
+  border: 1px solid rgba(0, 212, 255, 0.2) !important;
+}
+
+/* (선택사항) 자동완성된 상태에서 포커스(클릭) 했을 때 보더 색상 */
+input:-webkit-autofill:focus {
+    border-color: rgba(0, 212, 255, 0.5) !important;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 0px 1000px #1a1a2e !important;
+}
+
+
+/* ======================
+   👇 기존 스타일 유지 👇
+====================== */
 .error-tooltip {
   position: absolute;
   top: 100%;
@@ -792,11 +779,12 @@ const handleSignUp = () => router.push('/register');
   user-select: none;
 }
 
+/* ✅ 체크박스 색상 수정 (Register.vue와 동일) */
 .remember-me input {
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #00d4ff;
+  accent-color: #00d4ff; /* 여기 색상을 변경 */
 }
 
 .forgot-password {

@@ -63,6 +63,8 @@ import { Settings } from 'lucide-vue-next';
 import AiChatBot from '@/modal/AiChatBot.vue';
 import ThemeSettingsModal from '@/modal/ThemeSettingsModal.vue';
 import { applyContentAttrsToHtml } from '@/utils/applyContentAttrsToHtml';
+import { buildWcPreviewSrcdoc } from '@/utils/previewRuntime';
+import { DRAG_RUNTIME_JS } from '@/runtime/dragRuntime';
 
 const currentClientId = 'client_' + Math.random().toString(36).substr(2, 9);
 //기본 테마 설정
@@ -543,20 +545,14 @@ const saveToServerAsJson = async () => {
     // 🔥 [수정] style 태그 중첩 문제 해결!
     // genCss 변수 안에 이미 <style>...</style> 태그가 포함되어 있으므로,
     // 겉을 감싸던 <style> 태그를 제거하고 분리했습니다.
-    const previewHtmlString = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <style>
-            body { margin: 0; padding: 0; overflow: hidden; background-color: #fff; }
-          </style>
-          ${genCss}
-        </head>
-        <body>
-          ${cleanCodeForView(genHtml)} 
-        </body>
-      </html>
-    `;
+ // ✅ [핵심] Explore에 보여줄 previewHtml은 "IDE에서 실제로 보는 srcdoc"을 그대로 저장한다.
+const previewHtmlString = (previewSrc.value || '').trim();
+
+// previewSrc가 아직 비어있다면(초기 로드 직후 등) 한번 강제로 만들고 저장
+if (!previewHtmlString) {
+  updatePreview(); // 내부에서 buildWcPreviewSrcdoc로 previewSrc.value 생성
+}
+const finalPreviewHtml = (previewSrc.value || '').trim();
 
     // ---------------------------------------------------------
     // 🔥 [핵심 2] 백엔드가 원하는 구조(Map)로 포장
@@ -571,7 +567,7 @@ const saveToServerAsJson = async () => {
         logicData: logicRaw,
       },
       // ② previewHtml: 미리보기용 데이터 (HTML String) -> userWeb 테이블용
-      previewHtml: previewHtmlString,
+      previewHtml: finalPreviewHtml,
     };
 
     // ---------------------------------------------------------
@@ -1685,7 +1681,26 @@ const updatePreview = () => {
     '</body></html>',
   ];
 
-  const newHtml = htmlParts.join('\n');
+  const newHtml = buildWcPreviewSrcdoc({
+  structureHtml: structureCodeApplied,
+  styleRaw: styleCodeRaw,
+  positionsMap: getPositionsMap(),
+  isRunning: isRunning.value,
+
+  webId: props.webId,
+  pageId: page.id,
+  pageRoute: page.route,
+  scaleRatio,
+  animationKeyframes: Animation.Animation.ANIMATION_KEYFRAMES,
+  authRuntimeJs: AUTH_RUNTIME_JS,
+  valueRuntimeJs: VALUE_RUNTIME_JS,
+  logicJs: logicCodeForPreview,
+
+  enableDrag: true,                 // ✅ 드래그 쓸거면 true
+  dragRuntimeJs: DRAG_RUNTIME_JS,   // ✅ 여기!
+});
+
+previewSrc.value = newHtml;
 
   if (previewSrc.value !== newHtml) {
     previewSrc.value = newHtml;
@@ -2531,7 +2546,7 @@ onMounted(async () => {
     move: { scrollbars: true, drag: true, wheel: true },
     zoom: { controls: true, wheel: false, startScale: 0.8 },
     grid: { spacing: 20, length: 3, colour: '#ccc', snap: true },
-    trashcan: true,
+    trashcan: false,
   });
 
   // 드래그 중 deletable 상태 백업/복구용

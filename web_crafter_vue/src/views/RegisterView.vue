@@ -1650,8 +1650,30 @@ const getEmailButtonLabel = () => {
   color: #ff6b6b;
 }
 
-/* 인증번호 입력칸 위 여백 */
-.verify-row {
-  margin-top: 0.75rem;
+/* =========================================
+   🔥 브라우저 자동완성(Autofill) 스타일 수정 (최종)
+========================================= */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  /* 1. 글자 색상 */
+  -webkit-text-fill-color: #e0e0e0;
+  
+  /* 2. 배경색 덮어쓰기 (내부 그림자) */
+  -webkit-box-shadow: 0 0 0px 1000px #1a1a2e inset !important;
+  
+  /* 3. 배경 전환 애니메이션 딜레이 */
+  transition: background-color 5000s ease-in-out 0s;
+  
+  /* 4. [★해결책] 보더 스타일 강제 지정 */
+  /* 원래 .form-input에 있던 스타일과 똑같이 맞춰줍니다 */
+  border: 1px solid rgba(0, 212, 255, 0.2) !important;
+}
+
+/* (선택사항) 자동완성된 상태에서 포커스(클릭) 했을 때 보더 색상 */
+input:-webkit-autofill:focus {
+    border-color: rgba(0, 212, 255, 0.5) !important;
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.2), inset 0 0 0px 1000px #1a1a2e !important;
 }
 </style>

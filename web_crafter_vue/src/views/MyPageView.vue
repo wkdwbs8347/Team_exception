@@ -1,13 +1,14 @@
 <script setup>
-import { ref, computed, onMounted, nextTick, onBeforeUnmount } from 'vue';
-import { useRouter } from 'vue-router';
-import { useAuthStore } from '@/stores/auth'; // Pinia 스토어
+import { ref, computed, onMounted, nextTick, onBeforeUnmount, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
+import { useAuthStore } from '@/stores/auth';
 import api from '@/api/axios';
 import EditProfileModal from '@/modal/EditProfileModal.vue';
 import GlobalModal from '@/modal/GlobalModal.vue';
 import ConfirmModal from '@/modal/ConfirmModal.vue';
 
 const router = useRouter();
+const route = useRoute();
 const authStore = useAuthStore();
 
 // 1. 데이터 상태 관리
@@ -19,8 +20,7 @@ const myProjectCount = ref(0);
 const sharedProjectCount = ref(0);
 const isEditModalOpen = ref(false);
 
-// ✅ [핵심 수정 1] 로컬 변수(ref) 삭제하고 Store를 바라보게 변경(computed)
-// 이제 NavBar가 Store를 업데이트하면 여기도 자동으로 바뀝니다.
+// ✅ Store 기반
 const notifications = computed(() => authStore.notifications || []);
 const unreadNotiCount = computed(() =>
   authStore.notifications ? authStore.notifications.length : 0
@@ -125,20 +125,62 @@ const handleKeydown = (e) => {
 onMounted(() => window.addEventListener('keydown', handleKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 
+/* ======================
+   ✅ 탭 전환 + URL query 동기화 (핵심 수정)
+   - 마이페이지 내부에서 MY/SHARED/ALL 눌러도 URL이 바뀌게 해서
+     NOTI로 다시 push될 때 watch가 확실히 동작하도록 함
+====================== */
 const changeTab = async (tabName) => {
-  currentTab.value = tabName;
+  const nextTab = String(tabName || '').toUpperCase();
+  if (!nextTab) return;
 
-  // 알림 탭 누를 때 확실하게 서버랑 동기화 (Store 업데이트)
-  if (tabName === 'NOTI') {
+  // ✅ URL query도 같이 맞춰줌 (same-value면 replace 생략 가능하지만, 일관성을 위해 조건부로)
+  const curQ = String(route.query.tab || '').toUpperCase();
+  if (curQ !== nextTab) {
+    // replace: 뒤로가기 히스토리 과도하게 쌓이는 것 방지
+    await router.replace({ query: { ...route.query, tab: nextTab } });
+  }
+
+  currentTab.value = nextTab;
+
+  // ✅ 알림 탭은 서버 동기화
+  if (nextTab === 'NOTI') {
     try {
       const res = await api.get('/friends/notifications');
-      authStore.setNotifications(res.data); // ✅ Store 갱신
+      authStore.setNotifications(res.data);
     } catch (e) {
       console.error('알림 로드 실패:', e);
       openModal('알림을 불러오지 못했습니다.', 'error');
     }
   }
 };
+
+/* ======================
+   ✅ URL query로 탭 자동 선택
+====================== */
+const applyTabFromQuery = async () => {
+  const tab = String(route.query.tab || '').toUpperCase();
+  if (!tab) return;
+
+  if (tab === 'NOTI') {
+    // ✅ 알림탭은 changeTab을 타야 서버 동기화됨
+    await changeTab('NOTI');
+    return;
+  }
+
+  if (tab === 'MY' || tab === 'SHARED' || tab === 'ALL') {
+    currentTab.value = tab;
+  }
+};
+
+// query 바뀔 때도 적용 (NavBar에서 push / 뒤로가기 포함)
+watch(
+  () => route.query.tab,
+  () => {
+    applyTabFromQuery();
+  },
+  { immediate: true }
+);
 
 // [수정] 친구 요청 수락/거절 처리
 const handleFriendAction = async (action, noti) => {
@@ -155,7 +197,7 @@ const handleFriendAction = async (action, noti) => {
       notiId: noti.id,
     });
 
-    // ✅ [핵심 수정 2] 처리된 알림은 Store에서 제거 -> 화면 자동 반영
+    // ✅ 처리된 알림은 Store에서 제거 -> 화면 자동 반영
     const newList = authStore.notifications.filter((n) => n.id !== noti.id);
     authStore.setNotifications(newList);
 
@@ -188,7 +230,7 @@ const handleProjectAction = async (action, noti) => {
           webId: noti.relId,
         });
 
-        // ✅ [핵심 수정 3] Store에서 제거
+        // ✅ Store에서 제거
         const newList = authStore.notifications.filter((n) => n.id !== noti.id);
         authStore.setNotifications(newList);
 
@@ -232,6 +274,11 @@ onMounted(async () => {
 
     isLoading.value = false;
     console.log('통계 및 리스트 로드 완료');
+
+    // ✅ (선택) 최초 진입 시 query가 없으면 ALL로 통일하고 싶다면 주석 해제
+    // if (!route.query.tab) {
+    //   await router.replace({ query: { ...route.query, tab: 'ALL' } });
+    // }
   } catch (error) {
     if (error.response?.status === 401) {
       openModal('로그인이 필요합니다.', 'warning', () => {
@@ -430,7 +477,7 @@ export default {
         <div
           class="stat-card"
           :class="{ active: currentTab === 'MY' }"
-          @click="currentTab = 'MY'"
+          @click="changeTab('MY')"
           style="cursor: pointer"
         >
           <div class="stat-number">{{ myProjectCount }}</div>
@@ -440,7 +487,7 @@ export default {
         <div
           class="stat-card"
           :class="{ active: currentTab === 'SHARED' }"
-          @click="currentTab = 'SHARED'"
+          @click="changeTab('SHARED')"
           style="cursor: pointer"
         >
           <div class="stat-number">{{ sharedProjectCount }}</div>
@@ -461,13 +508,13 @@ export default {
       <section class="activity-section">
         <h2
           class="activity-title"
-          @click="currentTab = 'ALL'"
+          @click="changeTab('ALL')"
           style="cursor: pointer"
         >
           {{ currentTab === 'NOTI' ? 'Notifications' : 'Your Workspaces' }}
-          <small v-if="currentTab !== 'ALL' && currentTab !== 'NOTI'"
-            >(Filtering: {{ currentTab }})</small
-          >
+          <small v-if="currentTab !== 'ALL' && currentTab !== 'NOTI'">
+            (Filtering: {{ currentTab }})
+          </small>
         </h2>
 
         <div v-if="currentTab === 'NOTI'" class="notification-list">
@@ -528,9 +575,7 @@ export default {
             </div>
           </div>
 
-          <div v-else class="empty-msg">
-            🔔 현재 확인된 새로운 알림이 없습니다.
-          </div>
+          <div v-else class="empty-msg">🔔 현재 확인된 새로운 알림이 없습니다.</div>
         </div>
 
         <div v-else class="project-grid">
@@ -559,6 +604,7 @@ export default {
                   autofocus
                 />
               </div>
+
               <div class="activity-time">
                 {{ web.role }} | Last updated: {{ formatDate(web.updateDate) }}
                 <span v-if="web.ownerNickname"
@@ -680,37 +726,6 @@ header {
   justify-content: center;
   color: #0a1628;
   font-weight: 900;
-}
-
-/* 7. 워크스페이스(카드) 섹션 수정 */
-.project-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-
-  /* 높이 및 스크롤 설정 */
-  height: 150px; /* 요청하신 고정 높이 */
-  overflow-y: auto; /* 세로 내용이 넘치면 스크롤바 생성 */
-  padding-right: 10px; /* 스크롤바와 카드 사이의 여유 공간 */
-}
-
-/* (선택) 스크롤바 디자인을 더 깔끔하게 만들고 싶다면 추가하세요 */
-.project-grid::-webkit-scrollbar {
-  width: 6px;
-}
-
-.project-grid::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-}
-
-.project-grid::-webkit-scrollbar-thumb {
-  background: rgba(0, 217, 255, 0.3);
-  border-radius: 10px;
-}
-
-.project-grid::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 217, 255, 0.5);
 }
 
 nav a {
@@ -842,11 +857,42 @@ main {
   font-weight: 600;
 }
 
+/* ✅ [핵심] 덜 잘리게: 고정 height 제거 + 유동 max-height */
+.project-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem; /* 기존 1rem보다 살짝 줄임 */
+
+  height: auto;
+  max-height: clamp(220px, 34vh, 380px); /* 덜 잘리고, 화면에 맞게 */
+  overflow-y: auto;
+
+  padding-right: 10px;
+}
+
+/* 스크롤바 디자인 */
+.project-grid::-webkit-scrollbar {
+  width: 6px;
+}
+.project-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+.project-grid::-webkit-scrollbar-thumb {
+  background: rgba(0, 217, 255, 0.3);
+  border-radius: 10px;
+}
+.project-grid::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 217, 255, 0.5);
+}
+
+/* ✅ 카드 자체도 살짝 얇게 만들어서 더 많이 보이게 */
 .project-card {
   display: flex;
-  justify-content: space-between; /* 정보는 왼쪽, 버튼들은 오른쪽 끝 */
+  justify-content: space-between;
   align-items: center;
-  padding: 1.2rem 1.5rem;
+
+  padding: 0.85rem 1.2rem; /* ✅ 기존 1.2rem 1.5rem */
   background: rgba(255, 255, 255, 0.02);
   border-left: 4px solid #00d9ff;
   border-radius: 0 10px 10px 0;
@@ -864,12 +910,12 @@ main {
 
 .activity-text {
   font-weight: 600;
-  font-size: 1.05rem;
-  margin-bottom: 0.2rem;
+  font-size: 1rem;        /* ✅ 기존 1.05rem */
+  margin-bottom: 0.15rem; /* ✅ 기존 0.2rem */
 }
 
 .activity-time {
-  font-size: 0.85rem;
+  font-size: 0.8rem; /* ✅ 기존 0.85rem */
   color: #7a8a99;
 }
 
@@ -933,21 +979,21 @@ main {
   width: auto;
 }
 
-/* 2. [핵심] 정보와 버튼 사이를 벌려주는 장치 */
+/* 정보와 버튼 사이를 벌려주는 장치 */
 .project-info {
-  flex-grow: 1; /* 이 영역이 남는 공간을 다 차지해서 버튼들을 오른쪽으로 밀어냅니다 */
+  flex-grow: 1;
 }
 
-/* 3. 점 3개 컨테이너: 간격만 설정 */
+/* 점 3개 컨테이너 */
 .menu-container {
   position: relative;
   display: flex;
   align-items: center;
   margin-left: auto;
-  margin-right: 12px; /* ⋮ 버튼과 Open 버튼 사이의 간격 */
+  margin-right: 12px;
 }
 
-/* 4. 드롭다운(Delete) 위치 */
+/* 드롭다운(Delete) 위치 */
 .dropdown-menu {
   position: absolute;
   top: 50%;
@@ -958,7 +1004,7 @@ main {
   z-index: 9999;
 }
 
-/* 5. Delete 버튼 */
+/* Delete 버튼 */
 .delete-opt {
   min-width: 70px;
   height: 38px;
@@ -974,7 +1020,7 @@ main {
   justify-content: center;
 }
 
-/* [추가] 알림 리스트 스타일 */
+/* 알림 리스트 스타일 */
 .noti-wrapper {
   display: flex;
   flex-direction: column;

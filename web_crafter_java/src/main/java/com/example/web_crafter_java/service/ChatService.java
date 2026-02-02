@@ -18,4 +18,8 @@ public class ChatService {
     public List<ChatMessage> getChatHistory(String roomId) {
         return chatDao.getMessagesByRoomId(roomId);
     }
+
+   public void deleteChatRoom(String roomId) {
+        chatDao.deleteChatRoom(roomId);
+    }
 }

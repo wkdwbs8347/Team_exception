@@ -25,13 +25,6 @@ const fetchStats = async () => {
     let pCount = data.projectCount || 0;
     let tViews = data.totalViews || 0;
 
-    // 2. 데모 모드 로직 (프로젝트가 0개면 가짜 데이터 보여주기)
-    if (pCount === 0) {
-        console.warn("⚠️ 데이터가 없어서 데모 모드(가짜 데이터)를 보여줍니다.");
-        uCount = 15;
-        pCount = 3;
-        tViews = 120;
-    }
 
     // 3. 최종 값을 화면 변수(stats)에 주입
     // 🚨 중요: 인덱스 0, 1, 2 순서대로 넣어야 합니다.

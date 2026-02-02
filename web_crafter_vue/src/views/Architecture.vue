@@ -1,7 +1,7 @@
 <script setup>
-import { Database, Server, Layers, Code2, Cpu, Network } from 'lucide-vue-next';
+import { Database, Server, Layers, Code2, Cpu, Network, ArrowLeftRight, ArrowDown } from 'lucide-vue-next';
 import { onMounted } from 'vue'
-// 데이터 정의
+
 const nodes = [
   {
     id: 'frontend',
@@ -9,6 +9,7 @@ const nodes = [
     description: 'Vue 3 + Vite + Blockly',
     color: 'text-green-600',
     bgColor: 'bg-green-50 border-green-200',
+    borderColor: 'hover:border-green-400',
     iconComponent: Code2
   },
   {
@@ -17,6 +18,7 @@ const nodes = [
     description: 'Spring Boot + Gemini API',
     color: 'text-blue-600',
     bgColor: 'bg-blue-50 border-blue-200',
+    borderColor: 'hover:border-blue-400',
     iconComponent: Server
   },
   {
@@ -25,9 +27,11 @@ const nodes = [
     description: 'MySQL',
     color: 'text-orange-600',
     bgColor: 'bg-orange-50 border-orange-200',
+    borderColor: 'hover:border-orange-400',
     iconComponent: Database
   }
 ];
+
 onMounted(() => {
   window.scrollTo(0, 0);
 });
@@ -35,82 +39,79 @@ onMounted(() => {
 
 <template>
   <div class="w-full min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6 flex items-center justify-center overflow-hidden">
-    <div class="max-w-6xl mx-auto w-full">
+    <div class="max-w-7xl mx-auto w-full">
       
-      <div class="text-center mb-10">
+      <div class="text-center mb-12">
         <div class="inline-flex items-center gap-3 mb-2">
           <Layers class="size-10 text-slate-700" />
-          <h1 class="text-4xl font-extrabold text-slate-800 tracking-tight">Web Crafter 아키텍쳐</h1>
+          <h1 class="text-4xl font-extrabold text-slate-800 tracking-tight">Web Crafter 아키텍처</h1>
         </div>
-        <p class="text-slate-500 font-medium text-lg">실시간 협업 웹 빌더 플랫폼 기술 구조도</p>
+        <p class="text-slate-500 font-medium text-lg">실시간 협업 웹 빌더 플랫폼 데이터 흐름도</p>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-12">
+      <div class="flex flex-col lg:flex-row items-stretch justify-center gap-4 mb-16">
         
-        <div 
-          v-for="(node, index) in nodes" 
-          :key="node.id"
-          :class="[
-            node.bgColor, 
-            'border-2 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1'
-          ]"
-        >
-          <div class="flex items-center gap-4 mb-5">
-            <div :class="[node.color, 'bg-white p-3 rounded-xl shadow-md']">
-              <component :is="node.iconComponent" class="size-8" />
+        <template v-for="(node, index) in nodes" :key="node.id">
+          
+          <div 
+            :class="[
+              node.bgColor, 
+              node.borderColor,
+              'flex-1 min-w-[300px] border-2 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 flex flex-col'
+            ]"
+          >
+            <div class="flex items-center gap-4 mb-5">
+              <div :class="[node.color, 'bg-white p-3 rounded-xl shadow-md']">
+                <component :is="node.iconComponent" class="size-8" />
+              </div>
+              <div>
+                <h2 class="text-2xl font-bold text-slate-800">{{ node.title }}</h2>
+                <p :class="[node.color, 'font-bold text-sm']">{{ node.description }}</p>
+              </div>
             </div>
-            <div>
-              <h2 class="text-2xl font-bold text-slate-800">{{ node.title }}</h2>
-              <p :class="[node.color, 'font-bold text-sm']">{{ node.description }}</p>
+
+            <div class="mt-auto space-y-3 bg-white/50 p-4 rounded-xl">
+              <template v-if="index === 0">
+                <div class="stack-item"><span class="dot bg-green-500"></span> Vue 3 (Composition)</div>
+                <div class="stack-item"><span class="dot bg-green-500"></span> Google Blockly</div>
+                <div class="stack-item"><span class="dot bg-green-500"></span> Pinia Store</div>
+              </template>
+
+              <template v-if="index === 1">
+                <div class="stack-item"><span class="dot bg-blue-500"></span> Spring Boot</div>
+                <div class="stack-item"><span class="dot bg-purple-500"></span> <span class="font-bold text-purple-700">WebSocket (Stomp)</span></div>
+                <div class="stack-item"><span class="dot bg-indigo-500"></span> Gemini AI</div>
+              </template>
+
+              <template v-if="index === 2">
+                <div class="stack-item"><span class="dot bg-orange-500"></span> MySQL (RDB)</div>
+                <div class="stack-item"><span class="dot bg-orange-500"></span> MyBatis</div>
+                <div class="stack-item"><span class="dot bg-orange-500"></span> JSON 데이터 영속화</div>
+              </template>
             </div>
           </div>
 
-          <div class="mt-4 space-y-2">
-            <template v-if="index === 0">
-              <div class="stack-item"><span class="dot bg-green-500"></span> Vue 3 (Composition API)</div>
-              <div class="stack-item"><span class="dot bg-green-500"></span> Google Blockly (Visual Coding)</div>
-              <div class="stack-item"><span class="dot bg-green-500"></span> Pinia (State Management)</div>
-            </template>
-
-            <template v-if="index === 1">
-              <div class="stack-item"><span class="dot bg-blue-500"></span> Spring Boot (API Server)</div>
-              <div class="stack-item"><span class="dot bg-purple-500"></span> <span class="font-bold text-purple-700">WebSocket (Stomp/SockJS)</span></div>
-              <div class="stack-item"><span class="dot bg-indigo-500"></span> Gemini AI Integration</div>
-            </template>
-
-            <template v-if="index === 2">
-              <div class="stack-item"><span class="dot bg-orange-500"></span> MySQL (Relational DB)</div>
-              <div class="stack-item"><span class="dot bg-orange-500"></span> MyBatis (Data Mapper)</div>
-              <div class="stack-item"><span class="dot bg-orange-500"></span> 프로젝트/블록 상태 영속화</div>
-            </template>
+          <div v-if="index < nodes.length - 1" class="flex flex-col lg:flex-row items-center justify-center py-2 lg:py-0 lg:px-2 text-slate-400">
+            <div class="lg:hidden flex flex-col items-center gap-1 animate-bounce">
+              <span class="text-xs font-bold text-slate-400">Flow</span>
+              <ArrowDown class="size-8" />
+            </div>
+            
+            <div class="hidden lg:flex flex-col items-center gap-1">
+               <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                 {{ index === 0 ? 'WebSocket / API' : 'JDBC / SQL' }}
+               </span>
+               <div class="flex items-center text-slate-600">
+                 <div class="w-8 h-[2px] bg-slate-300"></div>
+                 <div class="bg-white p-1.5 rounded-full border-2 border-slate-200 shadow-sm z-10">
+                   <ArrowLeftRight class="size-5 text-slate-500" />
+                 </div>
+                 <div class="w-8 h-[2px] bg-slate-300"></div>
+               </div>
+            </div>
           </div>
-        </div>
-      </div>
 
-      <div class="flex flex-wrap items-center justify-center gap-4 mb-10 text-xs md:text-sm select-none">
-        <div class="flow-box">Client</div>
-        
-        <div class="flow-arrow">
-          <span class="text-[10px] font-bold text-slate-500 mb-1">REST API / WebSocket</span>
-          <div class="flex items-center">
-             <div class="line"></div>
-             <Network class="size-5 text-slate-500 mx-1 animate-pulse" />
-             <div class="line"></div>
-          </div>
-        </div>
-
-        <div class="flow-box">Server</div>
-
-        <div class="flow-arrow">
-          <span class="text-[10px] font-bold text-slate-500 mb-1">MyBatis / JDBC</span>
-          <div class="flex items-center">
-             <div class="line"></div>
-             <Cpu class="size-5 text-slate-500 mx-1" />
-             <div class="line"></div>
-          </div>
-        </div>
-
-        <div class="flow-box">DB</div>
+        </template>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -153,21 +154,11 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Tailwind 유틸리티 외 커스텀 스타일 */
 .stack-item {
   @apply flex items-center gap-2 text-slate-700 text-sm font-medium;
 }
 .dot {
   @apply w-2 h-2 rounded-full;
-}
-.flow-box {
-  @apply bg-white px-6 py-3 rounded-xl shadow-md border-2 border-slate-200 font-bold text-slate-700 z-10;
-}
-.flow-arrow {
-  @apply flex flex-col items-center gap-1;
-}
-.line {
-  @apply h-[3px] w-10 bg-slate-300 rounded-full;
 }
 .layer-card {
   @apply bg-white rounded-xl p-5 shadow-md border-2 border-slate-200 transition-colors duration-300;
