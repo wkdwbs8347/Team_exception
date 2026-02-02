@@ -121,7 +121,6 @@ const createNewProject = async () => {
 const userName = computed(() => auth.me?.nickname || '사용자');
 </script>
 
-
 <template>
   <nav class="navbar" :class="{ scrolled: scrollY > 50 }">
     <div class="navbar-container">
@@ -141,7 +140,11 @@ const userName = computed(() => auth.me?.nickname || '사용자');
         </button>
       </div>
 
-      <button class="menu-toggle" @click="toggleMenu" :class="{ active: isMenuOpen }">
+      <button
+        class="menu-toggle"
+        @click="toggleMenu"
+        :class="{ active: isMenuOpen }"
+      >
         <span></span><span></span><span></span>
       </button>
 
@@ -169,13 +172,17 @@ const userName = computed(() => auth.me?.nickname || '사용자');
             <span class="drawer-chevron">›</span>
           </button>
           <button class="drawer-item" @click="openFriendManage">
-            <span class="icon-wrapper"><Users :size="18" color="#00d4ff" /></span>
+            <span class="icon-wrapper"
+              ><Users :size="18" color="#00d4ff"
+            /></span>
             <span class="drawer-text">친구 목록</span>
             <span class="drawer-chevron">›</span>
           </button>
           <router-link to="/explore" class="drawer-item" @click="closeMenu">
-            <span class="icon-wrapper"><Compass :size="18" color="#00d4ff" /></span>
-            <span class="drawer-text">프로젝트 탐색</span>
+            <span class="icon-wrapper"
+              ><Compass :size="18" color="#00d4ff"
+            /></span>
+            <span class="drawer-text">프로젝트 공유</span>
             <span class="drawer-chevron">›</span>
           </router-link>
         </li>
@@ -206,7 +213,11 @@ const userName = computed(() => auth.me?.nickname || '사용자');
               >
                 로그인
               </button>
-              <button v-else class="profile-btn danger" @click.stop="handleLogout">
+              <button
+                v-else
+                class="profile-btn danger"
+                @click.stop="handleLogout"
+              >
                 로그아웃
               </button>
             </div>
@@ -216,7 +227,12 @@ const userName = computed(() => auth.me?.nickname || '사용자');
     </div>
   </nav>
 
-  <GlobalModal :open="modal.open" :message="modal.message" :type="modal.type" @confirm="closeModal" />
+  <GlobalModal
+    :open="modal.open"
+    :message="modal.message"
+    :type="modal.type"
+    @confirm="closeModal"
+  />
   <FriendListModal
     :isOpen="isFriendListOpen"
     :currentUser="auth.me"
@@ -237,7 +253,9 @@ const userName = computed(() => auth.me?.nickname || '사용자');
   background: rgba(26, 26, 46, 0.92);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(0, 212, 255, 0.12);
-  transition: background 0.25s, box-shadow 0.25s;
+  transition:
+    background 0.25s,
+    box-shadow 0.25s;
 }
 .navbar.scrolled {
   background: rgba(26, 26, 46, 0.96);
@@ -292,7 +310,9 @@ const userName = computed(() => auth.me?.nickname || '사용자');
   height: 3px;
   background: #00d4ff;
   border-radius: 2px;
-  transition: transform 0.28s, opacity 0.2s;
+  transition:
+    transform 0.28s,
+    opacity 0.2s;
 }
 .menu-toggle.active span:nth-child(1) {
   transform: rotate(45deg) translate(8px, 8px);
@@ -314,13 +334,19 @@ const userName = computed(() => auth.me?.nickname || '사용자');
   display: flex;
   flex-direction: column;
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(10, 20, 44, 0.96), rgba(8, 16, 36, 0.96));
+  background: linear-gradient(
+    180deg,
+    rgba(10, 20, 44, 0.96),
+    rgba(8, 16, 36, 0.96)
+  );
   backdrop-filter: blur(18px);
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
   transform: translateX(110%);
   opacity: 0;
-  transition: transform 0.28s, opacity 0.28s;
+  transition:
+    transform 0.28s,
+    opacity 0.28s;
   z-index: 1100;
   overflow: hidden;
 }
