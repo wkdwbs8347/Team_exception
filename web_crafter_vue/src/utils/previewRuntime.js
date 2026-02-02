@@ -53,6 +53,44 @@ export function buildWcPreviewSrcdoc({
   const authRuntimeScript =
     isRunning && authRuntimeJs ? `<script>${authRuntimeJs}<\/script>` : '';
 
+  const navRuntimeScript = isRunning
+    ? `<script>
+(function () {
+  if (window.__WC_NAV_RUNTIME__) return;
+  window.__WC_NAV_RUNTIME__ = true;
+
+  // ✅ 페이지 이동 API (블록에서 goToPage(pageId) 호출)
+  window.goToPage = function (pageId) {
+    try {
+      var pid = String(pageId || '');
+      if (!pid) return;
+
+      // 1) IDE 프리뷰(iframe) 환경: 부모로 메시지 보내서 IDE가 selectPage 처리
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(
+          { type: 'NAVIGATE', pageId: pid },
+          '*'
+        );
+        return;
+      }
+
+      // 2) 독립 런타임(단독 실행) fallback: route로 이동
+      // pid가 '/login' 같은 route일 수도 있으니 처리
+      if (pid.startsWith('/')) {
+        location.href = pid;
+        return;
+      }
+
+      // 마지막 fallback
+      location.href = '/' + pid;
+    } catch (e) {
+      console.error('[goToPage] failed:', e);
+    }
+  };
+})();
+<\/script>`
+    : '';
+
   const valueRuntimeScript =
     isRunning && valueRuntimeJs ? `<script>${valueRuntimeJs}<\/script>` : '';
 
@@ -104,6 +142,7 @@ export function buildWcPreviewSrcdoc({
     webIdBootstrapScript,
     authRuntimeScript,
     valueRuntimeScript,
+    navRuntimeScript,
     finalLogicScript,
 
     // ✅ builder runtime

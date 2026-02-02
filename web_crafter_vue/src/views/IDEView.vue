@@ -41,7 +41,7 @@ import GlobalModal from '@/modal/GlobalModal.vue';
 import api from '@/api/axios';
 
 // ===== 카테고리 블록 import =====
-//blockly 블록 정의 및 툴박스 XML을 각각의 모듈에서 가져옵니다.
+//html 관련 블록
 import * as Layout from '@/components/block/Layout.vue';
 import * as Content from '@/components/block/Content.vue';
 import * as Form from '@/components/block/Form.vue';
@@ -322,6 +322,66 @@ function createPage(name) {
   };
 }
 
+// ===============================
+// ✅ 페이지 목록 → 드롭다운 옵션 주입 Provider (항상 먼저 준비)
+// ===============================
+function ensurePageProvider() {
+  if (typeof window.WC_GET_PAGES === 'function') return;
+
+  window.WC_GET_PAGES = function () {
+    const list = window.__WC_PAGES__ || [];
+
+    if (!Array.isArray(list) || list.length === 0) {
+      return [['페이지 없음', '']];
+    }
+
+    return list.map((p) => {
+      const id = String(p?.id ?? '');
+      const name = String(p?.name ?? 'Untitled').trim();
+
+      // ✅ 이름만 보여주기 (route/별 제거)
+      return [name, id];
+    });
+  };
+}
+
+// ===============================
+// ✅ (선택) 이미 워크스페이스에 있는 페이지이동 블록 옵션 갱신
+//   - 이벤트/프리뷰/좌표저장 로직 안 건드리도록 Events.disable로 감쌈
+// ===============================
+function refreshNavigateDropdown(workspace) {
+  if (!workspace) return;
+
+  Blockly.Events.disable();
+  try {
+    const blocks = workspace.getAllBlocks(false);
+    blocks.forEach((b) => {
+      if (b.type !== 'action_navigate_internal') return;
+
+      const field = b.getField('PAGE_ID');
+      if (!field) return;
+
+      const options = window.WC_GET_PAGES
+        ? window.WC_GET_PAGES()
+        : [['로딩중...', '']];
+
+      // ✅ 옵션만 갱신
+      field.menuGenerator_ = options;
+
+      // ❌ 절대 setValue로 강제 보정하지 마
+      // const currentValue = field.getValue();
+      // const stillValid = options.some(([, v]) => v === currentValue);
+      // if (!stillValid) field.setValue(options[0]?.[1] ?? '');
+    });
+
+    try {
+      Blockly.svgResize(workspace);
+    } catch (_) {}
+  } finally {
+    Blockly.Events.enable();
+  }
+}
+
 /* ============================================================
  * UI 상태 및 초기화
  * ============================================================ */
@@ -545,14 +605,14 @@ const saveToServerAsJson = async () => {
     // 🔥 [수정] style 태그 중첩 문제 해결!
     // genCss 변수 안에 이미 <style>...</style> 태그가 포함되어 있으므로,
     // 겉을 감싸던 <style> 태그를 제거하고 분리했습니다.
- // ✅ [핵심] Explore에 보여줄 previewHtml은 "IDE에서 실제로 보는 srcdoc"을 그대로 저장한다.
-const previewHtmlString = (previewSrc.value || '').trim();
+    // ✅ [핵심] Explore에 보여줄 previewHtml은 "IDE에서 실제로 보는 srcdoc"을 그대로 저장한다.
+    const previewHtmlString = (previewSrc.value || '').trim();
 
-// previewSrc가 아직 비어있다면(초기 로드 직후 등) 한번 강제로 만들고 저장
-if (!previewHtmlString) {
-  updatePreview(); // 내부에서 buildWcPreviewSrcdoc로 previewSrc.value 생성
-}
-const finalPreviewHtml = (previewSrc.value || '').trim();
+    // previewSrc가 아직 비어있다면(초기 로드 직후 등) 한번 강제로 만들고 저장
+    if (!previewHtmlString) {
+      updatePreview(); // 내부에서 buildWcPreviewSrcdoc로 previewSrc.value 생성
+    }
+    const finalPreviewHtml = (previewSrc.value || '').trim();
 
     // ---------------------------------------------------------
     // 🔥 [핵심 2] 백엔드가 원하는 구조(Map)로 포장
@@ -1075,6 +1135,27 @@ watch(
   },
   { deep: true } // 객체 내부 변경까지 감지
 );
+
+watch(selectedPageId, (id) => {
+  window.__WC_CURRENT_PAGE_ID__ = String(id ?? '');
+  refreshNavigateDropdown(workspace);
+});
+
+watch(
+  pages,
+  () => {
+    window.__WC_PAGES__ = (Array.isArray(pages.value) ? pages.value : []).map(
+      (p) => ({
+        id: String(p.id ?? ''),
+        name: String(p.name ?? '').trim(),
+        route: String(p.route ?? '').trim(),
+      })
+    );
+    refreshNavigateDropdown(workspace);
+  },
+  { deep: true }
+);
+
 // ✅ [Final Fix] 탭 상관없이 항상 '화면 구성' 데이터를 기반으로 목록 갱신
 const updateObjectListFromWorkspace = () => {
   const page = pages.value.find((p) => p.id === selectedPageId.value);
@@ -1682,25 +1763,25 @@ const updatePreview = () => {
   ];
 
   const newHtml = buildWcPreviewSrcdoc({
-  structureHtml: structureCodeApplied,
-  styleRaw: styleCodeRaw,
-  positionsMap: getPositionsMap(),
-  isRunning: isRunning.value,
+    structureHtml: structureCodeApplied,
+    styleRaw: styleCodeRaw,
+    positionsMap: getPositionsMap(),
+    isRunning: isRunning.value,
 
-  webId: props.webId,
-  pageId: page.id,
-  pageRoute: page.route,
-  scaleRatio,
-  animationKeyframes: Animation.Animation.ANIMATION_KEYFRAMES,
-  authRuntimeJs: AUTH_RUNTIME_JS,
-  valueRuntimeJs: VALUE_RUNTIME_JS,
-  logicJs: logicCodeForPreview,
+    webId: props.webId,
+    pageId: page.id,
+    pageRoute: page.route,
+    scaleRatio,
+    animationKeyframes: Animation.Animation.ANIMATION_KEYFRAMES,
+    authRuntimeJs: AUTH_RUNTIME_JS,
+    valueRuntimeJs: VALUE_RUNTIME_JS,
+    logicJs: logicCodeForPreview,
 
-  enableDrag: true,                 // ✅ 드래그 쓸거면 true
-  dragRuntimeJs: DRAG_RUNTIME_JS,   // ✅ 여기!
-});
+    enableDrag: true, // ✅ 드래그 쓸거면 true
+    dragRuntimeJs: DRAG_RUNTIME_JS, // ✅ 여기!
+  });
 
-previewSrc.value = newHtml;
+  previewSrc.value = newHtml;
 
   if (previewSrc.value !== newHtml) {
     previewSrc.value = newHtml;
@@ -2549,6 +2630,20 @@ onMounted(async () => {
     trashcan: false,
   });
 
+  // inject 전/후 어디든 OK
+  ensurePageProvider();
+
+  // ❗ Vue proxy 그대로 넣지 말고 필요한 정보만 plain array로 넣는 게 안전
+  window.__WC_PAGES__ = (Array.isArray(pages.value) ? pages.value : []).map(
+    (p) => ({
+      id: String(p.id ?? ''),
+      name: String(p.name ?? '').trim(),
+      route: String(p.route ?? '').trim(),
+    })
+  );
+
+  window.__WC_CURRENT_PAGE_ID__ = String(selectedPageId.value ?? '');
+
   // 드래그 중 deletable 상태 백업/복구용
   const __dragDeletableBackup = new Map();
 
@@ -2812,6 +2907,23 @@ onMounted(async () => {
   window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data) return;
+
+    // ✅ 0) 페이지 이동 (프리뷰 -> IDE)  ← 여기! (가장 위)
+    if (data.type === 'NAVIGATE' || data.type === 'REDIRECT') {
+      const targetId = String(data.pageId || '');
+      if (!targetId) return;
+
+      const target = pages.value.find((p) => String(p.id) === targetId);
+      if (!target) return;
+
+      // ✅ 페이지 전환 (탭/상태까지 싹 맞추려면 selectPage)
+      selectPage(target.id);
+
+      // (선택) 주소창도 바꾸고 싶으면:
+      router.push(target.route).catch(() => {});
+
+      return; // 🔥 중요: 아래 로직 타지 않게 끊기
+    }
 
     // 1. 드래그 끝 -> 저장 로직
     if (data.type === 'update_free_position') {
