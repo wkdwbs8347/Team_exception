@@ -5,6 +5,9 @@ import { useRouter } from 'vue-router';
 import api from '@/api/axios';
 import GlobalModal from '@/modal/GlobalModal.vue';
 
+// ✅ 아이콘 (요구사항: "이미 적용중"일 때 빨간 경고 아이콘)
+import { CheckCircle, XCircle, TriangleAlert } from 'lucide-vue-next';
+
 const props = defineProps(['user']);
 const emit = defineEmits(['close', 'updated']);
 const authStore = useAuthStore();
@@ -19,6 +22,26 @@ const editData = reactive({
   confirmPassword: '',
 });
 
+// ✅ "원래 닉네임" 저장 (닉네임 변경 여부 판단용)
+const originalNickname = ref(props.user?.nickname || '');
+
+// ✅ 닉네임 중복체크 상태
+const isNicknameChecking = ref(false);
+const nicknameChecked = ref(false);
+const nicknameAvailable = ref(false);
+
+// ✅ 닉네임이 바뀌면 중복체크 초기화
+const handleNicknameInput = () => {
+  nicknameChecked.value = false;
+  nicknameAvailable.value = false;
+};
+
+// ✅ 버튼 라벨
+const getNicknameButtonLabel = () => {
+  if (nicknameAvailable.value) return '사용가능';
+  return '중복체크';
+};
+
 // ✅ 모달 상태 (alert 대체)
 const modal = ref({
   open: false,
@@ -26,19 +49,22 @@ const modal = ref({
   type: 'info', // warning | info | success | error
   focusField: null, // 'nickname' | 'currentPassword' | 'newPassword' | 'confirmPassword' | null
   onConfirm: null,
+  icon: null,
 });
 
 const openModal = (
   message,
   type = 'info',
   focusField = null,
-  onConfirm = null
+  onConfirm = null,
+  icon = null
 ) => {
   modal.value.open = true;
   modal.value.message = message;
   modal.value.type = type;
   modal.value.focusField = focusField;
   modal.value.onConfirm = onConfirm;
+  modal.value.icon = icon;
 };
 
 const closeModal = async () => {
@@ -53,12 +79,11 @@ const closeModal = async () => {
     return;
   }
 
-  // 포커스 이동 (기능엔 영향 없고 UX만)
+  // 포커스 이동 (UX)
   const field = modal.value.focusField;
   modal.value.focusField = null;
   if (!field) return;
 
-  // 가장 가까운 input/textarea를 찾아 포커스
   const root = document.querySelector('.modal-content');
   if (!root) return;
   const target = root.querySelector(`[data-focus="${field}"]`);
@@ -77,6 +102,98 @@ const handleKeydown = (e) => {
 onMounted(() => window.addEventListener('keydown', handleKeydown));
 onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 
+/* =========================
+   ✅ 닉네임 중복체크 API
+========================= */
+const checkNickname = async () => {
+  if (isNicknameChecking.value) return;
+  if (nicknameAvailable.value) return; // 이미 사용가능이면 재요청 막기
+
+  const nick = (editData.nickname || '').trim();
+
+  if (!nick) {
+    return openModal('닉네임을 입력해주세요.', 'warning', 'nickname');
+  }
+
+  // 닉네임 입력값 간단 규칙
+  if (nick.length < 2 || nick.length > 20) {
+    return openModal('닉네임은 2~20자여야 합니다.', 'warning', 'nickname');
+  }
+  if (nick.includes(' ')) {
+    return openModal(
+      '닉네임에는 공백을 사용할 수 없습니다.',
+      'warning',
+      'nickname'
+    );
+  }
+
+  // ✅ 요구사항: 변경사항 없으면 "이미 적용중" + 빨간 경고 아이콘
+  if (nick === (originalNickname.value || '').trim()) {
+    // 상태는 "문제 없음"으로 처리해도 되고(아래처럼 true),
+    // 굳이 안 남기고 싶으면 false로 바꿔도 됨.
+    nicknameChecked.value = true;
+    nicknameAvailable.value = true;
+
+    return openModal(
+      '이미 적용중인 닉네임입니다.',
+      'warning',
+      null,
+      null,
+      TriangleAlert
+    );
+  }
+
+  try {
+    isNicknameChecking.value = true;
+
+    const res = await api.get('/member/nicknameCheck', {
+      params: { nickname: nick },
+    });
+
+    nicknameChecked.value = true;
+    nicknameAvailable.value = !!res.data.available;
+
+    if (nicknameAvailable.value) {
+      openModal(
+        '사용 가능한 닉네임입니다',
+        'success',
+        null,
+        async () => {
+          await nextTick();
+        },
+        CheckCircle
+      );
+    } else {
+      openModal(
+        '이미 사용중인 닉네임입니다',
+        'error',
+        'nickname',
+        async () => {
+          await nextTick();
+          const root = document.querySelector('.modal-content');
+          const target = root?.querySelector(`[data-focus="nickname"]`);
+          target?.focus?.();
+        },
+        XCircle
+      );
+    }
+  } catch (e) {
+    nicknameChecked.value = false;
+    nicknameAvailable.value = false;
+    const msg = e?.response?.data?.message || '닉네임 확인 실패';
+    openModal(msg, 'warning', 'nickname');
+  } finally {
+    isNicknameChecking.value = false;
+  }
+};
+
+// ✅ 모달 열린 상태면 엔터는 닫기만, 아니면 닉네임 중복체크 실행
+const onEnterNickname = () => {
+  if (modal.value.open) return;
+  if (nicknameAvailable.value) return;
+  checkNickname();
+};
+
 // 2. 수정 요청 실행
 const handleUpdate = async () => {
   // 닉네임 기본 검사
@@ -84,9 +201,25 @@ const handleUpdate = async () => {
     return openModal('닉네임은 필수입니다.', 'warning', 'nickname');
   }
 
+  // ✅ 닉네임이 "변경된 경우"에는 중복체크 강제
+  const nick = editData.nickname.trim();
+  const nickChanged = nick !== (originalNickname.value || '').trim();
+
+  if (nickChanged) {
+    if (!nicknameChecked.value) {
+      return openModal('닉네임 중복체크를 해주세요.', 'warning', 'nickname');
+    }
+    if (!nicknameAvailable.value) {
+      return openModal(
+        '사용 가능한 닉네임으로 변경해주세요.',
+        'warning',
+        'nickname'
+      );
+    }
+  }
+
   // 비밀번호 관련 입력이 하나라도 있는 경우 검사 시작
   if (editData.newPassword || editData.currentPassword) {
-    // 1) 현재 비밀번호 입력 여부 확인
     if (!editData.currentPassword) {
       return openModal(
         '현재 비밀번호를 입력해야 합니다.',
@@ -95,7 +228,6 @@ const handleUpdate = async () => {
       );
     }
 
-    // 2) 새 비밀번호 자릿수 검사 (8자 이상이면 통과)
     if (editData.newPassword) {
       if (editData.newPassword.length < 8) {
         return openModal(
@@ -104,8 +236,6 @@ const handleUpdate = async () => {
           'newPassword'
         );
       }
-
-      // 3) 새 비밀번호와 확인 입력 일치 여부
       if (editData.newPassword !== editData.confirmPassword) {
         return openModal(
           '새 비밀번호가 일치하지 않습니다.',
@@ -125,6 +255,9 @@ const handleUpdate = async () => {
     } else {
       authStore.user = response.data;
     }
+
+    // ✅ 저장 성공 후 "원래 닉네임"도 갱신 (다음에 다시 열었을 때 일관성)
+    originalNickname.value = response.data?.nickname ?? editData.nickname;
 
     openModal('프로필이 성공적으로 수정되었습니다.', 'success', null, () => {
       emit('updated');
@@ -152,12 +285,35 @@ const handleUpdate = async () => {
 
         <div class="input-group">
           <label>Nickname</label>
-          <input
-            v-model="editData.nickname"
-            type="text"
-            placeholder="닉네임 입력"
-            data-focus="nickname"
-          />
+
+          <!-- ✅ input + 버튼 row -->
+          <div class="input-row">
+            <input
+              v-model="editData.nickname"
+              type="text"
+              placeholder="닉네임 입력"
+              data-focus="nickname"
+              class="has-right-btn"
+              @input="handleNicknameInput"
+              @keydown.enter.prevent="onEnterNickname"
+            />
+
+            <button
+              type="button"
+              class="nickname-check-btn"
+              :class="{ 'is-available': nicknameAvailable }"
+              :disabled="isNicknameChecking || nicknameAvailable"
+              @click="checkNickname"
+            >
+              <span v-if="!isNicknameChecking">{{
+                getNicknameButtonLabel()
+              }}</span>
+              <span v-else class="btn-loading">
+                <span class="mini-spinner"></span>
+                확인중
+              </span>
+            </button>
+          </div>
         </div>
 
         <div class="input-group">
@@ -216,6 +372,7 @@ const handleUpdate = async () => {
     :open="modal.open"
     :message="modal.message"
     :type="modal.type"
+    :icon="modal.icon"
     @confirm="closeModal"
   />
 </template>
@@ -324,22 +481,81 @@ const handleUpdate = async () => {
   gap: 1rem;
   margin-top: 2rem;
 }
+/* ✅ Cancel 버튼: 세련된 레드 톤 (기존 .btn-cancel 교체) */
 .btn-cancel {
-  background: transparent;
-  border: 1px solid #7a8a99;
-  color: #7a8a99;
+  background: rgba(255, 77, 77, 0.08); /* 은은한 레드 글로우 */
+  border: 1px solid rgba(255, 77, 77, 0.55); /* 세련된 레드 테두리 */
+  color: rgba(255, 120, 120, 0.95); /* 너무 쨍하지 않은 레드 텍스트 */
   padding: 0.7rem 1.5rem;
   border-radius: 8px;
   cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  transition: all 0.22s ease;
 }
+
+.btn-cancel:hover {
+  background: rgba(255, 77, 77, 0.14);
+  border-color: rgba(255, 77, 77, 0.85);
+  color: rgba(255, 160, 160, 1);
+  box-shadow: 0 10px 26px rgba(255, 77, 77, 0.18);
+  transform: translateY(-1px);
+}
+
+.btn-cancel:active {
+  transform: translateY(0px);
+  box-shadow: 0 6px 18px rgba(255, 77, 77, 0.14);
+}
+
+.btn-cancel:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(255, 77, 77, 0.22),
+    0 10px 26px rgba(255, 77, 77, 0.14);
+}
+/* 🔵 Save Changes 버튼 (Cancel 버튼과 애니메이션 완전 통일) */
 .btn-save {
-  background: #00d9ff;
+  background: linear-gradient(
+    135deg,
+    rgba(0, 217, 255, 0.9) 0%,
+    rgba(0, 170, 220, 0.9) 100%
+  );
   border: none;
   color: #0a1628;
   padding: 0.7rem 1.5rem;
   border-radius: 8px;
   cursor: pointer;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  transition: all 0.28s ease;
+  box-shadow: 0 6px 18px rgba(0, 217, 255, 0.25);
+}
+
+/* hover: Cancel 버튼과 동일한 "뜸 + 글로우" */
+.btn-save:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 14px 36px rgba(0, 217, 255, 0.45),
+    0 0 0 1px rgba(120, 230, 255, 0.45);
+  background: linear-gradient(
+    135deg,
+    rgba(80, 235, 255, 0.95) 0%,
+    rgba(0, 200, 240, 0.95) 100%
+  );
+}
+
+/* 클릭 */
+.btn-save:active {
+  transform: translateY(0px);
+  box-shadow: 0 8px 20px rgba(0, 217, 255, 0.3);
+}
+
+/* 키보드 포커스 접근성 */
+.btn-save:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(0, 217, 255, 0.35),
+    0 14px 36px rgba(0, 217, 255, 0.4);
 }
 
 /* 스크롤바 커스텀 */
@@ -349,5 +565,70 @@ const handleUpdate = async () => {
 .custom-scroll::-webkit-scrollbar-thumb {
   background: rgba(0, 217, 255, 0.2);
   border-radius: 10px;
+}
+
+/* 닉네임 input + 버튼 한 줄 배치 */
+.input-row {
+  position: relative;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+/* 오른쪽 버튼 공간 */
+.has-right-btn {
+  flex: 1;
+}
+
+/* 중복체크 버튼 */
+.nickname-check-btn {
+  height: 44px;
+  padding: 0 0.9rem;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 217, 255, 0.25);
+  background: rgba(0, 217, 255, 0.08);
+  color: #e0e0e0;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  white-space: nowrap;
+}
+
+.nickname-check-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: rgba(0, 217, 255, 0.14);
+  border-color: rgba(0, 217, 255, 0.45);
+}
+
+.nickname-check-btn:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}
+
+/* 사용가능일 때 글자색 */
+.nickname-check-btn.is-available:disabled {
+  color: rgba(51, 255, 153, 1);
+}
+
+/* 로딩 표시 */
+.btn-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.mini-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: rgba(0, 217, 255, 0.9);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>
