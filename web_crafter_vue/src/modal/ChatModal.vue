@@ -37,6 +37,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  auth.clearRoom(roomId.value);
   // ✅ 이제 여기서 구독 해제할 필요가 없음 (구독 자체를 안 하니까)
   auth.closeRoom();
 });

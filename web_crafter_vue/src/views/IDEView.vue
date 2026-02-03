@@ -1728,7 +1728,7 @@ const updatePreview = () => {
     '     if(ev.clientY > window.innerHeight - edge) window.scrollBy(0, speed);',
     '     else if(ev.clientY < edge) window.scrollBy(0, -speed);',
     '',
-    '     // ⚡ [핵심 변경] important를 붙여서 CSS 우선순위 확보',
+    '     // important를 붙여서 CSS 우선순위 확보',
     '     dragging.el.style.setProperty("left", finalL+"px", "important");',
     '     dragging.el.style.setProperty("top", finalT+"px", "important");',
     '   });',

@@ -118,6 +118,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
     // (5) 👥 친구 목록 갱신
     subscribe(`/topic/user/${userId}/friends`, async () => {
       console.log('👥 friends refresh 신호 수신');
+      window.dispatchEvent(new Event('friends-refresh'));
       try {
         const fres = await api.get('/friends/list');
         if (typeof auth.setFriends === 'function') {

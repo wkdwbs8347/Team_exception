@@ -137,6 +137,20 @@ export const useAuthStore = defineStore('auth', {
       this.activeRoomId = null;
     },
 
+    clearRoom(roomId) {
+  if (!roomId) return;
+
+  const copy = { ...this.allChatMessages };
+  delete copy[roomId];
+  this.allChatMessages = copy;
+
+  // active room이면 같이 닫기
+  if (this.activeRoomId === roomId) {
+    this.activeRoomId = null;
+    this.isChatOpen = false;
+  }
+},
+
     // ✅ 수신 메시지 저장 (websocketStore의 /user/queue/chat 에서 호출됨)
 pushIncomingChat(msg) {
   const rid = msg?.roomId;

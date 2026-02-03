@@ -161,6 +161,10 @@ const deleteFriend = (friendId, nickname) => {
       try {
         await api.delete(`/friends/${friendId}`);
         friends.value = friends.value.filter((u) => u.id !== friendId);
+
+            if (selectedChatFriend.value?.id === friendId) {
+            selectedChatFriend.value = null;
+          }
         openModal(`'${nickname}' 님을 친구 목록에서 삭제했습니다.`, 'success');
       } catch (e) {
         console.error(e);
@@ -243,6 +247,20 @@ watch(
   { immediate: true }
 );
 
+// ✅ websocket에서 친구 refresh 오면 즉시 다시 불러오기
+const onFriendsRefresh = async () => {
+  // 모달이 열려있을 때만 갱신 (원하면 조건 빼도 됨)
+  if (!props.isOpen) return;
+  await loadFriends();
+};
+
+onMounted(() => {
+  window.addEventListener('friends-refresh', onFriendsRefresh);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('friends-refresh', onFriendsRefresh);
+});
 </script>
 
 <template>
