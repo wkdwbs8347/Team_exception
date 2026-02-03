@@ -17,8 +17,6 @@ const myProjects = ref([]);
 const sharedProjects = ref([]);
 const currentTab = ref('ALL');
 const myProjectCount = ref(0);
-const sharedProjectCount = ref(0);
-const isEditModalOpen = ref(false);
 
 // ✅ Store 기반
 const notifications = computed(() => authStore.notifications || []);
@@ -238,7 +236,6 @@ const handleProjectAction = async (action, noti) => {
         if (action === 'accept') {
           const res = await api.get('/member/me');
           sharedProjects.value = res.data.sharedProjects || [];
-          sharedProjectCount.value = res.data.member.sharedProjectCount || 0;
           openModal(
             '프로젝트에 참여했습니다! 워크스페이스를 확인해보세요. 🎉',
             'success'
@@ -267,7 +264,6 @@ onMounted(async () => {
     authStore.user = data.member;
 
     myProjectCount.value = data.member.myProjectCount || 0;
-    sharedProjectCount.value = data.member.sharedProjectCount || 0;
 
     myProjects.value = data.myProjects || [];
     sharedProjects.value = data.sharedProjects || [];
@@ -486,16 +482,6 @@ export default {
 
         <div
           class="stat-card"
-          :class="{ active: currentTab === 'SHARED' }"
-          @click="changeTab('SHARED')"
-          style="cursor: pointer"
-        >
-          <div class="stat-number">{{ sharedProjectCount }}</div>
-          <div class="stat-label">Collaborating</div>
-        </div>
-
-        <div
-          class="stat-card"
           :class="{ active: currentTab === 'NOTI' }"
           @click="changeTab('NOTI')"
           style="cursor: pointer"
@@ -526,7 +512,6 @@ export default {
                   <span class="sender">{{ noti.senderName }}</span
                   >님이 친구 요청을 보냈습니다.
                 </div>
-
                 <div class="noti-actions">
                   <button
                     class="btn-xs accept"
@@ -543,35 +528,7 @@ export default {
                 </div>
 
                 <span class="date">{{ formatDate(noti.regDate) }}</span>
-              </div>
-
-              <div
-                v-else-if="noti.type === 'PROJECT_INVITE'"
-                class="noti-content"
-              >
-                <span class="icon">📁</span>
-                <div class="text">
-                  <span class="sender">{{ noti.senderName }}</span
-                  >님이 프로젝트에 초대했습니다.
-                </div>
-
-                <div class="noti-actions">
-                  <button
-                    class="btn-xs accept"
-                    @click="handleProjectAction('accept', noti)"
-                  >
-                    수락
-                  </button>
-                  <button
-                    class="btn-xs reject"
-                    @click="handleProjectAction('reject', noti)"
-                  >
-                    거절
-                  </button>
-                </div>
-
-                <span class="date">{{ formatDate(noti.regDate) }}</span>
-              </div>
+              </div>s
             </div>
           </div>
 
@@ -812,7 +769,7 @@ main {
 /* 6. 통계(Stats) 섹션 */
 .stats-section {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 1.5rem;
   margin-bottom: 3.5rem;
   padding-top: 2rem;

@@ -2,12 +2,8 @@
 import { ref, watch, reactive } from 'vue'
 import { 
   Palette, 
-  LayoutTemplate, 
-  Type, 
   Settings, 
-  Check,
-  Monitor,
-  MousePointer2
+  Check
 } from 'lucide-vue-next'
 import api from '@/api/axios';
 
@@ -23,20 +19,17 @@ const props = defineProps({
 const emit = defineEmits(['close', 'apply'])
 
 /* ============================================================
-   🗂️ 카테고리 (사이드바 메뉴) 설정
-   - 여기에 메뉴를 추가하면 왼쪽에 자동으로 생깁니다.
+   🗂️ 카테고리 (사이드바 메뉴)
    ============================================================ */
 const categories = [
   { id: 'general', label: '일반 설정', icon: Settings },
   { id: 'theme', label: '테마 디자인', icon: Palette },
-  { id: 'editor', label: '에디터 환경', icon: LayoutTemplate },
-  // { id: 'account', label: '계정 관리', icon: User }, // 나중에 추가 가능
 ]
 
-const activeCategory = ref('general') // 현재 선택된 카테고리
+const activeCategory = ref('general')
 
 /* ============================================================
-   🎨 테마 데이터 (기존 로직 유지)
+   🎨 테마 데이터
    ============================================================ */
 const themeList = [
   { id: 'default', name: 'Default Dark', toolboxColor: '#dcdcdcba', workspaceColor: '#ffffff' },
@@ -48,29 +41,21 @@ const themeList = [
 ]
 
 /* ============================================================
-   📝 폼 상태 관리
+   📝 폼 상태 관리 (언어, 에디터 설정 제거됨)
    ============================================================ */
 const formData = reactive({
   projectName: 'My Awesome Project',
-  language: 'ko',
-  showGrid: true,
-  snapToGrid: true,
   themeId: props.currentThemeId
 })
 
 // 모달 열릴 때 props 값으로 초기화
-// SettingModal.vue 수정
 watch(
-  // ✅ 열림 상태뿐만 아니라 부모가 주는 '이름' 값 자체를 감시합니다.
   () => [props.open, props.project?.title], 
   ([isOpen, newTitle]) => {
     if (isOpen) {
       formData.themeId = props.currentThemeId;
       
-      // ✅ [중요] 데이터가 확실히 존재할 때만 이름을 업데이트합니다.
-      // 서버에서 온 진짜 이름(newTitle)이 있다면 그것을 최우선으로 적용합니다.
       const actualName = newTitle;
-      
       if (actualName) {
         formData.projectName = actualName;
       }
@@ -78,31 +63,28 @@ watch(
       activeCategory.value = 'general';
     }
   }, 
-  { immediate: true } // 즉시 실행하여 초기값 매핑 보장
+  { immediate: true }
 );
 
 const selectTheme = (id) => {
   formData.themeId = id
 }
 
-// 최종 저장 (모든 설정을 부모에게 전달)
-// SettingModal.vue 내부 수정
-
-// handleSave 함수 완성 버전
+// 최종 저장
 const handleSave = async () => {
   try {
-    // 1. 서버 DB 저장 (작성하신 Controller와 Dao 호출) [cite: 2026-01-21, 2026-01-22]
+    // 1. 서버 DB 저장
     await api.put(`/projects/${props.project.id}/name`, { 
       name: formData.projectName 
     });
 
-    // 2. 테마 정보 및 수정된 이름을 함께 부모에게 전달 [cite: 2026-01-22]
+    // 2. 부모 컴포넌트에 반영
     const selectedTheme = themeList.find(t => t.id === formData.themeId);
     
     emit('apply', {
       theme: selectedTheme,
-      settings: { ...formData },
-      newName: formData.projectName // ✅ 이 값이 부모의 title을 바꿉니다.
+      settings: { ...formData }, // 이제 여기엔 projectName과 themeId만 들어감
+      newName: formData.projectName
     });
 
     emit('close');
@@ -145,17 +127,14 @@ const handleSave = async () => {
             
             <div class="form-group">
               <label>프로젝트 이름</label>
-              <input v-model="formData.projectName" type="text" class="input-field" @keyup.enter="handleSave"/>
+              <input 
+                v-model="formData.projectName" 
+                type="text" 
+                class="input-field" 
+                @keyup.enter="handleSave"
+              />
             </div>
-
-            <div class="form-group">
-              <label>언어 (Language)</label>
-              <select v-model="formData.language" class="input-field">
-                <option value="ko">한국어</option>
-                <option value="en">English</option>
-              </select>
             </div>
-          </div>
 
           <div v-if="activeCategory === 'theme'" class="tab-panel">
             <h3 class="panel-title">테마 디자인</h3>
@@ -177,30 +156,6 @@ const handleSave = async () => {
                   </div>
                 </div>
                 <span class="theme-name">{{ theme.name }}</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="activeCategory === 'editor'" class="tab-panel">
-            <h3 class="panel-title">에디터 환경</h3>
-            
-            <div class="toggle-item" @click="formData.showGrid = !formData.showGrid">
-              <div class="toggle-info">
-                <Monitor :size="20" />
-                <span>그리드 표시</span>
-              </div>
-              <div class="toggle-switch" :class="{ on: formData.showGrid }">
-                <div class="toggle-thumb"></div>
-              </div>
-            </div>
-
-            <div class="toggle-item" @click="formData.snapToGrid = !formData.snapToGrid">
-              <div class="toggle-info">
-                <MousePointer2 :size="20" />
-                <span>그리드에 스냅(Snap)</span>
-              </div>
-              <div class="toggle-switch" :class="{ on: formData.snapToGrid }">
-                <div class="toggle-thumb"></div>
               </div>
             </div>
           </div>
@@ -228,16 +183,16 @@ const handleSave = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100000; /* 최상위 보장 */
+  z-index: 100000;
 }
 
 .modal-card {
-  width: 750px; /* 더 넓게 */
+  width: 750px;
   height: 500px;
   background: #1a1a2e;
   border: 1px solid rgba(0, 212, 255, 0.15);
   border-radius: 16px;
-  display: flex; /* 좌우 배치 핵심 */
+  display: flex;
   overflow: hidden;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
   animation: popIn 0.3s ease-out;
@@ -308,11 +263,10 @@ const handleSave = async () => {
 
 .tab-panel {
   flex: 1;
-  overflow-y: auto; /* 내용 많으면 스크롤 */
-  padding-bottom: 60px; /* 하단 버튼 공간 확보 */
+  overflow-y: auto;
+  padding-bottom: 60px;
 }
 
-/* 스크롤바 숨김 (선택사항) */
 .tab-panel::-webkit-scrollbar {
   width: 6px;
 }
@@ -361,7 +315,7 @@ const handleSave = async () => {
   border-color: #00d4ff;
 }
 
-/* --- 테마 그리드 스타일 (기존 유지) --- */
+/* --- 테마 그리드 스타일 --- */
 .theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -405,42 +359,13 @@ const handleSave = async () => {
   color: #9ca3af;
 }
 
-/* --- 에디터 토글 스위치 --- */
-.toggle-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem;
-  background: rgba(255,255,255,0.03);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  cursor: pointer;
-}
-.toggle-info {
-  display: flex; gap: 10px; align-items: center; color: #e2e8f0;
-}
-.toggle-switch {
-  width: 44px; height: 24px;
-  background: #4b5563;
-  border-radius: 20px;
-  position: relative;
-  transition: 0.3s;
-}
-.toggle-switch.on { background: #00d4ff; }
-.toggle-thumb {
-  width: 20px; height: 20px;
-  background: #fff;
-  border-radius: 50%;
-  position: absolute; top: 2px; left: 2px;
-  transition: 0.3s;
-}
-.toggle-switch.on .toggle-thumb { left: 22px; }
+/* --- 에디터 토글 스위치 스타일 삭제됨 (필요 없음) --- */
 
 /* ===============================
    🔴 하단 액션 버튼
 ================================ */
 .action-footer {
-  margin-top: auto; /* 바닥에 붙임 */
+  margin-top: auto;
   display: flex;
   justify-content: flex-end;
   gap: 12px;
